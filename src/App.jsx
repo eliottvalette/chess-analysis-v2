@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import './App.css';
+import { parseEvaluationResult, extractMetadata, drawBestMoveArrow } from './components/utils';
+
 
 const App = () => {
   const [game, setGame] = useState(new Chess());
@@ -9,50 +11,14 @@ const App = () => {
   const [moveHistory, setMoveHistory] = useState([]);
   const [highlightedSquares, setHighlightedSquares] = useState({});
   const [gameMetadata, setGameMetadata] = useState(null);
-  const [evaluation, setEvaluation] = useState(''); // Stockfish evaluation
-  const [bestMove, setBestMove] = useState(''); // Stockfish best move
-  const [isBestMoveArrowDrawn, setIsBestMoveArrowDrawn] = useState(false); // Track arrow drawing
-  const [arrows, setArrows] = useState([]); // Arrows to draw on the chessboard
+  const [evaluation, setEvaluation] = useState(''); 
+  const [bestMove, setBestMove] = useState(''); 
+  const [isBestMoveArrowDrawn, setIsBestMoveArrowDrawn] = useState(false);
+  const [previousBestMove, setPreviousBestMove] = useState('');
+  const [ispreviousBestMoveArrowDrawn, setIsPreviousBestMoveArrowDrawn] = useState(false);
+  const [arrows, setArrows] = useState([]); 
   const [whitePercentage, setWhitePercentage] = useState(50);
   const [blackPercentage, setBlackPercentage] = useState(50);
-
-  // Helper function to parse Stockfish evaluation result
-  const parseEvaluationResult = (evaluationResult) => {
-    const scoreMatch = evaluationResult.match(/score (\w+) (-?\d+)/);
-    let evaluationText = '';
-    let whiteValue = 50;
-    let blackValue = 50;
-    if (scoreMatch) {
-      const scoreType = scoreMatch[1];
-      const scoreValue = parseInt(scoreMatch[2], 10);
-
-      if (scoreType === 'cp') {
-        if (scoreValue > 0) {
-          whiteValue = Math.min(100, 50 + scoreValue / 10); // Advantage for White
-          blackValue = 100 - whiteValue;
-        } else {
-          blackValue = Math.min(100, 50 - scoreValue / 10); // Advantage for Black
-          whiteValue = 100 - blackValue;
-        }
-        evaluationText = `${scoreValue} centipawns`;
-      } else if (scoreType === 'mate') {
-        if (scoreValue > 0) {
-          whiteValue = 100;
-          blackValue = 0;
-          evaluationText = 'Mate for White';
-        } else {
-          whiteValue = 0;
-          blackValue = 100;
-          evaluationText = 'Mate for Black';
-        }
-      }
-    }
-
-    setWhitePercentage(whiteValue);
-    setBlackPercentage(blackValue);
-
-    return { evaluationText };
-  };
 
   const evaluateGame = (fen) => {
     // Send FEN to Stockfish for evaluation
@@ -71,7 +37,7 @@ const App = () => {
         const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
         if (bestMoveMatch) {
           setBestMove(bestMoveMatch[1]);
-          drawBestMoveArrow(bestMoveMatch[1]);
+          drawBestMoveArrow(bestMoveMatch[1], setArrows, setIsBestMoveArrowDrawn, 'red', arrows);
         }
       })
       .catch((error) => {
@@ -91,29 +57,13 @@ const App = () => {
         setMoveHistory(newGame.history());
         setHistoryIndex(newGame.history().length);
         setGameMetadata(extractMetadata(newGame));
-        setIsBestMoveArrowDrawn(false); // Reset arrow drawing when loading a new game
-        setArrows([]); // Clear arrows when loading a new game
+        setIsBestMoveArrowDrawn(false);
+        setArrows([]);
 
-        // Evaluate after loading a PGN file
         evaluateGame(newGame.fen());
       };
       reader.readAsText(file);
     }
-  };
-
-  const extractMetadata = (game) => {
-    const headers = game.header();
-    return {
-      event: headers.Event || 'Unknown',
-      site: headers.Site || 'Unknown',
-      date: headers.Date || 'Unknown',
-      round: headers.Round || 'Unknown',
-      whitePlayer: headers.White || 'Unknown',
-      whiteElo: headers.WhiteElo || 'Unknown',
-      blackPlayer: headers.Black || 'Unknown',
-      blackElo: headers.BlackElo || 'Unknown',
-      result: headers.Result || 'Unknown',
-    };
   };
 
   const resetGame = () => {
@@ -125,9 +75,9 @@ const App = () => {
     setWhitePercentage(50);
     setBlackPercentage(50);
     setIsBestMoveArrowDrawn(false);
+    
     setArrows([]);
 
-    // Evaluate after resetting the game
     evaluateGame(game.fen());
   };
 
@@ -136,10 +86,10 @@ const App = () => {
       game.undo();
       setHistoryIndex(historyIndex - 1);
       setGame(game);
-      setIsBestMoveArrowDrawn(false); // Reset arrow drawing when undoing
+      setIsBestMoveArrowDrawn(false);
+      setIsPreviousBestMoveArrowDrawn(false);
       setArrows([]);
 
-      // Evaluate after undoing a move
       evaluateGame(game.fen());
     }
   };
@@ -149,32 +99,26 @@ const App = () => {
       game.move(moveHistory[historyIndex]);
       setHistoryIndex(historyIndex + 1);
       setGame(game);
-      setIsBestMoveArrowDrawn(false); // Reset arrow drawing when redoing
+      setIsBestMoveArrowDrawn(false); 
+      setIsPreviousBestMoveArrowDrawn(false);
       setArrows([]);
 
-      // Evaluate after redoing a move
       evaluateGame(game.fen());
     }
   };
 
-  const drawBestMoveArrow = (bestMove) => {
-    const from = bestMove.slice(0, 2);
-    const to = bestMove.slice(2, 4); 
-    setArrows([[from, to, 'red']]);
-    setIsBestMoveArrowDrawn(true);
-  };  
-
   useEffect(() => {
-    if (!isBestMoveArrowDrawn) {
-      drawBestMoveArrow(bestMove);
+    if (bestMove && !isBestMoveArrowDrawn) {
+      drawBestMoveArrow(bestMove, setArrows, setIsBestMoveArrowDrawn, 'red', arrows);
     }
   }, [bestMove]);
+  
 
   const handlePieceDrop = (sourceSquare, targetSquare) => {
     const move = game.move({
       from: sourceSquare,
       to: targetSquare,
-      promotion: 'q', // always promote to a queen for simplicity
+      promotion: 'q', 
     });
   
     if (move) {
@@ -184,9 +128,8 @@ const App = () => {
       setGame(new Chess(newFen));
       setHistoryIndex(historyIndex + 1);
       setHighlightedSquares({});
-      setIsBestMoveArrowDrawn(false); // Reset arrow drawing after every move
+      setIsBestMoveArrowDrawn(false);
   
-      // Send FEN to Stockfish for evaluation
       fetch('http://localhost:5001/evaluate', {
         method: 'POST',
         headers: {
@@ -268,7 +211,7 @@ const App = () => {
             }}
             onSquareClick={handlePieceClick}
             customSquareStyles={highlightedSquares}
-            customArrows={arrows}
+            customArrows={arrows} // Ensure unique arrows are passed
             className="chessboard"
           />
         </div>
