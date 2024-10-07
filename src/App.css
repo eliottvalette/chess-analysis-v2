@@ -105,7 +105,6 @@ body::before {
   height: 80vh;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   background-color: rgba(240, 240, 240, 0.6);
   padding: 2vh;
   border-radius: 1vh;
@@ -174,3 +173,46 @@ body::before {
 .controls button:not(:disabled):hover {
   background-color: #555;
 }
+
+/* Move History Styling */
+.move-history {
+  font-size: 1.2vh;
+  color: #555;
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 1vh;
+  border-radius: 1vh;
+  margin-bottom: 2vh;
+  max-height: 30vh; /* Adjust for visibility */
+  overflow-y: auto;
+}
+
+.move-history ul {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* Two columns for moves */
+  grid-gap: 0.5vh;
+}
+
+.move-history li {
+  padding: 0.5vh 0;
+  font-size: 1.1vh;
+}
+
+.even-line {
+  background-color: rgba(57, 59, 61, 0.3); /* Highlight the current move */
+  font-weight: bold;
+}
+
+.odd-line {
+  background-color: rgba(33, 35, 37, 0.1); /* Highlight the current move */
+  font-weight: bold;
+}
+
+.current-move {
+  background-color: rgba(50, 87, 123, 0.652); /* Highlight the current move */
+  font-weight: bold;
+}
+
+

@@ -54,6 +54,31 @@ const App = () => {
     return { evaluationText };
   };
 
+  const evaluateGame = (fen) => {
+    // Send FEN to Stockfish for evaluation
+    fetch('http://localhost:5001/evaluate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fen }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        const { evaluationText } = parseEvaluationResult(data.evaluation);
+        setEvaluation(evaluationText);
+
+        const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
+        if (bestMoveMatch) {
+          setBestMove(bestMoveMatch[1]);
+          drawBestMoveArrow(bestMoveMatch[1]);
+        }
+      })
+      .catch((error) => {
+        console.error('Error evaluating position:', error);
+      });
+  };
+
   const handlePgnUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -68,6 +93,9 @@ const App = () => {
         setGameMetadata(extractMetadata(newGame));
         setIsBestMoveArrowDrawn(false); // Reset arrow drawing when loading a new game
         setArrows([]); // Clear arrows when loading a new game
+
+        // Evaluate after loading a PGN file
+        evaluateGame(newGame.fen());
       };
       reader.readAsText(file);
     }
@@ -98,6 +126,9 @@ const App = () => {
     setBlackPercentage(50);
     setIsBestMoveArrowDrawn(false);
     setArrows([]);
+
+    // Evaluate after resetting the game
+    evaluateGame(game.fen());
   };
 
   const undoMove = () => {
@@ -107,6 +138,9 @@ const App = () => {
       setGame(game);
       setIsBestMoveArrowDrawn(false); // Reset arrow drawing when undoing
       setArrows([]);
+
+      // Evaluate after undoing a move
+      evaluateGame(game.fen());
     }
   };
 
@@ -117,24 +151,22 @@ const App = () => {
       setGame(game);
       setIsBestMoveArrowDrawn(false); // Reset arrow drawing when redoing
       setArrows([]);
+
+      // Evaluate after redoing a move
+      evaluateGame(game.fen());
     }
   };
 
-  const drawBestMoveArrow = () => {
-    // Draw the best move arrow if it hasn't been drawn yet
-    if (!isBestMoveArrowDrawn && bestMove) {
-      const from = bestMove.slice(0, 2); // Extract 'e2'
-      const to = bestMove.slice(2, 4);   // Extract 'e4'
-      setArrows([[from, to]]); // Format for react-chessboard: [['e2', 'e4']]
-      setIsBestMoveArrowDrawn(true);
-    }
+  const drawBestMoveArrow = (bestMove) => {
+    const from = bestMove.slice(0, 2);
+    const to = bestMove.slice(2, 4); 
+    setArrows([[from, to, 'red']]);
+    setIsBestMoveArrowDrawn(true);
   };  
 
-  // Real-time evaluation
   useEffect(() => {
     if (!isBestMoveArrowDrawn) {
-      // Trigger best move arrow drawing when not already drawn
-      drawBestMoveArrow();
+      drawBestMoveArrow(bestMove);
     }
   }, [bestMove]);
 
@@ -142,14 +174,15 @@ const App = () => {
     const move = game.move({
       from: sourceSquare,
       to: targetSquare,
-      promotion: 'q',
+      promotion: 'q', // always promote to a queen for simplicity
     });
   
     if (move) {
       const newFen = game.fen();
+  
+      setMoveHistory([...moveHistory, move.san]);
       setGame(new Chess(newFen));
-      setMoveHistory(game.history());
-      setHistoryIndex(game.history().length);
+      setHistoryIndex(historyIndex + 1);
       setHighlightedSquares({});
       setIsBestMoveArrowDrawn(false); // Reset arrow drawing after every move
   
@@ -163,9 +196,6 @@ const App = () => {
       })
         .then((res) => res.json())
         .then((data) => {
-          console.log('Evaluation result:', data); // Debug output
-  
-          // Use the parseEvaluationResult function to handle the evaluation result
           const { evaluationText } = parseEvaluationResult(data.evaluation);
           setEvaluation(evaluationText);
   
@@ -202,7 +232,6 @@ const App = () => {
 
     setHighlightedSquares(squaresToHighlight);
   };
-  console.log(arrows);
 
   const handlePieceClick = (square) => {
     getPossibleMoves(square);
@@ -239,7 +268,7 @@ const App = () => {
             }}
             onSquareClick={handlePieceClick}
             customSquareStyles={highlightedSquares}
-            arrows={arrows}
+            customArrows={arrows}
             className="chessboard"
           />
         </div>
@@ -270,6 +299,17 @@ const App = () => {
             />
           </div>
         )}
+        {/* Display Move History */}
+        <div className="move-history">
+          <h3>Move History</h3>
+          <ul>
+            {moveHistory.map((move, index) => (
+              <li key={index} className={`move-item ${index === historyIndex ? 'current-move' : ''} ${index % 4 <=1 ? 'even-line' : 'odd-line'}`}>
+                {index % 2 === 0 ? `${index / 2 + 1}. ${move}` : `  ${move}`}
+              </li>
+            ))}
+          </ul>
+        </div>
 
         {/* Display AI Evaluation */}
         <div className="evaluation">
