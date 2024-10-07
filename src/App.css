@@ -34,7 +34,7 @@ body::before {
   width: 95vw;
   max-height: 90vh;
   padding: 2vh;
-  background-color: rgba(245, 245, 245, 1); /* Fully opaque */
+  background-color: rgba(245, 245, 245, 0.3); /* Fully opaque */
   border-radius: 1vh;
   box-shadow: 0 1vh 2vh rgba(0, 0, 0, 0.3);
 }
@@ -101,12 +101,12 @@ body::before {
 
 /* Right Aside Block Styling */
 .side-info {
-  width: 25vw; /* Adjusted width */
+  width: 25vw;
   height: 80vh;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background-color: rgba(240, 240, 240, 1); /* Fully opaque */
+  background-color: rgba(240, 240, 240, 0.6);
   padding: 2vh;
   border-radius: 1vh;
   box-shadow: 0 0.5vh 1vh rgba(0, 0, 0, 0.1);
@@ -117,7 +117,7 @@ body::before {
   font-size: 1.2vh;
   color: #555;
   text-align: left;
-  background-color: rgba(255, 255, 255, 1); /* Fully opaque */
+  background-color: rgba(255, 255, 255, 0.9);
   padding: 1vh;
   border-radius: 1vh;
   margin-bottom: 2vh;
@@ -129,7 +129,13 @@ body::before {
 
 /* Evaluation display */
 .evaluation {
+  font-size: 1.2vh;
+  color: #555;
   text-align: left;
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 1vh;
+  border-radius: 1vh;
+  margin-bottom: 2vh;
 }
 
 .evaluation h3 {

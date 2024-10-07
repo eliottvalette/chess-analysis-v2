@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import './App.css';
@@ -9,23 +9,26 @@ const App = () => {
   const [moveHistory, setMoveHistory] = useState([]);
   const [highlightedSquares, setHighlightedSquares] = useState({});
   const [gameMetadata, setGameMetadata] = useState(null);
-  const [evaluation, setEvaluation] = useState(''); // Stockfish evaluation
+  const [evaluation, setEvaluation] = useState(''); // Stockfish evaluation text
   const [bestMove, setBestMove] = useState(''); // Stockfish best move
-  const [evaluationScore, setEvaluationScore] = useState(50);
+  const [evaluationScore, setEvaluationScore] = useState(50); // Score for evaluation bar
 
   // Helper function to parse Stockfish evaluation result
   const parseEvaluationResult = (evaluationResult) => {
     const scoreMatch = evaluationResult.match(/score (\w+) (-?\d+)/);
-    let evaluationValue = 50;
-    let evaluationText = '';
+    let evaluationValue = 50; // Start with a neutral evaluation
+    let evaluationText = 'Equal';
+
     if (scoreMatch) {
       const scoreType = scoreMatch[1];
       const scoreValue = parseInt(scoreMatch[2], 10);
 
       if (scoreType === 'cp') {
+        // Clamp centipawn score within range for display
         evaluationValue = Math.max(0, Math.min(100, 50 + scoreValue / 10));
         evaluationText = `${scoreValue} centipawns`;
       } else if (scoreType === 'mate') {
+        // Mating scenarios: 100 for white, 0 for black
         evaluationValue = scoreValue > 0 ? 100 : 0;
         evaluationText = scoreValue > 0 ? 'Mate for White' : 'Mate for Black';
       }
@@ -72,14 +75,14 @@ const App = () => {
     setGame(new Chess());
     setHighlightedSquares({});
     setEvaluation(''); // Clear Stockfish evaluation
-    setEvaluationScore(50);
+    setEvaluationScore(50); // Reset the evaluation bar to neutral
   };
 
   const undoMove = () => {
     if (historyIndex > 0) {
       game.undo();
       setHistoryIndex(historyIndex - 1);
-      setGame(game); // Update the state to trigger re-render
+      setGame(game);
     }
   };
 
@@ -99,7 +102,7 @@ const App = () => {
     });
 
     if (move) {
-      const newFen = game.fen(); // Correctly define the FEN here
+      const newFen = game.fen();
       setGame(new Chess(newFen));
       setMoveHistory(game.history());
       setHistoryIndex(game.history().length);
@@ -115,7 +118,6 @@ const App = () => {
       })
         .then((res) => res.json())
         .then((data) => {
-          console.log('Evaluation result:', data);
           const { evaluationValue, evaluationText } = parseEvaluationResult(data.evaluation);
           setEvaluationScore(evaluationValue);
           setEvaluation(evaluationText);
@@ -159,16 +161,20 @@ const App = () => {
 
   return (
     <div className="container">
-      
-
       <div className="main-content">
         {/* Chessboard and Evaluation Bar in the middle */}
         <div className="chess-game">
           <div className="evaluation-bar-container">
             <div className="evaluation-bar">
+              {/* Adjust the background dynamically */}
               <div
                 className="evaluation-bar-fill"
-                style={{ height: `${evaluationScore}%`, backgroundColor: evaluationScore > 50 ? 'green' : 'red' }}
+                style={{
+                  height: `${evaluationScore}%`,
+                  backgroundColor: evaluationScore > 50 ? 'white' : 'black',
+                  top: evaluationScore > 50 ? `${100 - evaluationScore}%` : '0',
+                  bottom: evaluationScore <= 50 ? `${evaluationScore}%` : '0',
+                }}
               />
             </div>
             <p>{evaluationScore > 50 ? 'White Advantage' : evaluationScore < 50 ? 'Black Advantage' : 'Equal'}</p>
