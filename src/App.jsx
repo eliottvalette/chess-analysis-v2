@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import './App.css';
@@ -9,32 +9,49 @@ const App = () => {
   const [moveHistory, setMoveHistory] = useState([]);
   const [highlightedSquares, setHighlightedSquares] = useState({});
   const [gameMetadata, setGameMetadata] = useState(null);
-  const [evaluation, setEvaluation] = useState(''); // Stockfish evaluation text
+  const [evaluation, setEvaluation] = useState(''); // Stockfish evaluation
   const [bestMove, setBestMove] = useState(''); // Stockfish best move
-  const [evaluationScore, setEvaluationScore] = useState(50); // Score for evaluation bar
+  const [isBestMoveArrowDrawn, setIsBestMoveArrowDrawn] = useState(false); // Track arrow drawing
+  const [arrows, setArrows] = useState([]); // Arrows to draw on the chessboard
+  const [whitePercentage, setWhitePercentage] = useState(50);
+  const [blackPercentage, setBlackPercentage] = useState(50);
 
   // Helper function to parse Stockfish evaluation result
   const parseEvaluationResult = (evaluationResult) => {
     const scoreMatch = evaluationResult.match(/score (\w+) (-?\d+)/);
-    let evaluationValue = 50; // Start with a neutral evaluation
-    let evaluationText = 'Equal';
-
+    let evaluationText = '';
+    let whiteValue = 50;
+    let blackValue = 50;
     if (scoreMatch) {
       const scoreType = scoreMatch[1];
       const scoreValue = parseInt(scoreMatch[2], 10);
 
       if (scoreType === 'cp') {
-        // Clamp centipawn score within range for display
-        evaluationValue = Math.max(0, Math.min(100, 50 + scoreValue / 10));
+        if (scoreValue > 0) {
+          whiteValue = Math.min(100, 50 + scoreValue / 10); // Advantage for White
+          blackValue = 100 - whiteValue;
+        } else {
+          blackValue = Math.min(100, 50 - scoreValue / 10); // Advantage for Black
+          whiteValue = 100 - blackValue;
+        }
         evaluationText = `${scoreValue} centipawns`;
       } else if (scoreType === 'mate') {
-        // Mating scenarios: 100 for white, 0 for black
-        evaluationValue = scoreValue > 0 ? 100 : 0;
-        evaluationText = scoreValue > 0 ? 'Mate for White' : 'Mate for Black';
+        if (scoreValue > 0) {
+          whiteValue = 100;
+          blackValue = 0;
+          evaluationText = 'Mate for White';
+        } else {
+          whiteValue = 0;
+          blackValue = 100;
+          evaluationText = 'Mate for Black';
+        }
       }
     }
 
-    return { evaluationValue, evaluationText };
+    setWhitePercentage(whiteValue);
+    setBlackPercentage(blackValue);
+
+    return { evaluationText };
   };
 
   const handlePgnUpload = (event) => {
@@ -49,6 +66,8 @@ const App = () => {
         setMoveHistory(newGame.history());
         setHistoryIndex(newGame.history().length);
         setGameMetadata(extractMetadata(newGame));
+        setIsBestMoveArrowDrawn(false); // Reset arrow drawing when loading a new game
+        setArrows([]); // Clear arrows when loading a new game
       };
       reader.readAsText(file);
     }
@@ -74,8 +93,11 @@ const App = () => {
     setMoveHistory([]);
     setGame(new Chess());
     setHighlightedSquares({});
-    setEvaluation(''); // Clear Stockfish evaluation
-    setEvaluationScore(50); // Reset the evaluation bar to neutral
+    setEvaluation('');
+    setWhitePercentage(50);
+    setBlackPercentage(50);
+    setIsBestMoveArrowDrawn(false);
+    setArrows([]);
   };
 
   const undoMove = () => {
@@ -83,6 +105,8 @@ const App = () => {
       game.undo();
       setHistoryIndex(historyIndex - 1);
       setGame(game);
+      setIsBestMoveArrowDrawn(false); // Reset arrow drawing when undoing
+      setArrows([]);
     }
   };
 
@@ -91,8 +115,28 @@ const App = () => {
       game.move(moveHistory[historyIndex]);
       setHistoryIndex(historyIndex + 1);
       setGame(game);
+      setIsBestMoveArrowDrawn(false); // Reset arrow drawing when redoing
+      setArrows([]);
     }
   };
+
+  const drawBestMoveArrow = () => {
+    // Draw the best move arrow if it hasn't been drawn yet
+    if (!isBestMoveArrowDrawn && bestMove) {
+      const from = bestMove.slice(0, 2); // e.g., 'e2'
+      const to = bestMove.slice(2, 4);   // e.g., 'e4'
+      setArrows([{ from, to }]);
+      setIsBestMoveArrowDrawn(true);
+    }
+  };
+
+  // Real-time evaluation
+  useEffect(() => {
+    if (!isBestMoveArrowDrawn) {
+      // Trigger best move arrow drawing when not already drawn
+      drawBestMoveArrow();
+    }
+  }, [bestMove]);
 
   const handlePieceDrop = (sourceSquare, targetSquare) => {
     const move = game.move({
@@ -100,14 +144,15 @@ const App = () => {
       to: targetSquare,
       promotion: 'q',
     });
-
+  
     if (move) {
       const newFen = game.fen();
       setGame(new Chess(newFen));
       setMoveHistory(game.history());
       setHistoryIndex(game.history().length);
       setHighlightedSquares({});
-
+      setIsBestMoveArrowDrawn(false); // Reset arrow drawing after every move
+  
       // Send FEN to Stockfish for evaluation
       fetch('http://localhost:5001/evaluate', {
         method: 'POST',
@@ -118,10 +163,12 @@ const App = () => {
       })
         .then((res) => res.json())
         .then((data) => {
-          const { evaluationValue, evaluationText } = parseEvaluationResult(data.evaluation);
-          setEvaluationScore(evaluationValue);
+          console.log('Evaluation result:', data); // Debug output
+  
+          // Use the parseEvaluationResult function to handle the evaluation result
+          const { evaluationText } = parseEvaluationResult(data.evaluation);
           setEvaluation(evaluationText);
-
+  
           const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
           if (bestMoveMatch) {
             setBestMove(bestMoveMatch[1]);
@@ -130,13 +177,14 @@ const App = () => {
         .catch((error) => {
           console.error('Error evaluating position:', error);
         });
-
+  
       return true;
     } else {
       console.log('Move is illegal');
       return false;
     }
   };
+  
 
   const getPossibleMoves = (square) => {
     const moves = game.moves({
@@ -154,6 +202,7 @@ const App = () => {
 
     setHighlightedSquares(squaresToHighlight);
   };
+  console.log(arrows);
 
   const handlePieceClick = (square) => {
     getPossibleMoves(square);
@@ -166,21 +215,18 @@ const App = () => {
         <div className="chess-game">
           <div className="evaluation-bar-container">
             <div className="evaluation-bar">
-              {/* Adjust the background dynamically */}
               <div
-                className="evaluation-bar-fill"
-                style={{
-                  height: `${evaluationScore}%`,
-                  backgroundColor: 'black',
-                  top: evaluationScore > 50 ? `${100 - evaluationScore}%` : '0',
-                  bottom: evaluationScore <= 50 ? `${evaluationScore}%` : '0',
-                }}
+                className="evaluation-bar-black"
+                style={{ height: `${blackPercentage}%`, backgroundColor: 'black' }}
+              />
+              <div
+                className="evaluation-bar-white"
+                style={{ height: `${whitePercentage}%`, backgroundColor: 'white' }}
               />
             </div>
-            <p>{evaluationScore > 50 ? 'White Advantage' : evaluationScore < 50 ? 'Black Advantage' : 'Equal'}</p>
+            <p>{evaluation}</p>
           </div>
 
-          {/* Chessboard */}
           <Chessboard
             position={game.fen()}
             width={400}
@@ -193,6 +239,7 @@ const App = () => {
             }}
             onSquareClick={handlePieceClick}
             customSquareStyles={highlightedSquares}
+            arrows={arrows}
             className="chessboard"
           />
         </div>
