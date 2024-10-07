@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
 import './App.css';
@@ -12,6 +12,27 @@ const App = () => {
   const [evaluation, setEvaluation] = useState(''); // Stockfish evaluation
   const [bestMove, setBestMove] = useState(''); // Stockfish best move
   const [evaluationScore, setEvaluationScore] = useState(50);
+
+  // Helper function to parse Stockfish evaluation result
+  const parseEvaluationResult = (evaluationResult) => {
+    const scoreMatch = evaluationResult.match(/score (\w+) (-?\d+)/);
+    let evaluationValue = 50;
+    let evaluationText = '';
+    if (scoreMatch) {
+      const scoreType = scoreMatch[1];
+      const scoreValue = parseInt(scoreMatch[2], 10);
+
+      if (scoreType === 'cp') {
+        evaluationValue = Math.max(0, Math.min(100, 50 + scoreValue / 10));
+        evaluationText = `${scoreValue} centipawns`;
+      } else if (scoreType === 'mate') {
+        evaluationValue = scoreValue > 0 ? 100 : 0;
+        evaluationText = scoreValue > 0 ? 'Mate for White' : 'Mate for Black';
+      }
+    }
+
+    return { evaluationValue, evaluationText };
+  };
 
   const handlePgnUpload = (event) => {
     const file = event.target.files[0];
@@ -95,29 +116,11 @@ const App = () => {
         .then((res) => res.json())
         .then((data) => {
           console.log('Evaluation result:', data);
-          const evaluationResult = data.evaluation;
+          const { evaluationValue, evaluationText } = parseEvaluationResult(data.evaluation);
+          setEvaluationScore(evaluationValue);
+          setEvaluation(evaluationText);
 
-          // Extract score (cp or mate)
-          const scoreMatch = evaluationResult.match(/score (\w+) (-?\d+)/);
-          if (scoreMatch) {
-            const scoreType = scoreMatch[1]; // 'cp' for centipawns or 'mate'
-            const scoreValue = parseInt(scoreMatch[2], 10); // The actual score
-
-            // Convert the score to a value between 0 and 100 for the evaluation bar
-            let evaluationValue = 50; // Default neutral value
-            if (scoreType === 'cp') {
-              // Clamp the value between -500 (Black advantage) and 500 (White advantage)
-              evaluationValue = Math.max(0, Math.min(100, 50 + (scoreValue / 10)));
-            } else if (scoreType === 'mate') {
-              // If it's a mate, show extreme advantage for one side
-              evaluationValue = scoreValue > 0 ? 100 : 0; // White mates (100), Black mates (0)
-            }
-
-            setEvaluationScore(evaluationValue); // Update evaluation score for the progress bar
-            setEvaluation(evaluationValue === 100 ? 'Mate for White' : evaluationValue === 0 ? 'Mate for Black' : `${scoreValue} centipawns`);
-          }
-
-          const bestMoveMatch = evaluationResult.match(/bestmove (\w+)/);
+          const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
           if (bestMoveMatch) {
             setBestMove(bestMoveMatch[1]);
           }
@@ -156,74 +159,78 @@ const App = () => {
 
   return (
     <div className="container">
-      <h1 className="title">Chess Game Viewer</h1>
-      <input
-        className="upload-input"
-        type="file"
-        accept=".pgn"
-        onChange={handlePgnUpload}
-      />
+      
 
-      {gameMetadata && (
-        <div className="metadata">
-          <p>
-            <strong>Date:</strong> {gameMetadata.date}
-          </p>
-          <p>
-            <strong>White:</strong> {gameMetadata.whitePlayer} (<strong>Elo :</strong> {gameMetadata.whiteElo})
-          </p>
-          <p>
-            <strong>Black:</strong> {gameMetadata.blackPlayer} (<strong>Elo :</strong> {gameMetadata.blackElo})
-          </p>
-          <p>
-            <strong>Result:</strong> {gameMetadata.result}
-          </p>
-        </div>
-      )}
-      <div className="chess-game">
-        <div className="evaluation-bar-container">
-          <div className="evaluation-bar">
-            <div
-              className="evaluation-bar-fill"
-              style={{ height: `${evaluationScore}%`, backgroundColor: evaluationScore > 50 ? 'green' : 'red' }}
-            />
+      <div className="main-content">
+        {/* Chessboard and Evaluation Bar in the middle */}
+        <div className="chess-game">
+          <div className="evaluation-bar-container">
+            <div className="evaluation-bar">
+              <div
+                className="evaluation-bar-fill"
+                style={{ height: `${evaluationScore}%`, backgroundColor: evaluationScore > 50 ? 'green' : 'red' }}
+              />
+            </div>
+            <p>{evaluationScore > 50 ? 'White Advantage' : evaluationScore < 50 ? 'Black Advantage' : 'Equal'}</p>
           </div>
-          <p>{evaluationScore > 50 ? 'White Advantage' : evaluationScore < 50 ? 'Black Advantage' : 'Equal'}</p>
-        </div>
-        {/* Chessboard */}
-        <div className="board-container">
+
+          {/* Chessboard */}
           <Chessboard
             position={game.fen()}
             width={400}
             boardOrientation="white"
             onPieceDrop={handlePieceDrop}
             customBoardStyle={{
-              borderRadius: '4px',
-              boxShadow: '0 5px 5px rgba(0, 0, 0, 0.5)',
+              borderRadius: '5px',
+              boxShadow: '0 5px 15px rgba(0, 0, 0, 0.5)',
+              width: '100%',
             }}
-            onSquareClick={(square) => handlePieceClick(square)}
+            onSquareClick={handlePieceClick}
             customSquareStyles={highlightedSquares}
+            className="chessboard"
           />
         </div>
       </div>
-      
 
-      {/* Display AI Evaluation */}
-      <div className="evaluation">
-        <h3>Position Evaluation:</h3>
-        {evaluation ? <p>{evaluation}</p> : <p>No evaluation yet.</p>}
-        {bestMove && <p><strong>Best move: </strong>{bestMove}</p>}
-      </div>
+      {/* Aside block on the right for player info and evaluation */}
+      <aside className="side-info">
+        {gameMetadata ? (
+          <div className="metadata">
+            <input
+              className="upload-input"
+              type="file"
+              accept=".pgn"
+              onChange={handlePgnUpload}
+            />
+            <p><strong>Date:</strong> {gameMetadata.date}</p>
+            <p><strong>White:</strong> {gameMetadata.whitePlayer} (<strong>Elo:</strong> {gameMetadata.whiteElo})</p>
+            <p><strong>Black:</strong> {gameMetadata.blackPlayer} (<strong>Elo:</strong> {gameMetadata.blackElo})</p>
+            <p><strong>Result:</strong> {gameMetadata.result}</p>
+          </div>
+        ) : (
+          <div className="metadata">
+            <input
+              className="upload-input"
+              type="file"
+              accept=".pgn"
+              onChange={handlePgnUpload}
+            />
+          </div>
+        )}
 
-      <div className="controls">
-        <button onClick={resetGame}>Reset</button>
-        <button onClick={undoMove} disabled={historyIndex === 0}>
-          Undo
-        </button>
-        <button onClick={redoMove} disabled={historyIndex === moveHistory.length}>
-          Redo
-        </button>
-      </div>
+        {/* Display AI Evaluation */}
+        <div className="evaluation">
+          <h3>Position Evaluation:</h3>
+          {evaluation ? <p>{evaluation}</p> : <p>No evaluation yet.</p>}
+          {bestMove && <p><strong>Best move: </strong>{bestMove}</p>}
+        </div>
+
+        <div className="controls">
+          <button onClick={resetGame}>Reset</button>
+          <button onClick={undoMove} disabled={historyIndex === 0}>Undo</button>
+          <button onClick={redoMove} disabled={historyIndex === moveHistory.length}>Redo</button>
+        </div>
+      </aside>
     </div>
   );
 };
