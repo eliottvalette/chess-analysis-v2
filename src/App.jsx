@@ -171,7 +171,7 @@ const App = () => {
                 className="evaluation-bar-fill"
                 style={{
                   height: `${evaluationScore}%`,
-                  backgroundColor: evaluationScore > 50 ? 'white' : 'black',
+                  backgroundColor: 'black',
                   top: evaluationScore > 50 ? `${100 - evaluationScore}%` : '0',
                   bottom: evaluationScore <= 50 ? `${evaluationScore}%` : '0',
                 }}
