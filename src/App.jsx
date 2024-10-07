@@ -123,12 +123,12 @@ const App = () => {
   const drawBestMoveArrow = () => {
     // Draw the best move arrow if it hasn't been drawn yet
     if (!isBestMoveArrowDrawn && bestMove) {
-      const from = bestMove.slice(0, 2); // e.g., 'e2'
-      const to = bestMove.slice(2, 4);   // e.g., 'e4'
-      setArrows([{ from, to }]);
+      const from = bestMove.slice(0, 2); // Extract 'e2'
+      const to = bestMove.slice(2, 4);   // Extract 'e4'
+      setArrows([[from, to]]); // Format for react-chessboard: [['e2', 'e4']]
       setIsBestMoveArrowDrawn(true);
     }
-  };
+  };  
 
   // Real-time evaluation
   useEffect(() => {
