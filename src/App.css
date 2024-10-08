@@ -1,10 +1,11 @@
 /* General Styles */
+/* General font styling */
 body {
   margin: 0;
   padding: 0;
-  font-family: Arial, sans-serif;
+  font-family: 'Roboto', sans-serif; /* Apply Roboto font */
   background-image: url('./assets/background.jpg');
-  background-size: cover; 
+  background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   display: flex;
@@ -12,9 +13,41 @@ body {
   align-items: center;
   height: 100vh;
   overflow: hidden;
+  color: #333; /* Softer font color */
 }
 
-/* Transparent overlay */
+* {
+  box-sizing: border-box;
+}
+
+/* Styling other text elements */
+h3, p, input, button {
+  font-family: 'Roboto', sans-serif; /* Apply Roboto to headings, paragraphs, inputs, and buttons */
+  font-weight: 400;
+  color: #333; /* Consistent and softer font color */
+}
+
+h3 {
+  font-size: 1.8vh;
+  font-weight: 500; /* Medium weight for headers */
+}
+
+p, li {
+  font-size: 1.2vh;
+  line-height: 1.5; /* Improved readability */
+}
+
+button {
+  font-size: 1.4vh;
+  font-weight: 500;
+}
+
+input {
+  font-size: 1.2vh;
+}
+
+
+/* Background blur and reduced opacity */
 body::before {
   content: '';
   position: absolute;
@@ -22,7 +55,8 @@ body::before {
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(255, 255, 255, 0.5); /* Light transparent overlay */
+  background-color: rgba(255, 255, 255, 0.35); /* Slightly reduced overlay */
+  backdrop-filter: blur(10px); /* Blur background for focus */
   z-index: -1; /* Keep it behind all other content */
 }
 
@@ -54,23 +88,31 @@ body::before {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: 35vw; /* Adjusted the size for chessboard and evaluation bar */
+  width: 40vw; /* Adjusted the size for chessboard and evaluation bar */
 }
 
-/* Chessboard container styling */
+/* Enhanced Chessboard styling */
 .chessboard {
   border-radius: 1vh;
-  box-shadow: 0 0.5vh 1vh rgba(0, 0, 0, 0.3);
-  background-color: white; /* Ensures the board remains opaque */
+  box-shadow: 0 1vh 2vh rgba(0, 0, 0, 0.4);
+  background-color: #fafafa; /* Light background for contrast */
+  transition: transform 0.3s ease;
 }
 
-/* Evaluation bar container */
+.chessboard:hover {
+  transform: scale(1.02); /* Slight zoom on hover */
+}
+
+/* Subtle gradient for the evaluation bar */
 .evaluation-bar-container {
+  font-weight: 700; /* Make evaluation text bold */
+  font-size: 1.4vh;
+  color: #444; /* A slightly darker color for emphasis */
   display: flex;
   flex-direction: column;
   align-items: center;
   width: 1vw;
-  height: 100%; /* Adjust the height to match the chessboard size */
+  height: 100%;
   margin-right: 2vw;
 }
 
@@ -78,18 +120,26 @@ body::before {
   width: 100%;
   height: 100%;
   border: 0.2vh solid #000;
-  background-color: #f0f0f0;
+  background-color: transparent;
   position: relative;
   overflow: hidden;
   border-radius: 0.5vh;
 }
 
-.evaluation-bar-fill {
+.evaluation-bar-white {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(220, 220, 220, 1) 100%);
+  width: 100%;
   position: absolute;
   bottom: 0;
+  transition: height 0.5s ease-in-out;
+}
+
+.evaluation-bar-black {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, rgba(60, 60, 60, 1) 100%);
   width: 100%;
-  background-color: green;
-  transition: height 0.3s ease;
+  position: absolute;
+  top: 0;
+  transition: height 0.5s ease-in-out;
 }
 
 .evaluation-bar-container p {
@@ -110,16 +160,36 @@ body::before {
   border-radius: 1vh;
   box-shadow: 0 0.5vh 1vh rgba(0, 0, 0, 0.1);
 }
-
-/* Metadata section */
-.metadata {
+.move-history {
+  height: 30vh; /* Adjust for visibility */
+  max-height: 30vh;
+  overflow-y: auto; /* Enable scrolling for move history */
+}
+/* Metadata, Evaluation, and Move History section */
+.metadata, .evaluation, .move-history {
   font-size: 1.2vh;
-  color: #555;
-  text-align: left;
-  background-color: rgba(255, 255, 255, 0.9);
-  padding: 1vh;
+  color: #444; /* Slightly darker and softer font color */
+  background-color: rgba(255, 255, 255, 0.95);
+  padding: 1.2vh;
   border-radius: 1vh;
   margin-bottom: 2vh;
+  font-weight: 300; /* Lighter text for these sections */
+  box-shadow: 0 0.4vh 1vh rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease;
+}
+
+.metadata {
+  height: 30vh;
+  max-height: 30vh;
+}
+
+.evaluation {
+  height: 15vh;
+  max-height: 15vh;
+}
+
+.metadata:hover, .evaluation:hover, .move-history:hover {
+  transform: translateY(-0.5vh); /* Lifting effect on hover */
 }
 
 .metadata p {
@@ -127,16 +197,6 @@ body::before {
 }
 
 /* Evaluation display */
-.evaluation {
-  font-size: 1.2vh;
-  color: #555;
-  text-align: left;
-  background-color: rgba(255, 255, 255, 0.9);
-  padding: 1vh;
-  border-radius: 1vh;
-  margin-bottom: 2vh;
-}
-
 .evaluation h3 {
   font-size: 1.8vh;
   color: #333;
@@ -149,43 +209,53 @@ body::before {
 
 /* Controls styling */
 .controls {
-  margin-top: 2vh;
-  display: flex;
+  display: grid;
   justify-content: space-between;
-  gap: 1vw;
+  gap: 1vh;
 }
 
+.reset {
+  grid-column: 1 / 5;
+  grid-row: 1;
+}
+.undo {
+  grid-column: 1 / 3;
+  grid-row: 2;
+}
+.redo {
+  grid-column: 3 / 5;
+  grid-row: 2;
+}
+.play-best {
+  grid-column: 1 /5;
+  grid-row: 3;
+}
+
+/* Button styling for better aesthetics */
 .controls button {
-  padding: 1vh 2vh;
-  font-size: 1.2vh;
+  font-weight: 500; 
+  padding: 1.2vh 2vh;
+  font-size: 1.4vh;
   color: #fff;
-  background-color: #333;
+  background: linear-gradient(145deg, #333, #555);
   border: none;
-  border-radius: 0.5vh;
+  border-radius: 1vh;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background 0.3s ease, box-shadow 0.2s ease;
+  box-shadow: 0 0.4vh 1vh rgba(0, 0, 0, 0.2);
 }
 
 .controls button:disabled {
-  background-color: #999;
+  background: #999;
+  cursor: not-allowed;
 }
 
 .controls button:not(:disabled):hover {
-  background-color: #555;
+  background: #777;
+  box-shadow: 0 0.6vh 1.2vh rgba(0, 0, 0, 0.3);
 }
 
 /* Move History Styling */
-.move-history {
-  font-size: 1.2vh;
-  color: #555;
-  background-color: rgba(255, 255, 255, 0.9);
-  padding: 1vh;
-  border-radius: 1vh;
-  margin-bottom: 2vh;
-  max-height: 30vh; /* Adjust for visibility */
-  overflow-y: auto;
-}
-
 .move-history ul {
   list-style-type: none;
   padding: 0;
@@ -196,23 +266,68 @@ body::before {
 }
 
 .move-history li {
-  padding: 0.5vh 0;
   font-size: 1.1vh;
+  font-weight: 400;
+  padding: 0.5vh 0;
 }
 
 .even-line {
-  background-color: rgba(57, 59, 61, 0.3); /* Highlight the current move */
+  background-color: rgba(57, 59, 61, 0.3); /* Highlight the even moves */
   font-weight: bold;
 }
 
 .odd-line {
-  background-color: rgba(33, 35, 37, 0.1); /* Highlight the current move */
+  background-color: rgba(33, 35, 37, 0.1); /* Highlight the odd moves */
   font-weight: bold;
 }
 
 .current-move {
-  background-color: rgba(50, 87, 123, 0.652); /* Highlight the current move */
+  background-color: rgba(50, 87, 123, 0.65); /* Highlight the current move */
   font-weight: bold;
 }
 
+/* Highlighted square styling */
+.custom-square-highlight {
+  background-color: rgba(255, 255, 0, 0.4);
+  transition: background-color 0.3s ease;
+}
 
+/* Hide the default file input */
+.upload-input {
+  display: none; /* Hides the default input */
+}
+
+/* Style the label to look like a button */
+.custom-upload-button {
+  display: inline-block;
+  padding: 1.2vh 2vh;
+  font-size: 1.4vh;
+  font-weight: 500;
+  color: #fff;
+  background: linear-gradient(145deg, #333, #555);
+  border: none;
+  border-radius: 1vh;
+  cursor: pointer;
+  transition: background 0.3s ease, box-shadow 0.2s ease;
+  box-shadow: 0 0.4vh 1vh rgba(0, 0, 0, 0.2);
+  width: 100%;
+  text-align: center;
+}
+
+/* Hover effect for the button */
+.custom-upload-button:hover {
+  background: #777;
+  box-shadow: 0 0.6vh 1.2vh rgba(0, 0, 0, 0.3);
+}
+
+/* Disabled button style */
+.custom-upload-button:disabled {
+  background: #999;
+  cursor: not-allowed;
+}
+
+
+/* Additional styles for smooth interactions */
+.custom-square-styles {
+  transition: background-color 0.3s ease;
+}

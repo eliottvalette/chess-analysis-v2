@@ -56,7 +56,7 @@ export const extractMetadata = (game) => {
       
         const updatedArrows = arrows.length === 0 
             ? [[from, to, color, uniqueKey]] // Init the first arrow
-            : [[arrows.slice(-1)[0][0], arrows.slice(-1)[0][1], 'green', `${arrows.slice(-1)[0][0]}-${arrows.slice(-1)[0][1]}`], [from, to, color, uniqueKey]];
+    : [[arrows.slice(-1)[0][0], arrows.slice(-1)[0][1], 'green', `${arrows.slice(-1)[0][0]}-${arrows.slice(-1)[0][1]}`], [from, to, color, uniqueKey]];
 
         
         setArrows(updatedArrows); 

@@ -14,11 +14,13 @@ const App = () => {
   const [evaluation, setEvaluation] = useState(''); 
   const [bestMove, setBestMove] = useState(''); 
   const [isBestMoveArrowDrawn, setIsBestMoveArrowDrawn] = useState(false);
-  const [previousBestMove, setPreviousBestMove] = useState('');
-  const [ispreviousBestMoveArrowDrawn, setIsPreviousBestMoveArrowDrawn] = useState(false);
+  const [isPreviousBestMoveArrowDrawn, setIsPreviousBestMoveArrowDrawn] = useState(false);
   const [arrows, setArrows] = useState([]); 
   const [whitePercentage, setWhitePercentage] = useState(50);
   const [blackPercentage, setBlackPercentage] = useState(50);
+  const [fileName, setFileName] = useState('No file selected')
+  const [selectedSquare, setSelectedSquare] = useState(null);
+
 
   const evaluateGame = (fen) => {
     // Send FEN to Stockfish for evaluation
@@ -37,7 +39,6 @@ const App = () => {
         const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
         if (bestMoveMatch) {
           setBestMove(bestMoveMatch[1]);
-          drawBestMoveArrow(bestMoveMatch[1], setArrows, setIsBestMoveArrowDrawn, 'red', arrows);
         }
       })
       .catch((error) => {
@@ -63,6 +64,7 @@ const App = () => {
         evaluateGame(newGame.fen());
       };
       reader.readAsText(file);
+      setFileName(event.target.files[0]?.name || 'No file selected');
     }
   };
 
@@ -112,7 +114,6 @@ const App = () => {
       drawBestMoveArrow(bestMove, setArrows, setIsBestMoveArrowDrawn, 'red', arrows);
     }
   }, [bestMove]);
-  
 
   const handlePieceDrop = (sourceSquare, targetSquare) => {
     const move = game.move({
@@ -129,37 +130,50 @@ const App = () => {
       setHistoryIndex(historyIndex + 1);
       setHighlightedSquares({});
       setIsBestMoveArrowDrawn(false);
-  
-      fetch('http://localhost:5001/evaluate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ fen: newFen }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          const { evaluationText } = parseEvaluationResult(data.evaluation);
-          setEvaluation(evaluationText);
-  
-          const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
-          if (bestMoveMatch) {
-            setBestMove(bestMoveMatch[1]);
-          }
-        })
-        .catch((error) => {
-          console.error('Error evaluating position:', error);
-        });
-  
+      setSelectedSquare(null);
+      evaluateGame(newFen);
       return true;
+
     } else {
       console.log('Move is illegal');
+      setSelectedSquare(null);
       return false;
+    }
+  };
+
+  const handlePieceClick = (square) => {
+    console.log(selectedSquare)
+    if (selectedSquare) {
+      // Try to move the piece to the clicked square
+      const move = game.move({
+        from: selectedSquare,
+        to: square,
+        promotion: 'q', // You can customize promotion logic here
+      });
+  
+      if (move) {
+        // Move was valid, update the state
+        const newFen = game.fen();
+        setMoveHistory([...moveHistory, move.san]);
+        setGame(new Chess(newFen));
+        setHistoryIndex(historyIndex + 1);
+        setHighlightedSquares({});
+        setIsBestMoveArrowDrawn(false);
+        evaluateGame(newFen);
+      }
+      setSelectedSquare(null)
+    } else {
+      // Select the square if there's a piece to move
+      const piece = game.get(square);
+      if (piece) {
+        setSelectedSquare(square);
+        getPossibleMoves(square, piece); // Highlight the possible moves
+      }
     }
   };
   
 
-  const getPossibleMoves = (square) => {
+  const getPossibleMoves = (square, piece) => {
     const moves = game.moves({
       square,
       verbose: true,
@@ -168,7 +182,7 @@ const App = () => {
     const squaresToHighlight = {};
     moves.forEach((move) => {
       squaresToHighlight[move.to] = {
-        background: 'radial-gradient(circle, #ffffff 40%, transparent 50%)',
+        background: `radial-gradient(circle, ${piece.color ==='w' ? '#ffffff' : '#000000'} 20%, transparent 25%)`,
         borderRadius: '50%',
       };
     });
@@ -176,8 +190,32 @@ const App = () => {
     setHighlightedSquares(squaresToHighlight);
   };
 
-  const handlePieceClick = (square) => {
-    getPossibleMoves(square);
+  const playBestMove = () => {
+
+    if (bestMove) {
+      const from = bestMove.slice(0, 2);
+      const to = bestMove.slice(2, 4);
+  
+      const move = game.move({ from, to });
+      if (move) {
+        const newFen = game.fen();
+  
+        setMoveHistory([...moveHistory, move.san]);
+        setGame(new Chess(newFen));
+        setHistoryIndex(historyIndex + 1);
+        setHighlightedSquares({});
+        setIsBestMoveArrowDrawn(false);
+  
+        evaluateGame(newFen);
+      } else {
+        console.log('Best move is illegal or not possible.');
+      }
+    }
+  };
+
+  const handleRightClick = () => {
+    setSelectedSquare(null);
+    setHighlightedSquares({}); // Clear the possible moves highlights
   };
 
   return (
@@ -210,9 +248,12 @@ const App = () => {
               width: '100%',
             }}
             onSquareClick={handlePieceClick}
+            onSquareRightClick={handleRightClick}
             customSquareStyles={highlightedSquares}
             customArrows={arrows} // Ensure unique arrows are passed
             className="chessboard"
+            animationDuration={150}
+            showBoardNotation={true}
           />
         </div>
       </div>
@@ -225,8 +266,14 @@ const App = () => {
               className="upload-input"
               type="file"
               accept=".pgn"
+              id="fileUpload"
               onChange={handlePgnUpload}
             />
+
+            <label className="custom-upload-button" htmlFor="fileUpload">
+              Upload PGN
+            </label>
+            <p id="fileNameDisplay">{fileName}</p>
             <p><strong>Date:</strong> {gameMetadata.date}</p>
             <p><strong>White:</strong> {gameMetadata.whitePlayer} (<strong>Elo:</strong> {gameMetadata.whiteElo})</p>
             <p><strong>Black:</strong> {gameMetadata.blackPlayer} (<strong>Elo:</strong> {gameMetadata.blackElo})</p>
@@ -238,8 +285,13 @@ const App = () => {
               className="upload-input"
               type="file"
               accept=".pgn"
+              id="fileUpload"
               onChange={handlePgnUpload}
             />
+            <label className="custom-upload-button" htmlFor="fileUpload">
+              Upload PGN
+            </label>
+            <p id="fileNameDisplay">{fileName}</p>
           </div>
         )}
         {/* Display Move History */}
@@ -262,10 +314,12 @@ const App = () => {
         </div>
 
         <div className="controls">
-          <button onClick={resetGame}>Reset</button>
-          <button onClick={undoMove} disabled={historyIndex === 0}>Undo</button>
-          <button onClick={redoMove} disabled={historyIndex === moveHistory.length}>Redo</button>
+          <button className = "reset" onClick={resetGame}>Reset</button>
+          <button className = "undo" onClick={undoMove} disabled={historyIndex === 0}>Undo</button>
+          <button className = "redo" onClick={redoMove} disabled={historyIndex === moveHistory.length}>Redo</button>
+          <button className = "play-best" onClick={playBestMove} disabled={!bestMove}>Play Best Move</button>
         </div>
+
       </aside>
     </div>
   );
