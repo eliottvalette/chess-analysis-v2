@@ -14,7 +14,6 @@ const App = () => {
   const [evaluation, setEvaluation] = useState(''); 
   const [bestMove, setBestMove] = useState(''); 
   const [isBestMoveArrowDrawn, setIsBestMoveArrowDrawn] = useState(false);
-  const [isPreviousBestMoveArrowDrawn, setIsPreviousBestMoveArrowDrawn] = useState(false);
   const [arrows, setArrows] = useState([]); 
   const [whitePercentage, setWhitePercentage] = useState(50);
   const [blackPercentage, setBlackPercentage] = useState(50);
@@ -89,7 +88,6 @@ const App = () => {
       setHistoryIndex(historyIndex - 1);
       setGame(game);
       setIsBestMoveArrowDrawn(false);
-      setIsPreviousBestMoveArrowDrawn(false);
       setArrows([]);
 
       evaluateGame(game.fen());
@@ -102,7 +100,6 @@ const App = () => {
       setHistoryIndex(historyIndex + 1);
       setGame(game);
       setIsBestMoveArrowDrawn(false); 
-      setIsPreviousBestMoveArrowDrawn(false);
       setArrows([]);
 
       evaluateGame(game.fen());
@@ -121,6 +118,7 @@ const App = () => {
       to: targetSquare,
       promotion: 'q', 
     });
+    setSelectedSquare(null);
   
     if (move) {
       const newFen = game.fen();
@@ -129,20 +127,19 @@ const App = () => {
       setGame(new Chess(newFen));
       setHistoryIndex(historyIndex + 1);
       setHighlightedSquares({});
-      setIsBestMoveArrowDrawn(false);
-      setSelectedSquare(null);
+      setIsBestMoveArrowDrawn(false);   
       evaluateGame(newFen);
       return true;
 
     } else {
       console.log('Move is illegal');
-      setSelectedSquare(null);
       return false;
     }
   };
 
   const handlePieceClick = (square) => {
-    console.log(selectedSquare)
+    console.log("square before :", square);
+    console.log("selectedSquare before:", selectedSquare)
     if (selectedSquare) {
       // Try to move the piece to the clicked square
       const move = game.move({
@@ -160,8 +157,8 @@ const App = () => {
         setHighlightedSquares({});
         setIsBestMoveArrowDrawn(false);
         evaluateGame(newFen);
+        setSelectedSquare(null)
       }
-      setSelectedSquare(null)
     } else {
       // Select the square if there's a piece to move
       const piece = game.get(square);
@@ -170,6 +167,8 @@ const App = () => {
         getPossibleMoves(square, piece); // Highlight the possible moves
       }
     }
+    console.log("square before :", square);
+    console.log("selectedSquare after:", selectedSquare)
   };
   
 
