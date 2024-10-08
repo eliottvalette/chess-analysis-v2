@@ -93,6 +93,7 @@ const App = () => {
       evaluateGame(game.fen());
     }
   };
+  
 
   const redoMove = () => {
     if (historyIndex < moveHistory.length) {
@@ -113,63 +114,74 @@ const App = () => {
   }, [bestMove]);
 
   const handlePieceDrop = (sourceSquare, targetSquare) => {
-    const move = game.move({
+    const newGame = new Chess(game.fen());
+    const move = newGame.move({
       from: sourceSquare,
       to: targetSquare,
-      promotion: 'q', 
+      promotion: 'q',
     });
     setSelectedSquare(null);
   
     if (move) {
-      const newFen = game.fen();
+      const newFen = newGame.fen();
   
       setMoveHistory([...moveHistory, move.san]);
-      setGame(new Chess(newFen));
+      setGame(newGame);
       setHistoryIndex(historyIndex + 1);
       setHighlightedSquares({});
-      setIsBestMoveArrowDrawn(false);   
+      setIsBestMoveArrowDrawn(false);
       evaluateGame(newFen);
       return true;
-
     } else {
       console.log('Move is illegal');
       return false;
     }
   };
+  
 
   const handlePieceClick = (square) => {
     console.log("square before :", square);
-    console.log("selectedSquare before:", selectedSquare)
+    console.log("selectedSquare before:", selectedSquare);
+  
+    let newSelectedSquare = selectedSquare;
+  
     if (selectedSquare) {
-      // Try to move the piece to the clicked square
-      const move = game.move({
+      const newGame = new Chess(game.fen());
+      const move = newGame.move({
         from: selectedSquare,
         to: square,
-        promotion: 'q', // You can customize promotion logic here
+        promotion: 'q',
       });
   
       if (move) {
-        // Move was valid, update the state
-        const newFen = game.fen();
         setMoveHistory([...moveHistory, move.san]);
-        setGame(new Chess(newFen));
+        setGame(newGame);
         setHistoryIndex(historyIndex + 1);
         setHighlightedSquares({});
         setIsBestMoveArrowDrawn(false);
-        evaluateGame(newFen);
-        setSelectedSquare(null)
+        evaluateGame(newGame.fen());
+        newSelectedSquare = null;
+      } else {
+        newSelectedSquare = null;
+        setHighlightedSquares({});
       }
+      setSelectedSquare(newSelectedSquare);
     } else {
-      // Select the square if there's a piece to move
       const piece = game.get(square);
       if (piece) {
-        setSelectedSquare(square);
-        getPossibleMoves(square, piece); // Highlight the possible moves
+        newSelectedSquare = square;
+        setSelectedSquare(newSelectedSquare);
+        getPossibleMoves(square, piece);
       }
     }
-    console.log("square before :", square);
-    console.log("selectedSquare after:", selectedSquare)
+    console.log("square after :", square);
+    console.log("selectedSquare after:", newSelectedSquare);
   };
+
+  useEffect(() => {
+    evaluateGame(game.fen());
+  }, [game.fen()]);
+  
   
 
   const getPossibleMoves = (square, piece) => {
