@@ -25,6 +25,7 @@ const App = () => {
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [orientation, setOrientation] = useState('white');
   const [displayArrows, setDisplayArrows] = useState(true);
+  const [evaluations, setEvaluations] = useState([]);
 
   const evaluateGame = (fen) => {
     // Send FEN to Stockfish for evaluation
@@ -35,14 +36,14 @@ const App = () => {
       },
       body: JSON.stringify({ fen }),
     })
-      .then((res) => res.json())
+      .then((res) => res.json()) // JSONified response
       .then((data) => {
-        const { evaluationText, numericalEvaluation } = parseEvaluationResult(data.evaluation);
+        const { evaluationText, numericalEvaluation } = parseEvaluationResult(data.evaluation); // see utils
         setEvaluation(evaluationText);
   
         const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
         if (bestMoveMatch) {
-          setBestMove(bestMoveMatch[1]);
+          setBestMove(bestMoveMatch[1]); // extract best move that is returned by Stockfish
         }
   
         // Update the evaluation bar based on the numerical evaluation
@@ -274,37 +275,6 @@ const App = () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [redoMove, undoMove]);
-
-  const data = {
-    labels: ['January', 'February', 'March', 'April', 'May'],
-    datasets: [
-      {
-        label: 'Sales Over Time',
-        data: [65, 59, 80, 81, 56],
-        fill: false,
-        borderColor: 'rgba(75,192,192,1)',
-        tension: 0.1,
-      },
-    ],
-  };
-  
-  const options = {
-    scales: {
-      x: {
-        title: {
-          display: true,
-          text: 'Month',
-        },
-      },
-      y: {
-        title: {
-          display: true,
-          text: 'Sales',
-        },
-      },
-    },
-  };
-
 
   return (
     <div className="container">
