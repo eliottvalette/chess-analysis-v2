@@ -1,38 +1,21 @@
 // utils.js
-export const parseEvaluationResult = (evaluationResult) => {
-    const scoreMatch = evaluationResult.match(/score (\w+) (-?\d+)/);
-    let evaluationText = '';
-    let whiteValue = 50;
-    let blackValue = 50;
-    
-    if (scoreMatch) {
-      const scoreType = scoreMatch[1];
-      const scoreValue = parseInt(scoreMatch[2], 10);
-  
-      if (scoreType === 'cp') {
-        if (scoreValue > 0) {
-          whiteValue = Math.min(100, 50 + scoreValue / 10);
-          blackValue = 100 - whiteValue;
-        } else {
-          blackValue = Math.min(100, 50 - scoreValue / 10);
-          whiteValue = 100 - blackValue;
-        }
-        evaluationText = `${scoreValue} centipawns`;
-      } else if (scoreType === 'mate') {
-        if (scoreValue > 0) {
-          whiteValue = 100;
-          blackValue = 0;
-          evaluationText = 'Mate for White';
-        } else {
-          whiteValue = 0;
-          blackValue = 100;
-          evaluationText = 'Mate for Black';
-        }
-      }
-    }
-  
-    return { evaluationText, whiteValue, blackValue };
-  };
+export const parseEvaluationResult = (evaluationString) => {
+  // Example: Extract numerical evaluation and formatted text
+  let evaluationText = '';
+  let numericalEvaluation = 0;
+
+  if (evaluationString.includes('cp')) {
+    numericalEvaluation = parseFloat(evaluationString.split('cp')[1]) / 100; // Convert centipawns to pawns
+    evaluationText = `Evaluation: ${numericalEvaluation}`;
+  } else if (evaluationString.includes('mate')) {
+    numericalEvaluation = evaluationString.includes('mate +')
+      ? 50
+      : -50; // Assuming mate in few moves gives extreme positive/negative values
+    evaluationText = `Mate in ${Math.abs(parseInt(evaluationString.split('mate ')[1]))}`;
+  }
+
+  return { evaluationText, numericalEvaluation };
+};
   
 export const extractMetadata = (game) => {
     const headers = game.header();

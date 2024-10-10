@@ -1,8 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
+import { Line } from 'react-chartjs-2';
 import './App.css';
 import { parseEvaluationResult, extractMetadata, drawBestMoveArrow } from './components/utils';
+
 
 
 const App = () => {
@@ -33,30 +37,46 @@ const App = () => {
     })
       .then((res) => res.json())
       .then((data) => {
-        const { evaluationText } = parseEvaluationResult(data.evaluation);
+        const { evaluationText, numericalEvaluation } = parseEvaluationResult(data.evaluation);
         setEvaluation(evaluationText);
-
+  
         const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
         if (bestMoveMatch) {
           setBestMove(bestMoveMatch[1]);
+        }
+  
+        // Update the evaluation bar based on the numerical evaluation
+        if (numericalEvaluation !== null) {
+          if (numericalEvaluation > 0) {
+            setWhitePercentage(50 + Math.min(numericalEvaluation, 50));
+            setBlackPercentage(50 - Math.min(numericalEvaluation, 50));
+          } else {
+            setWhitePercentage(50 + Math.max(numericalEvaluation, -50));
+            setBlackPercentage(50 - Math.max(numericalEvaluation, -50));
+          }
+        } else {
+          setWhitePercentage(50);
+          setBlackPercentage(50);
         }
       })
       .catch((error) => {
         console.error('Error evaluating position:', error);
       });
   };
+  
 
   const handlePgnUpload = (event) => {
-    const file = event.target.files[0];
+    const file = event.target.files[0]; // Get the first file selected by the user
     if (file) {
       const reader = new FileReader();
       reader.onload = (e) => {
-        const content = e.target.result;
+        const content = e.target.result; 
         const newGame = new Chess();
-        newGame.loadPgn(content);
-        setGame(newGame);
+        newGame.loadPgn(content); // Load the PGN content to initialize the game
+        setGame(newGame); //  The current game is now the newGame
         setMoveHistory(newGame.history());
         setHistoryIndex(newGame.history().length);
+
         setGameMetadata(extractMetadata(newGame));
         setIsBestMoveArrowDrawn(false);
         setArrows([]);
@@ -83,7 +103,19 @@ const App = () => {
     evaluateGame(game.fen());
   };
 
-  const undoMove = () => {
+  const redoMove = useCallback(() => {
+    if (historyIndex < moveHistory.length) {
+      game.move(moveHistory[historyIndex]);
+      setHistoryIndex(historyIndex + 1);
+      setGame(game);
+      setIsBestMoveArrowDrawn(false);
+      setArrows([]);
+  
+      evaluateGame(game.fen());
+    }
+  }, [historyIndex, moveHistory, game]);
+  
+  const undoMove = useCallback(() => {
     if (historyIndex > 0) {
       const newHistoryIndex = historyIndex - 1;
       const newGame = new Chess();
@@ -95,19 +127,7 @@ const App = () => {
       setArrows([]);
       evaluateGame(newGame.fen());
     }
-  };
-
-  const redoMove = () => {
-    if (historyIndex < moveHistory.length) {
-      game.move(moveHistory[historyIndex]);
-      setHistoryIndex(historyIndex + 1);
-      setGame(game);
-      setIsBestMoveArrowDrawn(false); 
-      setArrows([]);
-
-      evaluateGame(game.fen());
-    }
-  };
+  }, [historyIndex, moveHistory]);  
 
   useEffect(() => {
     if (bestMove && !isBestMoveArrowDrawn) {
@@ -116,19 +136,19 @@ const App = () => {
   }, [bestMove]);
 
   const handlePieceDrop = (sourceSquare, targetSquare) => {
-    const newGame = new Chess(game.fen());
+    const newGame = new Chess(game.fen()); // Create a new game to not alter the current game
     const move = newGame.move({
       from: sourceSquare,
       to: targetSquare,
-      promotion: 'q',
+      promotion: 'q', // Always promote to a queen
     });
     setSelectedSquare(null);
+
+    if (move) { // move is a truthy value if it's legal
+      const newFen = newGame.fen(); // .fen() returns the FEN representation of the current position
   
-    if (move) {
-      const newFen = newGame.fen();
-  
-      setMoveHistory([...moveHistory, move.san]);
-      setGame(newGame);
+      setMoveHistory([...moveHistory, move.san]); // Update the move history and apply the move
+      setGame(newGame); // Update the game state with the move applied
       setHistoryIndex(historyIndex + 1);
       setHighlightedSquares({});
       setIsBestMoveArrowDrawn(false);
@@ -142,47 +162,46 @@ const App = () => {
   
 
   const handlePieceClick = (square) => {
-    console.log("square before :", square);
-    console.log("selectedSquare before:", selectedSquare);
-  
+    // Same process but for clicking on a square
     let newSelectedSquare = selectedSquare;
   
-    if (selectedSquare) {
+    if (selectedSquare) { // If a square with a piece (not necesseraly movable) on it is selected
       const newGame = new Chess(game.fen());
       const move = newGame.move({
         from: selectedSquare,
         to: square,
         promotion: 'q',
       });
-  
-      if (move) {
+
+      if (move) { // process the move from the selected square to the new one if it's legal
         setMoveHistory([...moveHistory, move.san]);
         setGame(newGame);
         setHistoryIndex(historyIndex + 1);
         setHighlightedSquares({});
         setIsBestMoveArrowDrawn(false);
-        evaluateGame(newGame.fen());
-        newSelectedSquare = null;
+        evaluateGame(newGame.fen());        
       } else {
-        newSelectedSquare = null;
         setHighlightedSquares({});
       }
+
+      newSelectedSquare = null; // reset selection
       setSelectedSquare(newSelectedSquare);
+
+      return true;
+
     } else {
       const piece = game.get(square);
       if (piece) {
         newSelectedSquare = square;
         setSelectedSquare(newSelectedSquare);
-        getPossibleMoves(square, piece);
+        getPossibleMoves(square, piece); // Display possible moves on the board for that piece
       }
     }
-    console.log("square after :", square);
-    console.log("selectedSquare after:", newSelectedSquare);
   };
 
   useEffect(() => {
     evaluateGame(game.fen());
-  }, [game.fen()]);
+  }, [game.fen()]); //  Always evaluate the game for the current position
   
   
 
@@ -201,7 +220,7 @@ const App = () => {
     });
 
     setHighlightedSquares(squaresToHighlight);
-  };
+  }; // Highlight the possible moves for a movable piece
 
   const playBestMove = () => {
 
@@ -239,22 +258,52 @@ const App = () => {
     setHighlightedSquares({}); // Clear the possible moves highlights
   };
 
-useEffect(() => {
-  const handleKeyDown = (e) => {
-    const key = e.key;
-    if (key === 'ArrowRight') {
-      redoMove();
-    } else if (key === 'ArrowLeft') {
-      undoMove();
-    }
-  };
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const key = e.key;
+      if (key === 'ArrowRight') {
+        redoMove();
+      } else if (key === 'ArrowLeft') {
+        undoMove();
+      }
+    };
 
-  document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('keydown', handleKeyDown, true);
 
-  return () => {
-    document.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [redoMove, undoMove]);
+
+  const data = {
+    labels: ['January', 'February', 'March', 'April', 'May'],
+    datasets: [
+      {
+        label: 'Sales Over Time',
+        data: [65, 59, 80, 81, 56],
+        fill: false,
+        borderColor: 'rgba(75,192,192,1)',
+        tension: 0.1,
+      },
+    ],
   };
-}, [redoMove, undoMove]);
+  
+  const options = {
+    scales: {
+      x: {
+        title: {
+          display: true,
+          text: 'Month',
+        },
+      },
+      y: {
+        title: {
+          display: true,
+          text: 'Sales',
+        },
+      },
+    },
+  };
 
 
   return (
@@ -299,6 +348,7 @@ useEffect(() => {
 
       {/* Aside block on the right for player info and evaluation */}
       <aside className="side-info">
+        <Line data={data} options={options} />
         {gameMetadata ? (
           <div className="metadata">
             <input
