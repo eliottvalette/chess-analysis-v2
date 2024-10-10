@@ -19,7 +19,8 @@ const App = () => {
   const [blackPercentage, setBlackPercentage] = useState(50);
   const [fileName, setFileName] = useState('No file selected')
   const [selectedSquare, setSelectedSquare] = useState(null);
-
+  const [orientation, setOrientation] = useState('white');
+  const [displayArrows, setDisplayArrows] = useState(true);
 
   const evaluateGame = (fen) => {
     // Send FEN to Stockfish for evaluation
@@ -84,16 +85,17 @@ const App = () => {
 
   const undoMove = () => {
     if (historyIndex > 0) {
-      game.undo();
-      setHistoryIndex(historyIndex - 1);
-      setGame(game);
+      const newHistoryIndex = historyIndex - 1;
+      const newGame = new Chess();
+      const movesToPlay = moveHistory.slice(0, newHistoryIndex);
+      movesToPlay.forEach((move) => newGame.move(move));
+      setGame(newGame);
+      setHistoryIndex(newHistoryIndex);
       setIsBestMoveArrowDrawn(false);
       setArrows([]);
-
-      evaluateGame(game.fen());
+      evaluateGame(newGame.fen());
     }
   };
-  
 
   const redoMove = () => {
     if (historyIndex < moveHistory.length) {
@@ -224,10 +226,36 @@ const App = () => {
     }
   };
 
+  const handleOrientationChange = () => {
+    setOrientation(orientation === 'white'? 'black' : 'white');
+  };
+
+  const handleArrowToggle = () => {
+    setDisplayArrows(!displayArrows);
+  };
+
   const handleRightClick = () => {
     setSelectedSquare(null);
     setHighlightedSquares({}); // Clear the possible moves highlights
   };
+
+useEffect(() => {
+  const handleKeyDown = (e) => {
+    const key = e.key;
+    if (key === 'ArrowRight') {
+      redoMove();
+    } else if (key === 'ArrowLeft') {
+      undoMove();
+    }
+  };
+
+  document.addEventListener('keydown', handleKeyDown, true);
+
+  return () => {
+    document.removeEventListener('keydown', handleKeyDown);
+  };
+}, [redoMove, undoMove]);
+
 
   return (
     <div className="container">
@@ -251,7 +279,7 @@ const App = () => {
           <Chessboard
             position={game.fen()}
             width={400}
-            boardOrientation="white"
+            boardOrientation={orientation}
             onPieceDrop={handlePieceDrop}
             customBoardStyle={{
               borderRadius: '5px',
@@ -261,7 +289,7 @@ const App = () => {
             onSquareClick={handlePieceClick}
             onSquareRightClick={handleRightClick}
             customSquareStyles={highlightedSquares}
-            customArrows={arrows} // Ensure unique arrows are passed
+            customArrows={displayArrows ? arrows : []} // Ensure unique arrows are passed
             className="chessboard"
             animationDuration={150}
             showBoardNotation={true}
@@ -329,6 +357,8 @@ const App = () => {
           <button className = "undo" onClick={undoMove} disabled={historyIndex === 0}>Undo</button>
           <button className = "redo" onClick={redoMove} disabled={historyIndex === moveHistory.length}>Redo</button>
           <button className = "play-best" onClick={playBestMove} disabled={!bestMove}>Play Best Move</button>
+          <button className = "flip" onClick={handleOrientationChange} >Flip the Board</button>
+          <button className = "arrow-display" onClick={handleArrowToggle} > {displayArrows ? "Hide Arrows" : "Show arrows"} </button>
         </div>
 
       </aside>

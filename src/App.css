@@ -210,8 +210,8 @@ body::before {
 /* Controls styling */
 .controls {
   display: grid;
-  justify-content: space-between;
   gap: 1vh;
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .reset {
@@ -229,6 +229,15 @@ body::before {
 .play-best {
   grid-column: 1 /5;
   grid-row: 3;
+}
+
+.flip {
+  grid-column: 1 / 5;
+  grid-row: 4;
+}
+.arrow-display {
+  grid-column: 1 / 5;
+  grid-row: 5;
 }
 
 /* Button styling for better aesthetics */
