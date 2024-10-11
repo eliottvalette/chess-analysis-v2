@@ -5,7 +5,7 @@ import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 import { Line } from 'react-chartjs-2';
 import './App.css';
-import { parseEvaluationResult, extractMetadata, drawBestMoveArrow } from './components/utils';
+import { parseEvaluationResult, extractMetadata, drawBestMoveArrow, graphOptions } from './components/utils';
 
 
 
@@ -25,52 +25,75 @@ const App = () => {
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [orientation, setOrientation] = useState('white');
   const [displayArrows, setDisplayArrows] = useState(true);
-  const [evaluations, setEvaluations] = useState([]);
-
-  const evaluateGame = (fen) => {
-    // Send FEN to Stockfish for evaluation
-    fetch('http://localhost:5001/evaluate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+  const [evaluationsArray, setEvaluationsArray] = useState([]);
+  const [chartData, setChartData] = useState({
+    labels: [],
+    datasets: [
+      {
+        label: 'Evaluation',
+        data: [],
+        borderColor: 'rgba(75, 192, 192, 1)',
+        borderWidth: 2,
+        fill: false,
       },
-      body: JSON.stringify({ fen }),
-    })
-      .then((res) => res.json()) // JSONified response
-      .then((data) => {
-        const { evaluationText, numericalEvaluation } = parseEvaluationResult(data.evaluation); // see utils
-        setEvaluation(evaluationText);
-  
-        const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
-        if (bestMoveMatch) {
-          setBestMove(bestMoveMatch[1]); // extract best move that is returned by Stockfish
-        }
-  
-        // Update the evaluation bar based on the numerical evaluation
-        if (numericalEvaluation !== null) {
-          if (numericalEvaluation > 0) {
-            setWhitePercentage(50 + Math.min(numericalEvaluation, 50));
-            setBlackPercentage(50 - Math.min(numericalEvaluation, 50));
-          } else {
-            setWhitePercentage(50 + Math.max(numericalEvaluation, -50));
-            setBlackPercentage(50 - Math.max(numericalEvaluation, -50));
-          }
-        } else {
-          setWhitePercentage(50);
-          setBlackPercentage(50);
-        }
-      })
-      .catch((error) => {
-        console.error('Error evaluating position:', error);
-      });
-  };
-  
+    ],
+  });
 
-  const handlePgnUpload = (event) => {
+  const evaluateGame = async (fen) => {
+    try {
+      // Send FEN to Stockfish for evaluation
+      const response = await fetch('http://localhost:5001/evaluate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fen }),
+      })
+      const data = await response.json();
+      const { evaluationText, numericalEvaluation } = parseEvaluationResult(data.evaluation); // see utils
+      setEvaluation(evaluationText);
+      if (numericalEvaluation !== null) {
+        const objectiveNumericalEvaluation = evaluationsArray.length % 2 === 0 ? numericalEvaluation : -numericalEvaluation;
+        setEvaluationsArray((prevEvaluations) => {
+          // Check if the current evaluation is already added to prevent double entry (which is an unexpected behavior)
+          if (prevEvaluations[prevEvaluations.length - 1] === objectiveNumericalEvaluation) {
+            return prevEvaluations; // Skip adding if it is the same as the last value
+          }
+          return [...prevEvaluations, objectiveNumericalEvaluation];
+        });
+      } else {
+        setEvaluationsArray((prevEvaluations) => [...prevEvaluations, 0]);
+      }
+
+      const bestMoveMatch = data.evaluation.match(/bestmove (\w+)/);
+      if (bestMoveMatch) {
+        setBestMove(bestMoveMatch[1]); // extract best move that is returned by Stockfish
+      }
+
+      // Update the evaluation bar based on the numerical evaluation
+      if (numericalEvaluation !== null) {
+        if (numericalEvaluation > 0) {
+          setWhitePercentage(50 + Math.min(numericalEvaluation, 50));
+          setBlackPercentage(50 - Math.min(numericalEvaluation, 50));
+        } else {
+          setWhitePercentage(50 + Math.max(numericalEvaluation, -50));
+          setBlackPercentage(50 - Math.max(numericalEvaluation, -50));
+        }
+      } else {
+        setWhitePercentage(50);
+        setBlackPercentage(50);
+      }
+    } catch (error) {
+      console.error('Error evaluating position:', error);
+    };
+    ;
+  };
+
+  const handlePgnUpload = async (event) => {
     const file = event.target.files[0]; // Get the first file selected by the user
     if (file) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const content = e.target.result; 
         const newGame = new Chess();
         newGame.loadPgn(content); // Load the PGN content to initialize the game
@@ -83,6 +106,15 @@ const App = () => {
         setArrows([]);
 
         evaluateGame(newGame.fen());
+        // Clear previous evaluations and evaluate the moves
+        setEvaluationsArray([]);
+        let gameForEvaluation = new Chess();
+
+        for (const move of newGame.history()) {
+          gameForEvaluation.move(move);
+          const fen = gameForEvaluation.fen();
+          evaluateGame(fen); // Wait for each evaluation to complete
+        }
       };
       reader.readAsText(file);
       setFileName(event.target.files[0]?.name || 'No file selected');
@@ -276,113 +308,136 @@ const App = () => {
     };
   }, [redoMove, undoMove]);
 
+  useEffect(() => {
+    if (evaluationsArray.length > 0) {
+      setChartData({
+        labels: evaluationsArray.map((_, index) => index + 1),
+        datasets: [
+          {
+            label: 'Evaluation',
+            data: evaluationsArray,
+            borderColor: 'rgba(75, 192, 192, 1)',
+            borderWidth: 2,
+            fill: false,
+          },
+        ],
+      });
+    }
+    console.log(evaluationsArray)
+  }, [evaluationsArray]);
+
   return (
     <div className="container">
-      <div className="main-content">
-        {/* Chessboard and Evaluation Bar in the middle */}
-        <div className="chess-game">
-          <div className="evaluation-bar-container">
-            <div className="evaluation-bar">
-              <div
-                className="evaluation-bar-black"
-                style={{ height: `${blackPercentage}%`, backgroundColor: 'black' }}
-              />
-              <div
-                className="evaluation-bar-white"
-                style={{ height: `${whitePercentage}%`, backgroundColor: 'white' }}
-              />
-            </div>
-            <p>{evaluation}</p>
-          </div>
+    {/* Left-side block for buttons */}
+    <aside className="left-side-buttons">
+      <div className="controls">
+        <button className="reset" onClick={resetGame}>Reset</button>
+        <button className="undo" onClick={undoMove} disabled={historyIndex === 0}>Undo</button>
+        <button className="redo" onClick={redoMove} disabled={historyIndex === moveHistory.length}>Redo</button>
+        <button className="play-best" onClick={playBestMove} disabled={!bestMove}>Play Best Move</button>
+        <button className="flip" onClick={handleOrientationChange}>Flip the Board</button>
+        <button className="arrow-display" onClick={handleArrowToggle}> {displayArrows ? "Hide Arrows" : "Show Arrows"} </button>
+      </div>
+    </aside>
 
-          <Chessboard
-            position={game.fen()}
-            width={400}
-            boardOrientation={orientation}
-            onPieceDrop={handlePieceDrop}
-            customBoardStyle={{
-              borderRadius: '5px',
-              boxShadow: '0 5px 15px rgba(0, 0, 0, 0.5)',
-              width: '100%',
-            }}
-            onSquareClick={handlePieceClick}
-            onSquareRightClick={handleRightClick}
-            customSquareStyles={highlightedSquares}
-            customArrows={displayArrows ? arrows : []} // Ensure unique arrows are passed
-            className="chessboard"
-            animationDuration={150}
-            showBoardNotation={true}
-          />
+    {/* Main Content in the center */}
+    <div className="main-content">
+      {/* Chessboard and Evaluation Bar in the middle */}
+      <div className="chess-game">
+        <div className="evaluation-bar-container">
+          <div className="evaluation-bar">
+            <div
+              className="evaluation-bar-black"
+              style={{ height: `${blackPercentage}%`, backgroundColor: 'black' }}
+            />
+            <div
+              className="evaluation-bar-white"
+              style={{ height: `${whitePercentage}%`, backgroundColor: 'white' }}
+            />
+          </div>
+          <p>{evaluation}</p>
         </div>
+
+        <Chessboard
+          position={game.fen()}
+          boardOrientation={orientation}
+          onPieceDrop={handlePieceDrop}
+          customBoardStyle={{
+            borderRadius: '5px',
+            boxShadow: '0 5px 15px rgba(0, 0, 0, 0.5)',
+            width: '100%',
+          }}
+          onSquareClick={handlePieceClick}
+          onSquareRightClick={handleRightClick}
+          customSquareStyles={highlightedSquares}
+          customArrows={displayArrows ? arrows : []} // Ensure unique arrows are passed
+          className="chessboard"
+          animationDuration={150}
+          showBoardNotation={true}
+        />
+      </div>
+    </div>
+
+    {/* Right Aside block for player info and evaluation */}
+    <aside className="right-side-info">
+      <div className="chart-wrapper">
+        <Line className='evaluation-graph' data={chartData} options={graphOptions} />
+      </div>
+      {gameMetadata ? (
+        <div className="metadata">
+          <input
+            className="upload-input"
+            type="file"
+            accept=".pgn"
+            id="fileUpload"
+            onChange={handlePgnUpload}
+          />
+
+          <label className="custom-upload-button" htmlFor="fileUpload">
+            Upload PGN
+          </label>
+          <p className='date'><strong>Date:</strong> {gameMetadata.date}</p>
+          <p className='white'><strong>White:</strong> {gameMetadata.whitePlayer} (<strong>Elo:</strong> {gameMetadata.whiteElo})</p>
+          <p className='black'><strong>Black:</strong> {gameMetadata.blackPlayer} (<strong>Elo:</strong> {gameMetadata.blackElo})</p>
+          <p className='result'><strong>Result:</strong> {gameMetadata.result}</p>
+        </div>
+      ) : (
+        <div className="metadata">
+          <input
+            className="upload-input"
+            type="file"
+            accept=".pgn"
+            id="fileUpload"
+            onChange={handlePgnUpload}
+          />
+          <label className="custom-upload-button" htmlFor="fileUpload">
+            Upload PGN
+          </label>
+          <p id="fileNameDisplay">{fileName}</p>
+        </div>
+      )}
+      
+      {/* Display Move History */}
+      <div className="move-history">
+        <h3>Move History</h3>
+        <ul>
+          {moveHistory.map((move, index) => (
+            <li key={index} className={`move-item ${index === historyIndex ? 'current-move' : ''} ${index % 4 <=1 ? 'even-line' : 'odd-line'}`}>
+              {index % 2 === 0 ? `${index / 2 + 1}. ${move}` : `  ${move}`}
+            </li>
+          ))}
+        </ul>
       </div>
 
-      {/* Aside block on the right for player info and evaluation */}
-      <aside className="side-info">
-        <Line data={data} options={options} />
-        {gameMetadata ? (
-          <div className="metadata">
-            <input
-              className="upload-input"
-              type="file"
-              accept=".pgn"
-              id="fileUpload"
-              onChange={handlePgnUpload}
-            />
+      {/* Display AI Evaluation */}
+      <div className="evaluation">
+        <h3>Position Evaluation:</h3>
+        {evaluation ? <p>{evaluation}</p> : <p>No evaluation yet.</p>}
+        {bestMove && <p><strong>Best move: </strong>{bestMove}</p>}
+      </div>
 
-            <label className="custom-upload-button" htmlFor="fileUpload">
-              Upload PGN
-            </label>
-            <p id="fileNameDisplay">{fileName}</p>
-            <p><strong>Date:</strong> {gameMetadata.date}</p>
-            <p><strong>White:</strong> {gameMetadata.whitePlayer} (<strong>Elo:</strong> {gameMetadata.whiteElo})</p>
-            <p><strong>Black:</strong> {gameMetadata.blackPlayer} (<strong>Elo:</strong> {gameMetadata.blackElo})</p>
-            <p><strong>Result:</strong> {gameMetadata.result}</p>
-          </div>
-        ) : (
-          <div className="metadata">
-            <input
-              className="upload-input"
-              type="file"
-              accept=".pgn"
-              id="fileUpload"
-              onChange={handlePgnUpload}
-            />
-            <label className="custom-upload-button" htmlFor="fileUpload">
-              Upload PGN
-            </label>
-            <p id="fileNameDisplay">{fileName}</p>
-          </div>
-        )}
-        {/* Display Move History */}
-        <div className="move-history">
-          <h3>Move History</h3>
-          <ul>
-            {moveHistory.map((move, index) => (
-              <li key={index} className={`move-item ${index === historyIndex ? 'current-move' : ''} ${index % 4 <=1 ? 'even-line' : 'odd-line'}`}>
-                {index % 2 === 0 ? `${index / 2 + 1}. ${move}` : `  ${move}`}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Display AI Evaluation */}
-        <div className="evaluation">
-          <h3>Position Evaluation:</h3>
-          {evaluation ? <p>{evaluation}</p> : <p>No evaluation yet.</p>}
-          {bestMove && <p><strong>Best move: </strong>{bestMove}</p>}
-        </div>
-
-        <div className="controls">
-          <button className = "reset" onClick={resetGame}>Reset</button>
-          <button className = "undo" onClick={undoMove} disabled={historyIndex === 0}>Undo</button>
-          <button className = "redo" onClick={redoMove} disabled={historyIndex === moveHistory.length}>Redo</button>
-          <button className = "play-best" onClick={playBestMove} disabled={!bestMove}>Play Best Move</button>
-          <button className = "flip" onClick={handleOrientationChange} >Flip the Board</button>
-          <button className = "arrow-display" onClick={handleArrowToggle} > {displayArrows ? "Hide Arrows" : "Show arrows"} </button>
-        </div>
-
-      </aside>
-    </div>
+    </aside>
+  </div>
   );
 };
 

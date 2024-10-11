@@ -1,4 +1,3 @@
-/* General Styles */
 /* General font styling */
 body {
   margin: 0;
@@ -46,7 +45,6 @@ input {
   font-size: 1.2vh;
 }
 
-
 /* Background blur and reduced opacity */
 body::before {
   content: '';
@@ -73,12 +71,66 @@ body::before {
   box-shadow: 0 1vh 2vh rgba(0, 0, 0, 0.3);
 }
 
+/* Styling for the left-side buttons block */
+.left-side-buttons {
+  width: 15vw;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background-color: rgba(240, 240, 240, 0.6);
+  padding: 2vh;
+  border-radius: 1vh;
+  box-shadow: 0 0.5vh 1vh rgba(0, 0, 0, 0.1);
+}
+
+/* Button layout */
+.controls {
+  display: grid;
+  gap: 1vh;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.controls button {
+  font-weight: 500; 
+  padding: 2vh 3vh;
+  font-size: 1.6vh;
+  color: #fff;
+  background: linear-gradient(145deg, #333, #555);
+  border: none;
+  border-radius: 1vh;
+  cursor: pointer;
+  transition: background 0.3s ease, box-shadow 0.2s ease;
+  box-shadow: 0 0.4vh 1vh rgba(0, 0, 0, 0.2);
+}
+
+/* Specific buttons spanning full width */
+.reset {
+  grid-column: 1 / 3;
+}
+
+.flip,
+.arrow-display,
+.play-best {
+  grid-column: 1 / 3;
+}
+
+/* Hover and disabled button styles */
+.controls button:not(:disabled):hover {
+  background: #777;
+  box-shadow: 0 0.6vh 1.2vh rgba(0, 0, 0, 0.3);
+}
+
+.controls button:disabled {
+  background: #999;
+  cursor: not-allowed;
+}
+
 /* Main Content Styling for Chessboard and Evaluation Bar */
 .main-content {
   display: flex;
   justify-content: center;
   align-items: center;
-  width: 65vw; /* Adjusted to make room for the right sidebar */
+  width: 65vw; /* Adjusted to make room for the sidebars */
   height: 80vh;
   flex-direction: column;
 }
@@ -150,7 +202,7 @@ body::before {
 }
 
 /* Right Aside Block Styling */
-.side-info {
+.right-side-info {
   width: 25vw;
   height: 80vh;
   display: flex;
@@ -159,44 +211,64 @@ body::before {
   padding: 2vh;
   border-radius: 1vh;
   box-shadow: 0 0.5vh 1vh rgba(0, 0, 0, 0.1);
+  gap: 2vh;
 }
-.move-history {
-  height: 30vh; /* Adjust for visibility */
-  max-height: 30vh;
-  overflow-y: auto; /* Enable scrolling for move history */
+
+.chart-wrapper {
+  height: 30vh;
+  width: 100%;
 }
+
 /* Metadata, Evaluation, and Move History section */
-.metadata, .evaluation, .move-history {
+.metadata,
+.evaluation,
+.move-history {
   font-size: 1.2vh;
   color: #444; /* Slightly darker and softer font color */
   background-color: rgba(255, 255, 255, 0.95);
   padding: 1.2vh;
   border-radius: 1vh;
-  margin-bottom: 2vh;
   font-weight: 300; /* Lighter text for these sections */
   box-shadow: 0 0.4vh 1vh rgba(0, 0, 0, 0.1);
   transition: transform 0.3s ease;
 }
 
 .metadata {
+  height: 25vh;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-gap: 0.5vh;
+}
+
+.custom-upload-button {
+  grid-column: 1 / 3;
+  width: 100%;
+}
+
+.date,
+.result,
+.black,
+.white {
+  margin-top: 1vh;
+}
+
+.move-history {
   height: 30vh;
   max-height: 30vh;
+  overflow-y: auto; /* Enable scrolling for move history */
 }
 
-.evaluation {
-  height: 15vh;
-  max-height: 15vh;
-}
-
-.metadata:hover, .evaluation:hover, .move-history:hover {
+.metadata:hover,
+.evaluation:hover,
+.move-history:hover {
   transform: translateY(-0.5vh); /* Lifting effect on hover */
 }
 
-.metadata p {
-  margin: 1vh 0;
+/* Evaluation display */
+.evaluation{
+  height : 30vh;
 }
 
-/* Evaluation display */
 .evaluation h3 {
   font-size: 1.8vh;
   color: #333;
@@ -205,63 +277,6 @@ body::before {
 .evaluation p {
   font-size: 1.2vh;
   color: #666;
-}
-
-/* Controls styling */
-.controls {
-  display: grid;
-  gap: 1vh;
-  grid-template-columns: repeat(4, 1fr);
-}
-
-.reset {
-  grid-column: 1 / 5;
-  grid-row: 1;
-}
-.undo {
-  grid-column: 1 / 3;
-  grid-row: 2;
-}
-.redo {
-  grid-column: 3 / 5;
-  grid-row: 2;
-}
-.play-best {
-  grid-column: 1 /5;
-  grid-row: 3;
-}
-
-.flip {
-  grid-column: 1 / 5;
-  grid-row: 4;
-}
-.arrow-display {
-  grid-column: 1 / 5;
-  grid-row: 5;
-}
-
-/* Button styling for better aesthetics */
-.controls button {
-  font-weight: 500; 
-  padding: 1.2vh 2vh;
-  font-size: 1.4vh;
-  color: #fff;
-  background: linear-gradient(145deg, #333, #555);
-  border: none;
-  border-radius: 1vh;
-  cursor: pointer;
-  transition: background 0.3s ease, box-shadow 0.2s ease;
-  box-shadow: 0 0.4vh 1vh rgba(0, 0, 0, 0.2);
-}
-
-.controls button:disabled {
-  background: #999;
-  cursor: not-allowed;
-}
-
-.controls button:not(:disabled):hover {
-  background: #777;
-  box-shadow: 0 0.6vh 1.2vh rgba(0, 0, 0, 0.3);
 }
 
 /* Move History Styling */
@@ -334,7 +349,6 @@ body::before {
   background: #999;
   cursor: not-allowed;
 }
-
 
 /* Additional styles for smooth interactions */
 .custom-square-styles {

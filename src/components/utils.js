@@ -11,8 +11,8 @@ export const parseEvaluationResult = (evaluationString) => {
     evaluationText = `Evaluation: ${numericalEvaluation}`;
   } else if (evaluationString.includes('mate')) {
     numericalEvaluation = evaluationString.includes('mate + ') 
-      ? 50
-      : -50; // Assuming mate in few moves gives extreme positive/negative values
+      ? 20
+      : -20; // Assuming mate in few moves gives extreme positive/negative values
     evaluationText = `Mate in ${Math.abs(parseInt(evaluationString.split('mate ')[1]))}`;
   }
 
@@ -47,21 +47,8 @@ export const extractMetadata = (game) => {
         setArrows(updatedArrows); 
         setIsBestMoveArrowDrawn(false);
       };
-      
-export const data = {
-  labels: '',
-  datasets: [
-    {
-      label: 'Evaluation',
-      data: '',
-      borderColor: 'rgba(75, 192, 192, 1)',
-      borderWidth: 2,
-      fill: false,
-    },
-  ],
-};
 
-export const options = {
+export const graphOptions = {
   responsive: true,
   maintainAspectRatio: false,
   scales: {
