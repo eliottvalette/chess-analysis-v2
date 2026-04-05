@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { createRequire } from 'node:module';
+import { Chess } from 'chess.js';
 
 import type { AnalysisResult, AnalyzeRequest, PerspectiveWdl, RawWdl, RelativeScore } from '@/lib/analysis-types';
 
@@ -128,25 +129,54 @@ declare global {
   var __chessAnalysisStockfishSession: Promise<StockfishSession> | undefined;
 }
 
+if (process.env.NODE_ENV !== 'production') {
+  globalThis.__chessAnalysisStockfishSession = undefined;
+}
+
 export function getStockfishSession() {
   if (!globalThis.__chessAnalysisStockfishSession) {
-    globalThis.__chessAnalysisStockfishSession = createStockfish().then(async engine => {
-      const session = new StockfishSession(engine);
-      await session.initialize();
-      return session;
-    });
+    const sessionPromise = withGlobalFetchDisabledAsync(() => createStockfish())
+      .then(async engine => {
+        const session = new StockfishSession(engine);
+        await session.initialize();
+        return session;
+      })
+      .catch(error => {
+        globalThis.__chessAnalysisStockfishSession = undefined;
+        throw error;
+      });
+
+    globalThis.__chessAnalysisStockfishSession = sessionPromise;
   }
 
   return globalThis.__chessAnalysisStockfishSession;
 }
 
 function loadStockfishFactory() {
+  return withGlobalFetchDisabledSync(() => {
+    return require('stockfish.wasm') as StockfishFactory;
+  });
+}
+
+function withGlobalFetchDisabledSync<T>(task: () => T) {
   const originalFetch = Reflect.get(globalThis, 'fetch');
 
   Reflect.set(globalThis, 'fetch', undefined);
 
   try {
-    return require('stockfish.wasm') as StockfishFactory;
+    return task();
+  } finally {
+    Reflect.set(globalThis, 'fetch', originalFetch);
+  }
+}
+
+async function withGlobalFetchDisabledAsync<T>(task: () => T | Promise<T>) {
+  const originalFetch = Reflect.get(globalThis, 'fetch');
+
+  Reflect.set(globalThis, 'fetch', undefined);
+
+  try {
+    return await task();
   } finally {
     Reflect.set(globalThis, 'fetch', originalFetch);
   }
@@ -194,6 +224,7 @@ function parseAnalysis(lines: string[], fen: string | undefined, depthRequested:
   const multipvMatch = infoLine?.match(/\bmultipv\s+(\d+)/);
 
   const turn = fen?.trim().split(/\s+/)[1] === 'b' ? 'b' : 'w';
+  const terminalPerspective = inferTerminalPerspective(fen);
   const score: RelativeScore | null = scoreMatch
     ? {
         type: scoreMatch[1] as RelativeScore['type'],
@@ -206,20 +237,31 @@ function parseAnalysis(lines: string[], fen: string | undefined, depthRequested:
       }
     : null;
 
-  const whitePerspective = score
+  const whitePerspective: AnalysisResult['whitePerspective'] = score
     ? {
         type: score.type,
-        value: turn === 'w' ? score.value : -score.value,
+        value:
+          score.type === 'mate' && score.value === 0 && terminalPerspective
+            ? terminalPerspective.whiteScore
+            : turn === 'w'
+              ? score.value
+              : -score.value,
       }
+    : terminalPerspective
+      ? {
+          type: terminalPerspective.whiteScore === 0 ? 'cp' : 'mate',
+          value: terminalPerspective.whiteScore,
+        }
     : null;
 
-  const wdl: RawWdl | null = wdlMatch
+  const wdl: RawWdl | null =
+    wdlMatch
     ? {
         win: Number.parseInt(wdlMatch[1], 10),
         draw: Number.parseInt(wdlMatch[2], 10),
         loss: Number.parseInt(wdlMatch[3], 10),
       }
-    : null;
+    : terminalPerspective?.rawWdl ?? null;
 
   const whitePerspectiveWdl: PerspectiveWdl | null = wdl
     ? turn === 'w'
@@ -243,4 +285,40 @@ function parseAnalysis(lines: string[], fen: string | undefined, depthRequested:
     wdl,
     whitePerspectiveWdl,
   };
+}
+
+function inferTerminalPerspective(fen: string | undefined) {
+  if (!fen?.trim()) {
+    return null;
+  }
+
+  try {
+    const chess = new Chess(fen.trim());
+
+    if (chess.isCheckmate()) {
+      return {
+        whiteScore: chess.turn() === 'b' ? 1 : -1,
+        rawWdl: {
+          win: 0,
+          draw: 0,
+          loss: 1000,
+        } satisfies RawWdl,
+      };
+    }
+
+    if (chess.isDraw()) {
+      return {
+        whiteScore: 0,
+        rawWdl: {
+          win: 0,
+          draw: 1000,
+          loss: 0,
+        } satisfies RawWdl,
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }

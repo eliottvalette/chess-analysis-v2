@@ -18,11 +18,11 @@ import type { AnalysisResult } from '@/lib/analysis-types';
 import {
   analyzeGamePositions,
   analyzeSinglePosition,
+  buildChartOptions,
   buildMoveUciHistory,
-  buildTimelinePositions,
-  chartOptions,
+  buildTimelineSequencePositions,
+  classifyTimelineMoves,
   extractMetadataFromGame,
-  formatBestMove,
   formatPrincipalVariation,
   formatScoreLabel,
   getAdvantageMeter,
@@ -30,9 +30,11 @@ import {
   restoreGameFromHistory,
   toChartScore,
   toStoredMove,
-  wdlToPercentages,
   type GameMetadata,
   type StoredMove,
+  reviewCategoryMeta,
+  reviewCategoryOrder,
+  summarizeTimelineReviews,
 } from '@/lib/chess-analysis-client';
 import styles from './chess-analysis-lab.module.css';
 
@@ -54,7 +56,9 @@ export function ChessAnalysisLab() {
   const [showArrow, setShowArrow] = useState(true);
   const [metadata, setMetadata] = useState<GameMetadata | null>(null);
   const [fileName, setFileName] = useState('No PGN loaded');
+  const [pgnDraft, setPgnDraft] = useState('');
   const [positionAnalysis, setPositionAnalysis] = useState<AnalysisResult | null>(null);
+  const [preMoveAnalyses, setPreMoveAnalyses] = useState<AnalysisResult[]>([]);
   const [timelineAnalyses, setTimelineAnalyses] = useState<AnalysisResult[]>([]);
   const [positionLoading, setPositionLoading] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
@@ -62,7 +66,10 @@ export function ChessAnalysisLab() {
   const [timelineError, setTimelineError] = useState('');
   const [boardWidth, setBoardWidth] = useState(640);
 
-  const boardFrameRef = useRef<HTMLDivElement | null>(null);
+  const boardStageRef = useRef<HTMLDivElement | null>(null);
+  const evalRailRef = useRef<HTMLDivElement | null>(null);
+  const positionRequestIdRef = useRef(0);
+  const timelineRequestIdRef = useRef(0);
 
   const currentFen = useMemo(() => game.fen(), [game]);
   const currentMoves = useMemo(() => moveHistory.slice(0, historyIndex), [moveHistory, historyIndex]);
@@ -70,7 +77,14 @@ export function ChessAnalysisLab() {
   const currentLineKey = currentMoveList.join(' ');
   const whiteAdvantage = getAdvantageMeter(positionAnalysis);
   const bestMoveArrow = showArrow ? getBestMoveArrow(positionAnalysis?.bestMove ?? null) : [];
-  const wdl = wdlToPercentages(positionAnalysis?.whitePerspectiveWdl ?? null);
+  const whiteReviewName = metadata?.whitePlayer ?? 'White';
+  const blackReviewName = metadata?.blackPlayer ?? 'Black';
+  const timelineReviews = useMemo(
+    () => classifyTimelineMoves(moveHistory, preMoveAnalyses, timelineAnalyses, initialFen, metadata),
+    [initialFen, metadata, moveHistory, preMoveAnalyses, timelineAnalyses],
+  );
+  const reviewSummary = useMemo(() => summarizeTimelineReviews(timelineReviews), [timelineReviews]);
+  const chartConfig = useMemo(() => buildChartOptions(moveHistory, timelineReviews), [moveHistory, timelineReviews]);
 
   const chartData = useMemo(
     () => ({
@@ -82,12 +96,17 @@ export function ChessAnalysisLab() {
           backgroundColor: 'rgba(156, 132, 255, 0.16)',
           fill: true,
           borderWidth: 2,
-          pointRadius: 0,
+          pointRadius: timelineReviews.map(review => (review.category ? 4.8 : 0)),
+          pointHoverRadius: timelineReviews.map(review => (review.category ? 6.2 : 3.4)),
+          pointBorderWidth: timelineReviews.map(review => (review.category ? 1.5 : 0)),
+          pointBackgroundColor: timelineReviews.map(review => review.colorHex ?? '#8f75ff'),
+          pointBorderColor: timelineReviews.map(review => review.colorHex ?? '#8f75ff'),
+          pointStyle: timelineReviews.map(review => review.pointStyle),
           tension: 0.28,
         },
       ],
     }),
-    [timelineAnalyses],
+    [timelineAnalyses, timelineReviews],
   );
 
   const movePairs = useMemo(() => {
@@ -113,22 +132,34 @@ export function ChessAnalysisLab() {
   }, [moveHistory]);
 
   useEffect(() => {
-    const frame = boardFrameRef.current;
+    const stage = boardStageRef.current;
 
-    if (!frame || typeof ResizeObserver === 'undefined') {
+    if (!stage || typeof ResizeObserver === 'undefined') {
       return undefined;
     }
 
     const observer = new ResizeObserver(([entry]) => {
-      setBoardWidth(Math.max(220, Math.floor(entry.contentRect.width)));
+      const railRect = evalRailRef.current?.getBoundingClientRect();
+      const stageWidth = entry.contentRect.width;
+      const stageHeight = entry.contentRect.height;
+      const gap = 28;
+      const railWidth = railRect?.width ?? 0;
+      const railHeight = railRect?.height ?? 0;
+      const isHorizontalRail = railWidth > railHeight * 1.6;
+
+      const availableWidth = isHorizontalRail ? stageWidth - 12 : stageWidth - railWidth - gap;
+      const availableHeight = isHorizontalRail ? stageHeight - railHeight - gap : stageHeight - 12;
+
+      setBoardWidth(Math.max(188, Math.floor(Math.min(availableWidth, availableHeight))));
     });
 
-    observer.observe(frame);
+    observer.observe(stage);
     return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
+    const requestId = ++positionRequestIdRef.current;
 
     setPositionLoading(true);
     setServerError('');
@@ -143,10 +174,14 @@ export function ChessAnalysisLab() {
       controller.signal,
     )
       .then(analysis => {
+        if (controller.signal.aborted || positionRequestIdRef.current !== requestId) {
+          return;
+        }
+
         setPositionAnalysis(analysis);
       })
       .catch(error => {
-        if (error.name === 'AbortError') {
+        if (error.name === 'AbortError' || positionRequestIdRef.current !== requestId) {
           return;
         }
 
@@ -154,7 +189,7 @@ export function ChessAnalysisLab() {
         setServerError(error.message);
       })
       .finally(() => {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && positionRequestIdRef.current === requestId) {
           setPositionLoading(false);
         }
       });
@@ -255,9 +290,13 @@ export function ChessAnalysisLab() {
   }
 
   async function runTimelineAnalysis(nextMoves = moveHistory, nextInitialFen = initialFen) {
+    const requestId = ++timelineRequestIdRef.current;
+
     if (nextMoves.length === 0) {
+      setPreMoveAnalyses([]);
       setTimelineAnalyses([]);
       setTimelineError('');
+      setTimelineLoading(false);
       return;
     }
 
@@ -266,16 +305,29 @@ export function ChessAnalysisLab() {
 
     try {
       const response = await analyzeGamePositions({
-        positions: buildTimelinePositions(nextMoves, nextInitialFen),
+        positions: buildTimelineSequencePositions(nextMoves, nextInitialFen),
         depth: 10,
       });
 
-      setTimelineAnalyses(response.analyses ?? []);
+      if (timelineRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const sequence = response.analyses ?? [];
+      setPreMoveAnalyses(sequence.slice(0, -1));
+      setTimelineAnalyses(sequence.slice(1));
     } catch (error) {
+      if (timelineRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setPreMoveAnalyses([]);
       setTimelineAnalyses([]);
       setTimelineError(error instanceof Error ? error.message : 'Unable to analyze the line.');
     } finally {
-      setTimelineLoading(false);
+      if (timelineRequestIdRef.current === requestId) {
+        setTimelineLoading(false);
+      }
     }
   }
 
@@ -294,6 +346,8 @@ export function ChessAnalysisLab() {
       setGame(nextGame);
       setMetadata(extractMetadataFromGame(loadedGame));
       setFileName(name);
+      setPositionAnalysis(null);
+      setPreMoveAnalyses([]);
       setTimelineAnalyses([]);
       setTimelineError('');
       setServerError('');
@@ -323,16 +377,38 @@ export function ChessAnalysisLab() {
     event.target.value = '';
   }
 
+  async function handlePgnPaste() {
+    if (!pgnDraft.trim()) {
+      return;
+    }
+
+    await loadPgnText('Pasted PGN', pgnDraft.trim());
+  }
+
   return (
     <main className={styles.page}>
       <div className={styles.grid}>
         <aside className={`${styles.panel} ${styles.sidePanel}`}>
-          <section className={styles.card}>
-            <p className={styles.eyebrow}>PGN</p>
-            <label className={`${styles.action} ${styles.primary}`} htmlFor="pgn-upload">
-              Load PGN
-            </label>
+          <section className={`${styles.card} ${styles.pgnCard}`}>
+            <div className={styles.pgnHeader}>
+              <h2 className={styles.sectionTitle}>PGN</h2>
+            </div>
+            <div className={styles.pgnControls}>
+              <label className={`${styles.action} ${styles.primary}`} htmlFor="pgn-upload">
+                Load PGN
+              </label>
+              <button className={`${styles.action} ${styles.secondary}`} onClick={() => void handlePgnPaste()} disabled={!pgnDraft.trim()}>
+                Paste PGN
+              </button>
+            </div>
             <input className={styles.hiddenInput} id="pgn-upload" type="file" accept=".pgn" onChange={handleUpload} />
+            <textarea
+              className={styles.pgnInput}
+              value={pgnDraft}
+              onChange={event => setPgnDraft(event.target.value)}
+              placeholder={'[Event "Live Chess"]\n[White "LosValettos"]\n[Black "rafaelpiresrj"]\n\n1. e4 e5 2. Nf3 Nc6'}
+              spellCheck={false}
+            />
             <p className={styles.support}>{fileName}</p>
           </section>
 
@@ -359,6 +435,8 @@ export function ChessAnalysisLab() {
             <button
               className={styles.action}
               onClick={() => {
+                positionRequestIdRef.current += 1;
+                timelineRequestIdRef.current += 1;
                 setGame(new Chess());
                 setInitialFen(null);
                 setMoveHistory([]);
@@ -366,7 +444,10 @@ export function ChessAnalysisLab() {
                 setMetadata(null);
                 setFileName('No PGN loaded');
                 setPositionAnalysis(null);
+                setPreMoveAnalyses([]);
                 setTimelineAnalyses([]);
+                setPositionLoading(false);
+                setTimelineLoading(false);
                 setServerError('');
                 setTimelineError('');
                 clearSelection();
@@ -394,10 +475,7 @@ export function ChessAnalysisLab() {
 
         <section className={`${styles.panel} ${styles.boardPanel}`}>
           <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.eyebrow}>Live Position</p>
-              <h2 className={styles.sectionTitle}>{positionLoading ? 'Engine is thinking' : 'Position synced'}</h2>
-            </div>
+            <h2 className={styles.sectionTitle}>Position</h2>
             <span
               className={`${styles.statusPill} ${
                 serverError ? styles.statusError : positionLoading ? styles.statusPending : styles.statusReady
@@ -407,8 +485,8 @@ export function ChessAnalysisLab() {
             </span>
           </div>
 
-          <div className={styles.boardStage}>
-            <div className={styles.evalRail}>
+          <div className={styles.boardStage} ref={boardStageRef}>
+            <div className={styles.evalRail} ref={evalRailRef}>
               <div className={styles.evalShell} style={{ ['--white-share' as string]: `${whiteAdvantage}%` }}>
                 <div className={styles.evalBlack} />
                 <div className={styles.evalWhite} />
@@ -416,11 +494,10 @@ export function ChessAnalysisLab() {
               </div>
               <div className={styles.evalCopy}>
                 <span className={styles.score}>{formatScoreLabel(positionAnalysis)}</span>
-                <span className={styles.scoreCaption}>white view</span>
               </div>
             </div>
 
-            <div className={styles.boardFrame} ref={boardFrameRef}>
+            <div className={styles.boardFrame} style={{ width: `${boardWidth}px`, height: `${boardWidth}px` }}>
               <Chessboard
                 options={{
                   id: 'analysis-board',
@@ -466,31 +543,8 @@ export function ChessAnalysisLab() {
             </div>
           </div>
 
-          <section className={styles.metrics}>
-            <MetricCard label="Best move" value={formatBestMove(currentFen, positionAnalysis?.bestMove ?? null)} />
-            <MetricCard label="Depth" value={positionAnalysis?.depth ? `${positionAnalysis.depth}` : '...'} />
-            <MetricCard
-              label="Nodes"
-              value={positionAnalysis?.nodes ? positionAnalysis.nodes.toLocaleString() : '...'}
-            />
-            <MetricCard label="Time" value={positionAnalysis?.timeMs ? `${positionAnalysis.timeMs} ms` : '...'} />
-          </section>
-
           <section className={`${styles.card} ${styles.analysis}`}>
-            <div>
-              <p className={styles.eyebrow}>Principal Variation</p>
-              <p className={styles.copy}>
-                {formatPrincipalVariation(currentFen, positionAnalysis?.pv ?? [])}
-              </p>
-            </div>
-            <div>
-              <p className={styles.eyebrow}>WDL</p>
-              <div className={styles.wdl}>
-                <span>White {wdl?.white ?? 0}%</span>
-                <span>Draw {wdl?.draw ?? 0}%</span>
-                <span>Black {wdl?.black ?? 0}%</span>
-              </div>
-            </div>
+            <p className={styles.copy}>{formatPrincipalVariation(currentFen, positionAnalysis?.pv ?? [])}</p>
             {serverError ? <p className={styles.error}>{serverError}</p> : null}
           </section>
         </section>
@@ -498,28 +552,50 @@ export function ChessAnalysisLab() {
         <aside className={`${styles.panel} ${styles.infoPanel}`}>
           <section className={`${styles.card} ${styles.chartCard}`}>
             <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.eyebrow}>Timeline</p>
-                <h2 className={styles.sectionTitle}>Evaluation curve</h2>
-              </div>
+              <h2 className={styles.sectionTitle}>Curve</h2>
               <span className={styles.statusText}>{timelineLoading ? 'refreshing' : `ply ${historyIndex}/${moveHistory.length}`}</span>
             </div>
             <div className={styles.chartWrap}>
               {timelineAnalyses.length > 0 ? (
-                <Line data={chartData} options={chartOptions} />
+                <Line data={chartData} options={chartConfig} />
               ) : (
                 <div className={styles.boardFallback}>
                   {timelineLoading ? 'Analyzing the whole line…' : 'Load a PGN or refresh the current line.'}
                 </div>
               )}
             </div>
+            {timelineReviews.length > 0 ? (
+              <div className={styles.reviewLegend}>
+                {reviewCategoryOrder.map(category => {
+                  const meta = reviewCategoryMeta[category];
+                  const whiteCount = reviewSummary.white[category];
+                  const blackCount = reviewSummary.black[category];
+
+                  if (!whiteCount && !blackCount) {
+                    return null;
+                  }
+
+                  return (
+                    <div
+                      className={styles.reviewChip}
+                      key={category}
+                      style={{ ['--review-color' as string]: meta.color }}
+                    >
+                      <span className={styles.reviewDot} />
+                      <span className={styles.reviewLabel}>{meta.label}</span>
+                      <span className={styles.reviewCount}>{whiteReviewName} {whiteCount}</span>
+                      <span className={styles.reviewCount}>{blackReviewName} {blackCount}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
             {timelineError ? <p className={styles.error}>{timelineError}</p> : null}
           </section>
 
           <section className={`${styles.card} ${styles.movesCard}`}>
             <div className={styles.panelHeader}>
-              <p className={styles.eyebrow}>Move list</p>
-              <span className={styles.statusText}>Arrow keys work too</span>
+              <h2 className={styles.sectionTitle}>Moves</h2>
             </div>
             <div className={styles.moveList}>
               {movePairs.length === 0 ? (
@@ -549,14 +625,5 @@ export function ChessAnalysisLab() {
         </aside>
       </div>
     </main>
-  );
-}
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={`${styles.card} ${styles.metric}`}>
-      <span className={styles.metricLabel}>{label}</span>
-      <strong className={styles.metricValue}>{value}</strong>
-    </div>
   );
 }

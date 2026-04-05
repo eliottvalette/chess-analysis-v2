@@ -1,0 +1,20 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2026.04.05"]
+[Round "?"]
+[White "LosValettos"]
+[Black "rafaelpiresrj"]
+[Result "1-0"]
+[TimeControl "180+2"]
+[WhiteElo "791"]
+[BlackElo "797"]
+[Termination "LosValettos won by checkmate"]
+[ECO "C40"]
+[EndTime "18:15:37 GMT+0000"]
+[Link "https://www.chess.com/game/live/166906838500?move=0"]
+
+1. e4 e5 2. Nf3 Bc5 3. Nxe5 Nf6 4. Qe2 O-O 5. c3 Re8 6. d4 Bb6 7. Bg5 d6 8. Nc4
+Rxe4 9. Qxe4 Nxe4 10. Bxd8 Be6 11. Nxb6 cxb6 12. Nd2 Nc6 13. Bxb6 Nxd2 14. Kxd2
+axb6 15. Bd3 Ne7 16. Rhe1 Nd5 17. Bc4 Ra5 18. b4 Ra3 19. Kc2 Rxc3+ 20. Kb2 Rxc4
+21. Rad1 Rxb4+ 22. Ka3 Rb5 23. Rc1 Ra5+ 24. Kb3 Ne3+ 25. Kb2 Rxa2+ 26. Kc3 Ra3+
+27. Kd2 Nc4+ 28. Rxc4 Bxc4 29. Re8# 1-0

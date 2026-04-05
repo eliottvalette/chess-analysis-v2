@@ -1,0 +1,32 @@
+[Event "Live Chess"]
+[Site "Chess.com"]
+[Date "2026.04.05"]
+[Round "-"]
+[White "bason28"]
+[Black "LosValettos"]
+[Result "1-0"]
+[CurrentPosition "1k3b2/1pp2p1p/3p1Q2/1q4B1/6P1/7P/PPP2P2/2KR3R b - - 0 20"]
+[Timezone "UTC"]
+[ECO "C65"]
+[ECOUrl "https://www.chess.com/openings/Ruy-Lopez-Opening-Berlin-Defense-4.d3-d6"]
+[UTCDate "2026.04.05"]
+[UTCTime "18:03:18"]
+[WhiteElo "747"]
+[BlackElo "782"]
+[TimeControl "180+2"]
+[Termination "bason28 won by resignation"]
+[StartTime "18:03:18"]
+[EndDate "2026.04.05"]
+[EndTime "18:08:50"]
+[Link "https://www.chess.com/analysis/game/live/166906557032/analysis?flip=true"]
+[WhiteUrl "https://www.chess.com/bundles/web/images/noavatar_l.84a92436.gif"]
+[WhiteCountry "2"]
+[WhiteTitle ""]
+[BlackUrl "https://images.chesscomfiles.com/uploads/v1/user/101189914.34b9b8a0.50x50o.b2369398ca81.jpg"]
+[BlackCountry "52"]
+[BlackTitle ""]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 Nf6 4. d3 d6 5. Nc3 Bg4 6. h3 Bh5 7. g4 Bg6 8. d4
+exd4 9. Nxd4 Qd7 10. Qf3 O-O-O 11. e5 Re8 12. Nxc6 Rxe5+ 13. Be3 Be4 14. Nxa7+
+Kb8 15. Nxe4 Rxb5 16. Nxf6 gxf6 17. Qxf6 Rg8 18. Nxb5 Qxb5 19. O-O-O Rg5 20.
+Bxg5 1-0

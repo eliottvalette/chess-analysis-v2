@@ -1,6 +1,7 @@
 .page {
-  min-height: 100svh;
+  height: 100svh;
   padding: 2vh;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(92, 74, 150, 0.18), transparent 28%),
     radial-gradient(circle at 82% 16%, rgba(88, 58, 132, 0.14), transparent 22%),
@@ -10,14 +11,17 @@
 }
 
 .grid {
-  min-height: calc(100svh - 4vh);
+  height: calc(100svh - 4vh);
   display: grid;
   grid-template-columns: 31vh minmax(0, 1fr) 42vh;
   gap: 1.6vh;
+  overflow: hidden;
 }
 
 .panel {
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   border: 0.1vh solid rgba(255, 255, 255, 0.12);
   border-radius: 2.2vh;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
@@ -30,20 +34,30 @@
 .sidePanel,
 .infoPanel,
 .boardPanel {
-  display: flex;
-  flex-direction: column;
+  min-height: 0;
 }
 
 .sidePanel,
 .infoPanel {
   padding: 2.2vh;
-  gap: 1.6vh;
+  gap: 1.4vh;
+}
+
+.sidePanel {
+  display: grid;
+  grid-template-rows: minmax(0, 0.96fr) auto minmax(0, 1fr);
+}
+
+.infoPanel {
+  display: grid;
+  grid-template-rows: minmax(0, 0.92fr) minmax(0, 1.08fr);
 }
 
 .boardPanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   padding: 2.2vh;
-  gap: 1.8vh;
-  justify-content: space-between;
+  gap: 1.4vh;
 }
 
 .card {
@@ -51,6 +65,7 @@
   border-radius: 1.8vh;
   background: rgba(255, 255, 255, 0.03);
   padding: 1.8vh;
+  min-height: 0;
 }
 
 .eyebrow {
@@ -62,7 +77,7 @@
 }
 
 .sectionTitle {
-  margin: 0.6vh 0 0;
+  margin: 0;
   font-size: 2.3vh;
   line-height: 1;
   letter-spacing: -0.05vh;
@@ -86,6 +101,11 @@
 }
 
 .copy,
+.support {
+  margin: 0;
+}
+
+.copy,
 .support,
 .metaValue,
 .moveChip,
@@ -93,6 +113,11 @@
 .wdl,
 .empty {
   color: rgba(255, 255, 255, 0.72);
+}
+
+.support,
+.metaValue {
+  overflow-wrap: anywhere;
 }
 
 .actions {
@@ -137,20 +162,74 @@
   background: linear-gradient(180deg, rgba(143, 117, 255, 0.28), rgba(143, 117, 255, 0.12));
 }
 
+.secondary {
+  width: 100%;
+}
+
 .hiddenInput {
   display: none;
+}
+
+.pgnCard {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 1.1vh;
+  overflow: hidden;
+}
+
+.pgnHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5vh;
+}
+
+.pgnControls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9vh;
+}
+
+.pgnInput {
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  max-height: 16vh;
+  box-sizing: border-box;
+  resize: none;
+  border: 0.1vh solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.4vh;
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(255, 255, 255, 0.82);
+  padding: 1.2vh 1.3vh;
+  font: inherit;
+  font-size: 1.2vh;
+  line-height: 1.55;
+  overflow: auto;
+}
+
+.pgnInput:focus {
+  outline: none;
+  border-color: rgba(143, 117, 255, 0.5);
+  box-shadow: inset 0 0 0 0.1vh rgba(143, 117, 255, 0.3);
+}
+
+.pgnInput::placeholder {
+  color: rgba(255, 255, 255, 0.34);
 }
 
 .metaList {
   display: flex;
   flex-direction: column;
   gap: 1vh;
+  overflow: auto;
+  padding-right: 0.4vh;
 }
 
 .metaRow {
   display: flex;
   justify-content: space-between;
   gap: 1vh;
+  min-width: 0;
 }
 
 .metaLabel,
@@ -194,6 +273,9 @@
   align-items: center;
   justify-content: center;
   gap: 1.8vh;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.2vh;
 }
 
 .evalRail {
@@ -202,12 +284,14 @@
   flex-direction: column;
   align-items: center;
   gap: 1.2vh;
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
 .evalShell {
   position: relative;
   width: 1.8vh;
-  height: 70vh;
+  height: min(48vh, calc(100svh - 45vh));
   border-radius: 999vh;
   overflow: hidden;
   border: 0.1vh solid rgba(255, 255, 255, 0.2);
@@ -258,17 +342,10 @@
   font-weight: 400;
 }
 
-.scoreCaption {
-  font-size: 1.04vh;
-  text-transform: uppercase;
-  letter-spacing: 0.18vh;
-  color: rgba(255, 255, 255, 0.52);
-}
-
 .boardFrame {
-  width: min(72vh, calc(100vw - 12vh));
   max-width: 100%;
-  aspect-ratio: 1;
+  max-height: 100%;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -311,35 +388,78 @@
 }
 
 .analysis {
-  display: grid;
-  grid-template-columns: 1.8fr 1fr;
-  gap: 1.4vh;
-}
-
-.wdl {
   display: flex;
-  flex-direction: column;
-  gap: 0.5vh;
+  align-items: center;
 }
 
 .chartCard {
-  min-height: 28vh;
-}
-
-.chartWrap {
-  min-height: 24vh;
-}
-
-.movesCard {
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.moveList {
+.chartWrap {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.reviewLegend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8vh;
+  margin-top: 1.2vh;
+  width: 100%;
+}
+
+.reviewChip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.7vh;
+  min-height: 3.4vh;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0 1.1vh;
+  border: 0.1vh solid color-mix(in srgb, var(--review-color) 48%, rgba(255, 255, 255, 0.12));
+  border-radius: 999vh;
+  background: color-mix(in srgb, var(--review-color) 16%, rgba(255, 255, 255, 0.03));
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 1.15vh;
+  letter-spacing: 0.04vh;
+}
+
+.reviewDot {
+  width: 0.9vh;
+  height: 0.9vh;
+  border-radius: 50%;
+  background: var(--review-color);
+  box-shadow: 0 0 1vh color-mix(in srgb, var(--review-color) 42%, transparent);
+}
+
+.reviewLabel {
+  min-width: 0;
+}
+
+.reviewCount {
+  color: rgba(255, 255, 255, 0.54);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.movesCard {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+.moveList {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
   gap: 0.8vh;
+  overflow: hidden auto;
   overflow-y: auto;
   padding-right: 0.4vh;
 }
@@ -382,7 +502,22 @@
 
 @media (max-width: 1100px) {
   .grid {
+    height: auto;
     grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .page {
+    height: auto;
+    min-height: 100svh;
+    overflow: auto;
+  }
+
+  .sidePanel,
+  .infoPanel,
+  .boardPanel {
+    display: flex;
+    flex-direction: column;
   }
 
   .boardStage {
@@ -426,6 +561,10 @@
   .analysis {
     grid-template-columns: 1fr 1fr;
   }
+
+  .boardFrame {
+    max-width: calc(100vw - 10vh);
+  }
 }
 
 @media (max-width: 720px) {
@@ -444,12 +583,17 @@
   }
 
   .actions,
+  .pgnControls,
   .metrics,
   .analysis {
     grid-template-columns: 1fr;
   }
 
+  .reviewLegend {
+    grid-template-columns: 1fr;
+  }
+
   .boardFrame {
-    width: min(56vh, calc(100vw - 7vh));
+    max-width: calc(100vw - 7vh);
   }
 }
