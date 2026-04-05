@@ -1,0 +1,455 @@
+.page {
+  min-height: 100svh;
+  padding: 2vh;
+  background:
+    radial-gradient(circle at top left, rgba(92, 74, 150, 0.18), transparent 28%),
+    radial-gradient(circle at 82% 16%, rgba(88, 58, 132, 0.14), transparent 22%),
+    radial-gradient(circle at bottom right, rgba(52, 38, 84, 0.16), transparent 24%),
+    linear-gradient(180deg, #050506 0%, #020203 100%);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.grid {
+  min-height: calc(100svh - 4vh);
+  display: grid;
+  grid-template-columns: 31vh minmax(0, 1fr) 42vh;
+  gap: 1.6vh;
+}
+
+.panel {
+  min-height: 0;
+  border: 0.1vh solid rgba(255, 255, 255, 0.12);
+  border-radius: 2.2vh;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
+  box-shadow:
+    0 2.8vh 6vh rgba(0, 0, 0, 0.34),
+    inset 0 0 0 0.1vh rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(2.6vh);
+}
+
+.sidePanel,
+.infoPanel,
+.boardPanel {
+  display: flex;
+  flex-direction: column;
+}
+
+.sidePanel,
+.infoPanel {
+  padding: 2.2vh;
+  gap: 1.6vh;
+}
+
+.boardPanel {
+  padding: 2.2vh;
+  gap: 1.8vh;
+  justify-content: space-between;
+}
+
+.card {
+  border: 0.1vh solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.8vh;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 1.8vh;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 1.15vh;
+  letter-spacing: 0.26vh;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.sectionTitle {
+  margin: 0.6vh 0 0;
+  font-size: 2.3vh;
+  line-height: 1;
+  letter-spacing: -0.05vh;
+  font-weight: 300;
+}
+
+.copy,
+.support,
+.metaValue,
+.metaLabel,
+.metricLabel,
+.metricValue,
+.moveChip,
+.moveNumber,
+.statusText,
+.wdl,
+.empty,
+.error {
+  font-size: 1.35vh;
+  line-height: 1.55;
+}
+
+.copy,
+.support,
+.metaValue,
+.moveChip,
+.statusText,
+.wdl,
+.empty {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1vh;
+}
+
+.action {
+  min-height: 5.6vh;
+  padding: 0 1.4vh;
+  border: 0.1vh solid rgba(255, 255, 255, 0.14);
+  border-radius: 1.5vh;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1.24vh;
+  font-weight: 400;
+  letter-spacing: 0.16vh;
+  text-transform: uppercase;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    transform 180ms ease;
+}
+
+.action:hover:not(:disabled) {
+  transform: translateY(-0.08vh);
+  border-color: rgba(143, 117, 255, 0.42);
+  background: rgba(143, 117, 255, 0.12);
+}
+
+.action:disabled {
+  opacity: 0.34;
+  cursor: not-allowed;
+}
+
+.primary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, rgba(143, 117, 255, 0.28), rgba(143, 117, 255, 0.12));
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.metaList {
+  display: flex;
+  flex-direction: column;
+  gap: 1vh;
+}
+
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 1vh;
+}
+
+.metaLabel,
+.metricLabel {
+  color: rgba(255, 255, 255, 0.46);
+  text-transform: uppercase;
+  letter-spacing: 0.18vh;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2vh;
+}
+
+.statusPill {
+  padding: 0.9vh 1.3vh;
+  border-radius: 999vh;
+  border: 0.1vh solid rgba(255, 255, 255, 0.1);
+  font-size: 1.08vh;
+  text-transform: uppercase;
+  letter-spacing: 0.18vh;
+}
+
+.statusReady {
+  background: rgba(82, 63, 131, 0.28);
+}
+
+.statusPending {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.statusError {
+  background: rgba(157, 63, 86, 0.25);
+  color: #ffd7db;
+}
+
+.boardStage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.8vh;
+}
+
+.evalRail {
+  width: 6.6vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2vh;
+}
+
+.evalShell {
+  position: relative;
+  width: 1.8vh;
+  height: 70vh;
+  border-radius: 999vh;
+  overflow: hidden;
+  border: 0.1vh solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.evalBlack,
+.evalWhite {
+  position: absolute;
+  width: 100%;
+  transition:
+    height 240ms ease,
+    width 240ms ease;
+}
+
+.evalBlack {
+  top: 0;
+  height: calc(100% - var(--white-share, 50%));
+  background: linear-gradient(180deg, #020202 0%, #2c2736 100%);
+}
+
+.evalWhite {
+  bottom: 0;
+  height: var(--white-share, 50%);
+  background: linear-gradient(180deg, #f7f7f5 0%, #d6d3de 100%);
+}
+
+.evalDivider {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 0.18vh;
+  background: #8f75ff;
+  box-shadow: 0 0 1.2vh rgba(143, 117, 255, 0.9);
+  transform: translateY(50%);
+  bottom: var(--white-share, 50%);
+}
+
+.evalCopy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4vh;
+}
+
+.score {
+  font-size: 2vh;
+  font-weight: 400;
+}
+
+.scoreCaption {
+  font-size: 1.04vh;
+  text-transform: uppercase;
+  letter-spacing: 0.18vh;
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.boardFrame {
+  width: min(72vh, calc(100vw - 12vh));
+  max-width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.2vh;
+  border-radius: 2vh;
+  border: 0.1vh solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(circle at top, rgba(143, 117, 255, 0.14), transparent 42%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.boardFallback {
+  width: 100%;
+  height: 100%;
+  border-radius: 1.5vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.1vh dashed rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.54);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1vh;
+}
+
+.metric {
+  padding: 1.4vh;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6vh;
+}
+
+.metricValue {
+  font-size: 1.85vh;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.analysis {
+  display: grid;
+  grid-template-columns: 1.8fr 1fr;
+  gap: 1.4vh;
+}
+
+.wdl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5vh;
+}
+
+.chartCard {
+  min-height: 28vh;
+}
+
+.chartWrap {
+  min-height: 24vh;
+}
+
+.movesCard {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.moveList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8vh;
+  overflow-y: auto;
+  padding-right: 0.4vh;
+}
+
+.moveRow {
+  display: grid;
+  grid-template-columns: 4vh minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.8vh;
+  align-items: center;
+}
+
+.moveNumber {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.moveChip {
+  min-height: 4.6vh;
+  border: 0.1vh solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.2vh;
+  background: rgba(255, 255, 255, 0.04);
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease;
+}
+
+.moveChip:hover:not(:disabled) {
+  border-color: rgba(143, 117, 255, 0.42);
+  background: rgba(143, 117, 255, 0.12);
+}
+
+.activeMove {
+  border-color: rgba(143, 117, 255, 0.54);
+  background: rgba(143, 117, 255, 0.16);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.error {
+  color: #ffbec8;
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .boardStage {
+    flex-direction: column;
+  }
+
+  .evalRail {
+    width: 100%;
+    flex-direction: row;
+    justify-content: center;
+  }
+
+  .evalShell {
+    width: min(72vh, calc(100vw - 12vh));
+    height: 1.8vh;
+  }
+
+  .evalBlack {
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: calc(100% - var(--white-share, 50%));
+  }
+
+  .evalWhite {
+    bottom: 0;
+    left: 0;
+    height: 100%;
+    width: var(--white-share, 50%);
+  }
+
+  .evalDivider {
+    width: 0.18vh;
+    height: 100%;
+    bottom: 0;
+    left: var(--white-share, 50%);
+    transform: translateX(-50%);
+  }
+
+  .metrics,
+  .analysis {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 1.4vh;
+  }
+
+  .grid {
+    gap: 1.2vh;
+  }
+
+  .boardPanel,
+  .sidePanel,
+  .infoPanel {
+    padding: 1.6vh;
+  }
+
+  .actions,
+  .metrics,
+  .analysis {
+    grid-template-columns: 1fr;
+  }
+
+  .boardFrame {
+    width: min(56vh, calc(100vw - 7vh));
+  }
+}
