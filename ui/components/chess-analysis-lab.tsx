@@ -11,6 +11,7 @@ import {
   LinearScale,
   PointElement,
   Tooltip,
+  type ChartData,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 
@@ -18,11 +19,13 @@ import type { AnalysisResult } from '@/lib/analysis-types';
 import {
   analyzeGamePositions,
   analyzeSinglePosition,
+  buildGameReview,
   buildChartOptions,
   buildMoveUciHistory,
   buildTimelineSequencePositions,
   classifyTimelineMoves,
   extractMetadataFromGame,
+  filterReviewMoments,
   formatPrincipalVariation,
   formatScoreLabel,
   getAdvantageMeter,
@@ -31,12 +34,15 @@ import {
   toChartScore,
   toStoredMove,
   type GameMetadata,
+  type ReviewSide,
   type StoredMove,
   reviewCategoryMeta,
   reviewCategoryOrder,
   summarizeTimelineReviews,
 } from '@/lib/chess-analysis-client';
 import styles from './chess-analysis-lab.module.css';
+
+type LabMode = 'overview' | 'review' | 'analysis';
 
 const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
   ssr: false,
@@ -54,6 +60,9 @@ export function ChessAnalysisLab() {
   const [squareStyles, setSquareStyles] = useState<Record<string, CSSProperties>>({});
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [showArrow, setShowArrow] = useState(true);
+  const [mode, setMode] = useState<LabMode>('overview');
+  const [reviewSide, setReviewSide] = useState<ReviewSide>('both');
+  const [reviewIndex, setReviewIndex] = useState(0);
   const [metadata, setMetadata] = useState<GameMetadata | null>(null);
   const [fileName, setFileName] = useState('No PGN loaded');
   const [pgnDraft, setPgnDraft] = useState('');
@@ -84,9 +93,22 @@ export function ChessAnalysisLab() {
     [initialFen, metadata, moveHistory, preMoveAnalyses, timelineAnalyses],
   );
   const reviewSummary = useMemo(() => summarizeTimelineReviews(timelineReviews), [timelineReviews]);
-  const chartConfig = useMemo(() => buildChartOptions(moveHistory, timelineReviews), [moveHistory, timelineReviews]);
+  const gameReview = useMemo(() => buildGameReview(timelineReviews, metadata), [metadata, timelineReviews]);
+  const reviewMoments = useMemo(
+    () => filterReviewMoments(gameReview.keyMoments, reviewSide),
+    [gameReview.keyMoments, reviewSide],
+  );
+  const activeReviewMoment = reviewMoments[reviewIndex] ?? null;
+  const chartConfig = buildChartOptions(moveHistory, timelineReviews, ply => {
+    const boundedIndex = Math.max(0, Math.min(ply, moveHistory.length));
+    const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
-  const chartData = useMemo(
+    setHistoryIndex(boundedIndex);
+    setGame(nextGame);
+    clearSelection();
+  });
+
+  const chartData = useMemo<ChartData<'line', number[], number>>(
     () => ({
       labels: timelineAnalyses.map((_, index) => index + 1),
       datasets: [
@@ -222,6 +244,10 @@ export function ChessAnalysisLab() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [historyIndex, initialFen, moveHistory]);
 
+  useEffect(() => {
+    setReviewIndex(value => Math.max(0, Math.min(value, Math.max(0, reviewMoments.length - 1))));
+  }, [reviewMoments.length]);
+
   function clearSelection() {
     setSelectedSquare(null);
     setSquareStyles({});
@@ -289,6 +315,18 @@ export function ChessAnalysisLab() {
     clearSelection();
   }
 
+  function goToReviewMoment(index: number) {
+    const boundedIndex = Math.max(0, Math.min(index, Math.max(0, reviewMoments.length - 1)));
+    const moment = reviewMoments[boundedIndex] ?? null;
+
+    setMode('review');
+    setReviewIndex(boundedIndex);
+
+    if (moment) {
+      jumpToIndex(Math.max(0, moment.ply - 1));
+    }
+  }
+
   async function runTimelineAnalysis(nextMoves = moveHistory, nextInitialFen = initialFen) {
     const requestId = ++timelineRequestIdRef.current;
 
@@ -346,6 +384,8 @@ export function ChessAnalysisLab() {
       setGame(nextGame);
       setMetadata(extractMetadataFromGame(loadedGame));
       setFileName(name);
+      setMode('overview');
+      setReviewIndex(0);
       setPositionAnalysis(null);
       setPreMoveAnalyses([]);
       setTimelineAnalyses([]);
@@ -412,6 +452,25 @@ export function ChessAnalysisLab() {
             <p className={styles.support}>{fileName}</p>
           </section>
 
+          <section className={styles.modeTabs}>
+            {(['overview', 'review', 'analysis'] satisfies LabMode[]).map(nextMode => (
+              <button
+                className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
+                key={nextMode}
+                onClick={() => {
+                  if (nextMode === 'review') {
+                    goToReviewMoment(reviewIndex);
+                    return;
+                  }
+
+                  setMode(nextMode);
+                }}
+              >
+                {nextMode}
+              </button>
+            ))}
+          </section>
+
           <section className={styles.actions}>
             <button className={styles.action} onClick={() => jumpToIndex(historyIndex - 1)} disabled={historyIndex === 0}>
               Back
@@ -443,6 +502,8 @@ export function ChessAnalysisLab() {
                 setHistoryIndex(0);
                 setMetadata(null);
                 setFileName('No PGN loaded');
+                setMode('overview');
+                setReviewIndex(0);
                 setPositionAnalysis(null);
                 setPreMoveAnalyses([]);
                 setTimelineAnalyses([]);
@@ -550,80 +611,274 @@ export function ChessAnalysisLab() {
         </section>
 
         <aside className={`${styles.panel} ${styles.infoPanel}`}>
-          <section className={`${styles.card} ${styles.chartCard}`}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.sectionTitle}>Curve</h2>
-              <span className={styles.statusText}>{timelineLoading ? 'refreshing' : `ply ${historyIndex}/${moveHistory.length}`}</span>
-            </div>
-            <div className={styles.chartWrap}>
-              {timelineAnalyses.length > 0 ? (
-                <Line data={chartData} options={chartConfig} />
-              ) : (
-                <div className={styles.boardFallback}>
-                  {timelineLoading ? 'Analyzing the whole line…' : 'Load a PGN or refresh the current line.'}
+          {mode === 'overview' ? (
+            <>
+              <section className={`${styles.card} ${styles.overviewCard}`}>
+                <div className={styles.panelHeader}>
+                  <h2 className={styles.sectionTitle}>Overview</h2>
+                  <span className={styles.statusText}>{timelineLoading ? 'building' : `${gameReview.keyMoments.length} moments`}</span>
                 </div>
-              )}
-            </div>
-            {timelineReviews.length > 0 ? (
-              <div className={styles.reviewLegend}>
-                {reviewCategoryOrder.map(category => {
-                  const meta = reviewCategoryMeta[category];
-                  const whiteCount = reviewSummary.white[category];
-                  const blackCount = reviewSummary.black[category];
-
-                  if (!whiteCount && !blackCount) {
-                    return null;
-                  }
-
-                  return (
-                    <div
-                      className={styles.reviewChip}
-                      key={category}
-                      style={{ ['--review-color' as string]: meta.color }}
-                    >
-                      <span className={styles.reviewDot} />
-                      <span className={styles.reviewLabel}>{meta.label}</span>
-                      <span className={styles.reviewCount}>{whiteReviewName} {whiteCount}</span>
-                      <span className={styles.reviewCount}>{blackReviewName} {blackCount}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
-            {timelineError ? <p className={styles.error}>{timelineError}</p> : null}
-          </section>
-
-          <section className={`${styles.card} ${styles.movesCard}`}>
-            <div className={styles.panelHeader}>
-              <h2 className={styles.sectionTitle}>Moves</h2>
-            </div>
-            <div className={styles.moveList}>
-              {movePairs.length === 0 ? (
-                <p className={styles.empty}>No moves yet.</p>
-              ) : (
-                movePairs.map(pair => (
-                  <div className={styles.moveRow} key={pair.moveNumber}>
-                    <span className={styles.moveNumber}>{pair.moveNumber}</span>
-                    <button
-                      className={`${styles.moveChip} ${historyIndex === pair.whitePly ? styles.activeMove : ''}`}
-                      onClick={() => jumpToIndex(pair.whitePly)}
-                    >
-                      {pair.white?.san ?? '...'}
-                    </button>
-                    <button
-                      className={`${styles.moveChip} ${historyIndex === pair.blackPly ? styles.activeMove : ''}`}
-                      onClick={() => jumpToIndex(pair.blackPly)}
-                      disabled={!pair.black}
-                    >
-                      {pair.black?.san ?? ''}
-                    </button>
+                <div className={styles.accuracyGrid}>
+                  <div className={styles.accuracyCard}>
+                    <span className={styles.metaLabel}>{whiteReviewName}</span>
+                    <strong>{formatNullable(gameReview.accuracy.white)}%</strong>
+                    <span className={styles.statusText}>rating {formatNullable(gameReview.gameRating.white)}</span>
                   </div>
-                ))
-              )}
-            </div>
-          </section>
+                  <div className={styles.accuracyCard}>
+                    <span className={styles.metaLabel}>{blackReviewName}</span>
+                    <strong>{formatNullable(gameReview.accuracy.black)}%</strong>
+                    <span className={styles.statusText}>rating {formatNullable(gameReview.gameRating.black)}</span>
+                  </div>
+                </div>
+                <div className={styles.openingBox}>
+                  <span className={styles.metaLabel}>Opening</span>
+                  <strong>{gameReview.opening.name}</strong>
+                  <span className={styles.statusText}>
+                    {gameReview.opening.eco !== '-' ? `${gameReview.opening.eco} · ` : ''}
+                    {gameReview.opening.lastBookPly ? `book through ply ${gameReview.opening.lastBookPly}` : 'book not detected'}
+                  </span>
+                </div>
+                <div className={styles.categoryGrid}>
+                  {reviewCategoryOrder.map(category => {
+                    const meta = reviewCategoryMeta[category];
+                    const whiteCount = gameReview.counts.white[category];
+                    const blackCount = gameReview.counts.black[category];
+
+                    if (!whiteCount && !blackCount) {
+                      return null;
+                    }
+
+                    return (
+                      <div className={styles.categoryTile} key={category} style={{ ['--review-color' as string]: meta.color }}>
+                        <span>{meta.label}</span>
+                        <strong>{whiteCount + blackCount}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+              <ChartSection
+                chartConfig={chartConfig}
+                chartData={chartData}
+                historyIndex={historyIndex}
+                moveHistoryLength={moveHistory.length}
+                timelineAnalysesLength={timelineAnalyses.length}
+                timelineError={timelineError}
+                timelineLoading={timelineLoading}
+              />
+            </>
+          ) : mode === 'review' ? (
+            <>
+              <section className={`${styles.card} ${styles.reviewCard}`}>
+                <div className={styles.panelHeader}>
+                  <h2 className={styles.sectionTitle}>Review</h2>
+                  <span className={styles.statusText}>
+                    {reviewMoments.length ? `${reviewIndex + 1}/${reviewMoments.length}` : 'no moments'}
+                  </span>
+                </div>
+                <div className={styles.reviewSideTabs}>
+                  {[
+                    ['both', 'Both'],
+                    ['white', whiteReviewName],
+                    ['black', blackReviewName],
+                  ].map(([side, label]) => (
+                    <button
+                      className={`${styles.sideTab} ${reviewSide === side ? styles.activeSideTab : ''}`}
+                      key={side}
+                      onClick={() => {
+                        setReviewSide(side as ReviewSide);
+                        setReviewIndex(0);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {activeReviewMoment ? (
+                  <div className={styles.coachBox}>
+                    <div className={styles.coachHeader}>
+                      <span
+                        className={styles.reviewBadge}
+                        style={{ ['--review-color' as string]: activeReviewMoment.colorHex ?? '#8f75ff' }}
+                      >
+                        {activeReviewMoment.label}
+                      </span>
+                      <strong>{activeReviewMoment.moveLabel}</strong>
+                    </div>
+                    <p className={styles.copy}>{activeReviewMoment.coachText}</p>
+                    <div className={styles.reviewFacts}>
+                      <span>played {activeReviewMoment.san}</span>
+                      <span>best {activeReviewMoment.bestMoveSan ?? '...'}</span>
+                      <span>loss {formatExpectedLoss(activeReviewMoment.expectedPointsLost)}</span>
+                    </div>
+                    <div className={styles.reviewNav}>
+                      <button className={styles.action} onClick={() => goToReviewMoment(reviewIndex - 1)} disabled={reviewIndex === 0}>
+                        Prev
+                      </button>
+                      <button
+                        className={styles.action}
+                        onClick={() => {
+                          setShowArrow(true);
+                          goToReviewMoment(reviewIndex);
+                        }}
+                      >
+                        Show best
+                      </button>
+                      <button
+                        className={styles.action}
+                        onClick={() => goToReviewMoment(reviewIndex + 1)}
+                        disabled={reviewIndex >= reviewMoments.length - 1}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className={styles.empty}>Load a PGN and refresh the line to build key moments.</p>
+                )}
+              </section>
+              <section className={`${styles.card} ${styles.momentListCard}`}>
+                <div className={styles.panelHeader}>
+                  <h2 className={styles.sectionTitle}>Moments</h2>
+                </div>
+                <div className={styles.momentList}>
+                  {reviewMoments.map((moment, index) => (
+                    <button
+                      className={`${styles.momentButton} ${index === reviewIndex ? styles.activeMoment : ''}`}
+                      key={`${moment.ply}-${moment.category}`}
+                      onClick={() => goToReviewMoment(index)}
+                    >
+                      <span>{moment.moveLabel}</span>
+                      <strong>{moment.label}</strong>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : (
+            <>
+              <ChartSection
+                chartConfig={chartConfig}
+                chartData={chartData}
+                historyIndex={historyIndex}
+                moveHistoryLength={moveHistory.length}
+                reviewSummary={reviewSummary}
+                timelineAnalysesLength={timelineAnalyses.length}
+                timelineError={timelineError}
+                timelineLoading={timelineLoading}
+                whiteReviewName={whiteReviewName}
+                blackReviewName={blackReviewName}
+              />
+              <section className={`${styles.card} ${styles.movesCard}`}>
+                <div className={styles.panelHeader}>
+                  <h2 className={styles.sectionTitle}>Moves</h2>
+                </div>
+                <div className={styles.moveList}>
+                  {movePairs.length === 0 ? (
+                    <p className={styles.empty}>No moves yet.</p>
+                  ) : (
+                    movePairs.map(pair => (
+                      <div className={styles.moveRow} key={pair.moveNumber}>
+                        <span className={styles.moveNumber}>{pair.moveNumber}</span>
+                        <button
+                          className={`${styles.moveChip} ${historyIndex === pair.whitePly ? styles.activeMove : ''}`}
+                          onClick={() => jumpToIndex(pair.whitePly)}
+                        >
+                          {pair.white?.san ?? '...'}
+                        </button>
+                        <button
+                          className={`${styles.moveChip} ${historyIndex === pair.blackPly ? styles.activeMove : ''}`}
+                          onClick={() => jumpToIndex(pair.blackPly)}
+                          disabled={!pair.black}
+                        >
+                          {pair.black?.san ?? ''}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+            </>
+          )}
         </aside>
       </div>
     </main>
   );
+}
+
+function ChartSection({
+  chartConfig,
+  chartData,
+  historyIndex,
+  moveHistoryLength,
+  reviewSummary,
+  timelineAnalysesLength,
+  timelineError,
+  timelineLoading,
+  whiteReviewName,
+  blackReviewName,
+}: {
+  chartConfig: ReturnType<typeof buildChartOptions>;
+  chartData: ChartData<'line', number[], number>;
+  historyIndex: number;
+  moveHistoryLength: number;
+  reviewSummary?: ReturnType<typeof summarizeTimelineReviews>;
+  timelineAnalysesLength: number;
+  timelineError: string;
+  timelineLoading: boolean;
+  whiteReviewName?: string;
+  blackReviewName?: string;
+}) {
+  return (
+    <section className={`${styles.card} ${styles.chartCard}`}>
+      <div className={styles.panelHeader}>
+        <h2 className={styles.sectionTitle}>Curve</h2>
+        <span className={styles.statusText}>{timelineLoading ? 'refreshing' : `ply ${historyIndex}/${moveHistoryLength}`}</span>
+      </div>
+      <div className={styles.chartWrap}>
+        {timelineAnalysesLength > 0 ? (
+          <Line data={chartData} options={chartConfig} />
+        ) : (
+          <div className={styles.boardFallback}>
+            {timelineLoading ? 'Analyzing the whole line…' : 'Load a PGN or refresh the current line.'}
+          </div>
+        )}
+      </div>
+      {reviewSummary && whiteReviewName && blackReviewName ? (
+        <div className={styles.reviewLegend}>
+          {reviewCategoryOrder.map(category => {
+            const meta = reviewCategoryMeta[category];
+            const whiteCount = reviewSummary.white[category];
+            const blackCount = reviewSummary.black[category];
+
+            if (!whiteCount && !blackCount) {
+              return null;
+            }
+
+            return (
+              <div className={styles.reviewChip} key={category} style={{ ['--review-color' as string]: meta.color }}>
+                <span className={styles.reviewDot} />
+                <span className={styles.reviewLabel}>{meta.label}</span>
+                <span className={styles.reviewCount}>
+                  {whiteReviewName} {whiteCount}
+                </span>
+                <span className={styles.reviewCount}>
+                  {blackReviewName} {blackCount}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {timelineError ? <p className={styles.error}>{timelineError}</p> : null}
+    </section>
+  );
+}
+
+function formatNullable(value: number | null) {
+  return value == null ? '...' : `${value}`;
+}
+
+function formatExpectedLoss(value: number | null) {
+  return value == null ? '...' : `${(value * 100).toFixed(1)}%`;
 }

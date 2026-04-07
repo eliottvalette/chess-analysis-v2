@@ -26,9 +26,25 @@ export type GameMetadata = {
   blackPlayer: string;
   blackElo: string;
   result: string;
+  eco: string;
+  opening: string;
 };
 
-export type ReviewCategory = 'brilliant' | 'great' | 'best' | 'miss' | 'mistake' | 'blunder';
+export type ReviewCategory =
+  | 'book'
+  | 'brilliant'
+  | 'great'
+  | 'best'
+  | 'excellent'
+  | 'good'
+  | 'inaccuracy'
+  | 'miss'
+  | 'mistake'
+  | 'blunder';
+
+export type ReviewSide = 'white' | 'black' | 'both';
+
+export type ReviewCounter = Record<ReviewCategory, number>;
 
 export type TimelineReview = {
   ply: number;
@@ -37,10 +53,54 @@ export type TimelineReview = {
   label: string | null;
   colorHex: string | null;
   pointStyle: PointStyle;
+  moveLabel: string;
+  san: string;
+  playedMove: string;
+  bestMove: string | null;
+  bestMoveSan: string | null;
+  beforeExpected: number | null;
+  afterExpected: number | null;
   expectedPointsLost: number | null;
+  moveAccuracy: number | null;
+  isKeyMoment: boolean;
+  coachText: string;
+  fenBefore: string;
+  fenAfter: string;
 };
 
-export const reviewCategoryOrder: ReviewCategory[] = ['brilliant', 'great', 'best', 'miss', 'mistake', 'blunder'];
+export type GameReview = {
+  accuracy: {
+    white: number | null;
+    black: number | null;
+  };
+  gameRating: {
+    white: number | null;
+    black: number | null;
+  };
+  counts: {
+    white: ReviewCounter;
+    black: ReviewCounter;
+  };
+  keyMoments: TimelineReview[];
+  opening: {
+    name: string;
+    eco: string;
+    lastBookPly: number | null;
+  };
+};
+
+export const reviewCategoryOrder: ReviewCategory[] = [
+  'book',
+  'brilliant',
+  'great',
+  'best',
+  'excellent',
+  'good',
+  'inaccuracy',
+  'miss',
+  'mistake',
+  'blunder',
+];
 
 export const reviewCategoryMeta: Record<
   ReviewCategory,
@@ -55,6 +115,11 @@ export const reviewCategoryMeta: Record<
     color: '#9fd7ff',
     pointStyle: 'star',
   },
+  book: {
+    label: 'Book',
+    color: '#7d8797',
+    pointStyle: 'rectRounded',
+  },
   great: {
     label: 'Great',
     color: '#8f75ff',
@@ -62,8 +127,23 @@ export const reviewCategoryMeta: Record<
   },
   best: {
     label: 'Best',
-    color: '#f3f3ef00',
+    color: '#f3f3ef',
     pointStyle: 'rectRounded',
+  },
+  excellent: {
+    label: 'Excellent',
+    color: '#cfd5dc',
+    pointStyle: 'circle',
+  },
+  good: {
+    label: 'Good',
+    color: '#a8b1bd',
+    pointStyle: 'circle',
+  },
+  inaccuracy: {
+    label: 'Inaccuracy',
+    color: '#ffd66e',
+    pointStyle: 'rect',
   },
   miss: {
     label: 'Miss',
@@ -204,6 +284,8 @@ export function extractMetadataFromGame(game: Chess) {
     blackPlayer: headers.Black ?? 'Black',
     blackElo: headers.BlackElo ?? '-',
     result: headers.Result ?? '*',
+    eco: headers.ECO ?? '-',
+    opening: headers.Opening ?? headers.Variation ?? 'Opening phase',
   } satisfies GameMetadata;
 }
 
@@ -341,6 +423,7 @@ export function classifyTimelineMoves(
 
     const beforeAnalysis = preMoveAnalyses[index];
     const afterAnalysis = postMoveAnalyses[index];
+    const moveLabel = formatTimelineMoveLabel(index, move);
     const playerRating = parsePlayerRating(color === 'w' ? metadata?.whiteElo : metadata?.blackElo);
     const ratingFlex = getRatingFlex(playerRating);
     const beforeExpected = getExpectedPoints(beforeAnalysis, color);
@@ -352,10 +435,13 @@ export function classifyTimelineMoves(
     const afterWinning = isWinningOutcome(afterAnalysis, color);
     const beforeCompletelyWinning = isCompletelyWinning(beforeAnalysis, color);
     const decisiveMove = move.san.includes('#') || move.san.includes('+') || isMateForColor(afterAnalysis, color);
+    const bestMoveSan = beforeAnalysis?.bestMove ? formatBestMove(beforeFen, beforeAnalysis.bestMove) : null;
 
     let category: ReviewCategory | null = null;
 
-    if (
+    if (isBookCandidate(index, expectedPointsLost, move.san)) {
+      category = 'book';
+    } else if (
       bestMovePlayed &&
       sacrifice &&
       afterWinning &&
@@ -382,11 +468,31 @@ export function classifyTimelineMoves(
       category = 'miss';
     } else if (bestMovePlayed || ((expectedPointsLost ?? Infinity) <= 0.01 + ratingFlex / 2)) {
       category = 'best';
-    } else if ((expectedPointsLost ?? 0) >= 0.2) {
+    } else if (expectedPointsLost == null) {
+      category = null;
+    } else if (expectedPointsLost <= 0.03 + ratingFlex) {
+      category = 'excellent';
+    } else if (expectedPointsLost <= 0.065 + ratingFlex) {
+      category = 'good';
+    } else if (expectedPointsLost < 0.1) {
+      category = 'inaccuracy';
+    } else if (expectedPointsLost >= 0.2) {
       category = 'blunder';
-    } else if ((expectedPointsLost ?? 0) >= 0.1) {
+    } else {
       category = 'mistake';
     }
+
+    const moveAccuracy = getMoveAccuracy(category, expectedPointsLost);
+    const isKeyMoment = isReviewKeyMoment(category, expectedPointsLost);
+    const coachText = buildCoachText({
+      moveLabel,
+      category,
+      playedMove: move.san,
+      bestMoveSan,
+      beforeExpected,
+      afterExpected,
+      expectedPointsLost,
+    });
 
     beforeGame.move({
       from: move.from,
@@ -403,7 +509,19 @@ export function classifyTimelineMoves(
       label: meta?.label ?? null,
       colorHex: meta?.color ?? null,
       pointStyle: meta?.pointStyle ?? 'circle',
+      moveLabel,
+      san: move.san,
+      playedMove: move.uci,
+      bestMove: beforeAnalysis?.bestMove ?? null,
+      bestMoveSan,
+      beforeExpected: beforeExpected == null ? null : Number(beforeExpected.toFixed(3)),
+      afterExpected: afterExpected == null ? null : Number(afterExpected.toFixed(3)),
       expectedPointsLost: expectedPointsLost == null ? null : Number(expectedPointsLost.toFixed(3)),
+      moveAccuracy,
+      isKeyMoment,
+      coachText,
+      fenBefore: beforeFen,
+      fenAfter: afterGame.fen(),
     } satisfies TimelineReview;
   });
 }
@@ -424,10 +542,56 @@ export function summarizeTimelineReviews(reviews: TimelineReview[]) {
   return { white, black };
 }
 
-export function buildChartOptions(moves: StoredMove[], reviews: TimelineReview[]): ChartOptions<'line'> {
+export function buildGameReview(reviews: TimelineReview[], metadata: GameMetadata | null) {
+  const counts = summarizeTimelineReviews(reviews);
+  const keyMoments = extractKeyMoments(reviews);
+  const whiteAccuracy = calculatePlayerAccuracy(reviews, 'w');
+  const blackAccuracy = calculatePlayerAccuracy(reviews, 'b');
+  const lastBookPly = [...reviews].reverse().find(review => review.category === 'book')?.ply ?? null;
+
+  return {
+    accuracy: {
+      white: whiteAccuracy,
+      black: blackAccuracy,
+    },
+    gameRating: {
+      white: calculateGameRating(parsePlayerRating(metadata?.whiteElo), whiteAccuracy),
+      black: calculateGameRating(parsePlayerRating(metadata?.blackElo), blackAccuracy),
+    },
+    counts,
+    keyMoments,
+    opening: {
+      name: metadata?.opening ?? 'Opening phase',
+      eco: metadata?.eco ?? '-',
+      lastBookPly,
+    },
+  } satisfies GameReview;
+}
+
+export function filterReviewMoments(moments: TimelineReview[], side: ReviewSide) {
+  if (side === 'both') {
+    return moments;
+  }
+
+  const color = side === 'white' ? 'w' : 'b';
+  return moments.filter(moment => moment.color === color);
+}
+
+export function buildChartOptions(
+  moves: StoredMove[],
+  reviews: TimelineReview[],
+  onPointClick?: (ply: number) => void,
+): ChartOptions<'line'> {
   return {
     responsive: true,
     maintainAspectRatio: false,
+    onClick(_event, elements) {
+      const index = elements[0]?.index;
+
+      if (typeof index === 'number') {
+        onPointClick?.(index + 1);
+      }
+    },
     interaction: {
       mode: 'index',
       intersect: false,
@@ -566,13 +730,17 @@ function applyUciMove(chess: Chess, move: string) {
 
 function createReviewCounter() {
   return {
+    book: 0,
     brilliant: 0,
     great: 0,
     best: 0,
+    excellent: 0,
+    good: 0,
+    inaccuracy: 0,
     miss: 0,
     mistake: 0,
     blunder: 0,
-  } satisfies Record<ReviewCategory, number>;
+  } satisfies ReviewCounter;
 }
 
 function parsePlayerRating(value: string | number | null | undefined) {
@@ -616,6 +784,138 @@ function getExpectedPoints(analysis: AnalysisResult | null | undefined, color: '
 
   const perspectiveValue = color === 'w' ? chartValue : -chartValue;
   return 1 / (1 + Math.exp(-perspectiveValue / 1.35));
+}
+
+function isBookCandidate(index: number, expectedPointsLost: number | null, san: string) {
+  if (index > 9 || san.includes('+') || san.includes('#')) {
+    return false;
+  }
+
+  return expectedPointsLost != null && expectedPointsLost <= 0.025;
+}
+
+function getMoveAccuracy(category: ReviewCategory | null, expectedPointsLost: number | null) {
+  if (!category) {
+    return null;
+  }
+
+  if (category === 'book' || category === 'brilliant' || category === 'great' || category === 'best') {
+    return 100;
+  }
+
+  if (expectedPointsLost == null) {
+    return null;
+  }
+
+  return Math.round(Math.max(0, Math.min(100, 100 - expectedPointsLost * 260)));
+}
+
+function isReviewKeyMoment(category: ReviewCategory | null, expectedPointsLost: number | null) {
+  if (!category) {
+    return false;
+  }
+
+  if (category === 'brilliant' || category === 'great' || category === 'miss' || category === 'mistake' || category === 'blunder') {
+    return true;
+  }
+
+  return category === 'inaccuracy' && (expectedPointsLost ?? 0) >= 0.085;
+}
+
+function buildCoachText({
+  moveLabel,
+  category,
+  playedMove,
+  bestMoveSan,
+  beforeExpected,
+  afterExpected,
+  expectedPointsLost,
+}: {
+  moveLabel: string;
+  category: ReviewCategory | null;
+  playedMove: string;
+  bestMoveSan: string | null;
+  beforeExpected: number | null;
+  afterExpected: number | null;
+  expectedPointsLost: number | null;
+}) {
+  const swing =
+    beforeExpected == null || afterExpected == null
+      ? ''
+      : ` Expected score: ${formatExpected(beforeExpected)} -> ${formatExpected(afterExpected)}.`;
+  const best = bestMoveSan ? ` Best was ${bestMoveSan}.` : '';
+  const loss = expectedPointsLost == null ? '' : ` Loss: ${(expectedPointsLost * 100).toFixed(1)}%.`;
+
+  switch (category) {
+    case 'book':
+      return `${moveLabel} ${playedMove} stays in the opening lane.`;
+    case 'brilliant':
+      return `${moveLabel} ${playedMove} is a strong sacrifice that keeps or increases the advantage.${swing}`;
+    case 'great':
+      return `${moveLabel} ${playedMove} is a key engine-aligned move.${swing}`;
+    case 'best':
+      return `${moveLabel} ${playedMove} matches the engine's top choice.`;
+    case 'excellent':
+      return `${moveLabel} ${playedMove} is accurate with only a tiny practical loss.${loss}`;
+    case 'good':
+      return `${moveLabel} ${playedMove} is playable, but it leaves a little more on the board.${loss}`;
+    case 'inaccuracy':
+      return `${moveLabel} ${playedMove} is an inaccuracy.${swing}${best}`;
+    case 'miss':
+      return `${moveLabel} ${playedMove} misses a chance to punish the previous move.${swing}${best}`;
+    case 'mistake':
+      return `${moveLabel} ${playedMove} is a mistake.${swing}${best}`;
+    case 'blunder':
+      return `${moveLabel} ${playedMove} is a blunder.${swing}${best}`;
+    default:
+      return `${moveLabel} ${playedMove}.`;
+  }
+}
+
+function calculatePlayerAccuracy(reviews: TimelineReview[], color: 'w' | 'b') {
+  const accuracies = reviews
+    .filter(review => review.color === color)
+    .map(review => review.moveAccuracy)
+    .filter((value): value is number => typeof value === 'number');
+
+  if (accuracies.length === 0) {
+    return null;
+  }
+
+  return Number((accuracies.reduce((total, value) => total + value, 0) / accuracies.length).toFixed(1));
+}
+
+function calculateGameRating(rating: number | null, accuracy: number | null) {
+  if (accuracy == null) {
+    return null;
+  }
+
+  const base = rating ?? 800;
+  const raw = base + (accuracy - 65) * 18;
+  return Math.round(Math.max(100, Math.min(3200, raw)) / 50) * 50;
+}
+
+function extractKeyMoments(reviews: TimelineReview[]) {
+  const directMoments = reviews.filter(review => review.isKeyMoment);
+  const selected = directMoments.length > 0 ? directMoments : reviews.filter(review => review.category && review.category !== 'book');
+
+  return selected
+    .sort((left, right) => {
+      const leftLoss = left.expectedPointsLost ?? 0;
+      const rightLoss = right.expectedPointsLost ?? 0;
+
+      if (left.isKeyMoment !== right.isKeyMoment) {
+        return left.isKeyMoment ? -1 : 1;
+      }
+
+      return rightLoss - leftLoss;
+    })
+    .slice(0, 16)
+    .sort((left, right) => left.ply - right.ply);
+}
+
+function formatExpected(value: number) {
+  return `${Math.round(value * 100)}%`;
 }
 
 function getMaterialCount(chess: Chess, color: 'w' | 'b') {

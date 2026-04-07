@@ -45,7 +45,7 @@
 
 .sidePanel {
   display: grid;
-  grid-template-rows: minmax(0, 0.96fr) auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 0.9fr) auto auto minmax(0, 1fr);
 }
 
 .infoPanel {
@@ -124,6 +124,35 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1vh;
+}
+
+.modeTabs,
+.reviewSideTabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8vh;
+}
+
+.modeTab,
+.sideTab {
+  min-width: 0;
+  min-height: 4.4vh;
+  border: 0.1vh solid rgba(255, 255, 255, 0.11);
+  border-radius: 1.3vh;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 1.05vh;
+  letter-spacing: 0.14vh;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activeModeTab,
+.activeSideTab {
+  border-color: rgba(143, 117, 255, 0.52);
+  background: rgba(143, 117, 255, 0.15);
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .action {
@@ -401,6 +430,161 @@
 .chartWrap {
   min-height: 0;
   flex: 1 1 auto;
+}
+
+.overviewCard,
+.reviewCard,
+.momentListCard {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2vh;
+  overflow: hidden;
+}
+
+.accuracyGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1vh;
+}
+
+.accuracyCard,
+.openingBox {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6vh;
+  border: 0.1vh solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.3vh;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 1.2vh;
+}
+
+.accuracyCard strong {
+  font-size: 3.2vh;
+  line-height: 0.9;
+  font-weight: 300;
+}
+
+.openingBox strong {
+  font-size: 1.45vh;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.9);
+  overflow-wrap: anywhere;
+}
+
+.categoryGrid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8vh;
+  overflow: auto;
+  padding-right: 0.2vh;
+}
+
+.categoryTile {
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8vh;
+  min-height: 3.3vh;
+  padding: 0 1vh;
+  border: 0.1vh solid color-mix(in srgb, var(--review-color) 38%, rgba(255, 255, 255, 0.1));
+  border-radius: 999vh;
+  background: color-mix(in srgb, var(--review-color) 12%, rgba(255, 255, 255, 0.03));
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 1.12vh;
+}
+
+.categoryTile strong {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 500;
+}
+
+.coachBox {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2vh;
+  border: 0.1vh solid rgba(143, 117, 255, 0.22);
+  border-radius: 1.6vh;
+  background:
+    radial-gradient(circle at top right, rgba(143, 117, 255, 0.13), transparent 44%),
+    rgba(255, 255, 255, 0.035);
+  padding: 1.4vh;
+}
+
+.coachHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1vh;
+}
+
+.reviewBadge {
+  flex: 0 0 auto;
+  padding: 0.7vh 1vh;
+  border-radius: 999vh;
+  background: color-mix(in srgb, var(--review-color) 20%, rgba(255, 255, 255, 0.05));
+  border: 0.1vh solid color-mix(in srgb, var(--review-color) 46%, rgba(255, 255, 255, 0.1));
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1.05vh;
+  letter-spacing: 0.12vh;
+  text-transform: uppercase;
+}
+
+.reviewFacts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6vh;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 1.2vh;
+}
+
+.reviewNav {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 1fr;
+  gap: 0.8vh;
+}
+
+.momentList {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8vh;
+  overflow: auto;
+  padding-right: 0.3vh;
+}
+
+.momentButton {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1vh;
+  min-height: 4.4vh;
+  border: 0.1vh solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.3vh;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(255, 255, 255, 0.72);
+  padding: 0 1.1vh;
+  font-size: 1.2vh;
+}
+
+.momentButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.momentButton strong {
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.activeMoment {
+  border-color: rgba(143, 117, 255, 0.52);
+  background: rgba(143, 117, 255, 0.13);
 }
 
 .reviewLegend {
