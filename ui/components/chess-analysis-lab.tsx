@@ -114,15 +114,15 @@ export function ChessAnalysisLab() {
       datasets: [
         {
           data: timelineAnalyses.map(analysis => toChartScore(analysis)),
-          borderColor: '#9c84ff',
-          backgroundColor: 'rgba(156, 132, 255, 0.16)',
+          borderColor: '#7c6dff',
+          backgroundColor: 'rgba(124, 109, 255, 0.14)',
           fill: true,
           borderWidth: 2,
           pointRadius: timelineReviews.map(review => (review.category ? 4.8 : 0)),
           pointHoverRadius: timelineReviews.map(review => (review.category ? 6.2 : 3.4)),
           pointBorderWidth: timelineReviews.map(review => (review.category ? 1.5 : 0)),
-          pointBackgroundColor: timelineReviews.map(review => review.colorHex ?? '#8f75ff'),
-          pointBorderColor: timelineReviews.map(review => review.colorHex ?? '#8f75ff'),
+          pointBackgroundColor: timelineReviews.map(review => review.colorHex ?? '#7c6dff'),
+          pointBorderColor: timelineReviews.map(review => review.colorHex ?? '#7c6dff'),
           pointStyle: timelineReviews.map(review => review.pointStyle),
           tension: 0.28,
         },
@@ -256,8 +256,8 @@ export function ChessAnalysisLab() {
   function highlightMoves(square: string) {
     const nextStyles: Record<string, CSSProperties> = {
       [square]: {
-        boxShadow: 'inset 0 0 0 0.28vh rgba(143, 117, 255, 0.82)',
-        backgroundColor: 'rgba(143, 117, 255, 0.16)',
+        boxShadow: 'inset 0 0 0 3px rgba(124, 109, 255, 0.9)',
+        backgroundColor: 'rgba(124, 109, 255, 0.18)',
       },
     };
 
@@ -266,13 +266,13 @@ export function ChessAnalysisLab() {
     for (const move of moves) {
       nextStyles[move.to] = game.get(move.to)
         ? {
-            boxShadow: 'inset 0 0 0 0.18vh rgba(255, 255, 255, 0.28)',
+            boxShadow: 'inset 0 0 0 2px rgba(242, 243, 245, 0.34)',
             background:
-              'radial-gradient(circle, rgba(143, 117, 255, 0.28) 0%, rgba(143, 117, 255, 0.08) 54%, transparent 56%)',
+              'radial-gradient(circle, rgba(124, 109, 255, 0.28) 0%, rgba(124, 109, 255, 0.08) 54%, transparent 56%)',
           }
         : {
             background:
-              'radial-gradient(circle, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.22) 16%, transparent 18%)',
+              'radial-gradient(circle, rgba(242, 243, 245, 0.5) 0%, rgba(242, 243, 245, 0.32) 16%, transparent 18%)',
           };
     }
 
@@ -292,11 +292,17 @@ export function ChessAnalysisLab() {
 
   function tryMove(from: string, to: string) {
     const nextGame = new Chess(currentFen);
-    const move = nextGame.move({
-      from,
-      to,
-      promotion: 'q',
-    });
+    const move = (() => {
+      try {
+        return nextGame.move({
+          from,
+          to,
+          promotion: 'q',
+        });
+      } catch {
+        return null;
+      }
+    })();
 
     if (!move) {
       return false;
@@ -435,7 +441,7 @@ export function ChessAnalysisLab() {
             </div>
             <div className={styles.pgnControls}>
               <label className={`${styles.action} ${styles.primary}`} htmlFor="pgn-upload">
-                Load PGN
+                Load file
               </label>
               <button className={`${styles.action} ${styles.secondary}`} onClick={() => void handlePgnPaste()} disabled={!pgnDraft.trim()}>
                 Paste PGN
@@ -466,27 +472,27 @@ export function ChessAnalysisLab() {
                   setMode(nextMode);
                 }}
               >
-                {nextMode}
+                {nextMode === 'overview' ? 'Overview' : nextMode === 'review' ? 'Review' : 'Analysis'}
               </button>
             ))}
           </section>
 
           <section className={styles.actions}>
             <button className={styles.action} onClick={() => jumpToIndex(historyIndex - 1)} disabled={historyIndex === 0}>
-              Back
+              Prev move
             </button>
             <button
               className={styles.action}
               onClick={() => jumpToIndex(historyIndex + 1)}
               disabled={historyIndex === moveHistory.length}
             >
-              Forward
+              Next move
             </button>
             <button className={styles.action} onClick={() => setOrientation(value => (value === 'white' ? 'black' : 'white'))}>
               Flip board
             </button>
             <button className={styles.action} onClick={() => setShowArrow(value => !value)}>
-              {showArrow ? 'Hide arrow' : 'Show arrow'}
+              {showArrow ? 'Hide best' : 'Show best'}
             </button>
             <button className={styles.action} onClick={() => void runTimelineAnalysis()} disabled={timelineLoading}>
               {timelineLoading ? 'Refreshing' : 'Refresh line'}
@@ -568,7 +574,7 @@ export function ChessAnalysisLab() {
                     width: `${boardWidth}px`,
                     maxWidth: '100%',
                     height: `${boardWidth}px`,
-                    borderRadius: '1.4vh',
+                    borderRadius: '10px',
                   },
                   onPieceDrop: ({ sourceSquare, targetSquare }) =>
                     targetSquare ? tryMove(sourceSquare, targetSquare) : false,
@@ -595,8 +601,8 @@ export function ChessAnalysisLab() {
                   onSquareRightClick: () => clearSelection(),
                   squareStyles,
                   arrows: bestMoveArrow,
-                  lightSquareStyle: { backgroundColor: '#f2f2f0' },
-                  darkSquareStyle: { backgroundColor: '#17131d' },
+                  lightSquareStyle: { backgroundColor: '#e8e6df' },
+                  darkSquareStyle: { backgroundColor: '#5a526b' },
                   animationDurationInMs: 180,
                   showNotation: true,
                 }}
@@ -876,9 +882,9 @@ function ChartSection({
 }
 
 function formatNullable(value: number | null) {
-  return value == null ? '...' : `${value}`;
+  return value == null ? '--' : `${value}`;
 }
 
 function formatExpectedLoss(value: number | null) {
-  return value == null ? '...' : `${(value * 100).toFixed(1)}%`;
+  return value == null ? '--' : `${(value * 100).toFixed(1)}%`;
 }

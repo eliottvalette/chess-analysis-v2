@@ -1,8 +1,8 @@
 @import 'tailwindcss';
 
 :root {
-  --background: #050505;
-  --foreground: rgba(255, 255, 255, 0.94);
+  --background: #0f1014;
+  --foreground: #f2f3f5;
   --font-sans:
     'Avenir Next',
     'Helvetica Neue',
@@ -33,11 +33,12 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-weight: 300;
+  font-weight: 400;
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -51,6 +52,6 @@ code {
 }
 
 ::selection {
-  background: rgba(143, 117, 255, 0.34);
+  background: rgba(124, 109, 255, 0.36);
   color: #ffffff;
 }

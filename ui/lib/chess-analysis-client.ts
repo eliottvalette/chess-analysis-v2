@@ -348,7 +348,7 @@ export function getBestMoveArrow(bestMove: string | null) {
     {
       startSquare: bestMove.slice(0, 2),
       endSquare: bestMove.slice(2, 4),
-      color: '#8f75ff',
+      color: '#7c6dff',
     },
   ];
 }
@@ -601,11 +601,11 @@ export function buildChartOptions(
         display: false,
       },
       tooltip: {
-        backgroundColor: 'rgba(8, 8, 10, 0.92)',
-        borderColor: 'rgba(255, 255, 255, 0.12)',
+        backgroundColor: 'rgba(24, 26, 32, 0.96)',
+        borderColor: '#343744',
         borderWidth: 1,
-        titleColor: '#f8f8f8',
-        bodyColor: '#d9d9df',
+        titleColor: '#f2f3f5',
+        bodyColor: '#cfd3dc',
         displayColors: false,
         callbacks: {
           title(items) {
@@ -652,39 +652,39 @@ export function buildChartOptions(
     scales: {
       x: {
         ticks: {
-          color: 'rgba(255, 255, 255, 0.58)',
+          color: '#a7abb7',
         },
         grid: {
-          color: 'rgba(255, 255, 255, 0.05)',
+          color: 'rgba(167, 171, 183, 0.12)',
         },
         border: {
-          color: 'rgba(255, 255, 255, 0.1)',
+          color: '#343744',
         },
         title: {
           display: true,
           text: 'Half-move',
-          color: 'rgba(255, 255, 255, 0.62)',
+          color: '#a7abb7',
         },
       },
       y: {
         suggestedMin: -8,
         suggestedMax: 8,
         ticks: {
-          color: 'rgba(255, 255, 255, 0.58)',
+          color: '#a7abb7',
           callback(value) {
             return formatChartAxisValue(Number(value));
           },
         },
         grid: {
-          color: 'rgba(255, 255, 255, 0.05)',
+          color: 'rgba(167, 171, 183, 0.12)',
         },
         border: {
-          color: 'rgba(255, 255, 255, 0.1)',
+          color: '#343744',
         },
         title: {
           display: true,
           text: 'White edge',
-          color: 'rgba(255, 255, 255, 0.62)',
+          color: '#a7abb7',
         },
       },
     },
