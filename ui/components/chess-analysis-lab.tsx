@@ -158,6 +158,41 @@ export function ChessAnalysisLab() {
     return pairs;
   }, [moveHistory]);
 
+  const fetchCachedPositionAnalysis = useCallback(
+    (cacheKey: string, fen: string, moves: string[]) => {
+      const cachedAnalysis = positionCacheRef.current.get(cacheKey);
+
+      if (cachedAnalysis) {
+        return Promise.resolve(cachedAnalysis);
+      }
+
+      const inFlight = positionInFlightRef.current.get(cacheKey);
+
+      if (inFlight) {
+        return inFlight;
+      }
+
+      const request = analyzeSinglePosition({
+        fen,
+        initialFen,
+        moves,
+        depth: POSITION_DEPTH,
+        multipv: POSITION_MULTIPV,
+      })
+        .then(analysis => {
+          positionCacheRef.current.set(cacheKey, analysis);
+          return analysis;
+        })
+        .finally(() => {
+          positionInFlightRef.current.delete(cacheKey);
+        });
+
+      positionInFlightRef.current.set(cacheKey, request);
+      return request;
+    },
+    [initialFen],
+  );
+
   useEffect(() => {
     const stage = boardStageRef.current;
 
@@ -222,7 +257,7 @@ export function ChessAnalysisLab() {
       });
 
     return undefined;
-  }, [currentFen, currentLineKey, currentMoveList, initialFen]);
+  }, [currentFen, currentLineKey, currentMoveList, fetchCachedPositionAnalysis, initialFen]);
 
   useEffect(() => {
     if (moveHistory.length === 0 || historyIndex >= moveHistory.length) {
@@ -244,7 +279,7 @@ export function ChessAnalysisLab() {
     }, 180);
 
     return () => window.clearTimeout(timer);
-  }, [historyIndex, initialFen, moveHistory]);
+  }, [fetchCachedPositionAnalysis, historyIndex, initialFen, moveHistory]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -458,42 +493,6 @@ export function ChessAnalysisLab() {
     }
 
     await loadPgnText('Pasted PGN', pgnDraft.trim());
-  }
-
-  function getPositionCacheKey(nextInitialFen: string | null, moves: string[]) {
-    return `${nextInitialFen ?? 'startpos'}|${moves.join(' ')}`;
-  }
-
-  function fetchCachedPositionAnalysis(cacheKey: string, fen: string, moves: string[]) {
-    const cachedAnalysis = positionCacheRef.current.get(cacheKey);
-
-    if (cachedAnalysis) {
-      return Promise.resolve(cachedAnalysis);
-    }
-
-    const inFlight = positionInFlightRef.current.get(cacheKey);
-
-    if (inFlight) {
-      return inFlight;
-    }
-
-    const request = analyzeSinglePosition({
-      fen,
-      initialFen,
-      moves,
-      depth: POSITION_DEPTH,
-      multipv: POSITION_MULTIPV,
-    })
-      .then(analysis => {
-        positionCacheRef.current.set(cacheKey, analysis);
-        return analysis;
-      })
-      .finally(() => {
-        positionInFlightRef.current.delete(cacheKey);
-      });
-
-    positionInFlightRef.current.set(cacheKey, request);
-    return request;
   }
 
   return (
@@ -971,4 +970,8 @@ function formatMoveFigurine(san: string) {
   };
 
   return san.replace(/^[KQRBN]/, piece => pieces[piece] ?? piece);
+}
+
+function getPositionCacheKey(initialFen: string | null, moves: string[]) {
+  return `${initialFen ?? 'startpos'}|${moves.join(' ')}`;
 }
