@@ -667,8 +667,8 @@ export function ChessAnalysisLab() {
                   onSquareRightClick: () => clearSelection(),
                   squareStyles,
                   arrows: bestMoveArrow,
-                  lightSquareStyle: { backgroundColor: '#e8e6df' },
-                  darkSquareStyle: { backgroundColor: '#5a526b' },
+                  lightSquareStyle: { backgroundColor: '#728092' },
+                  darkSquareStyle: { backgroundColor: '#253140' },
                   animationDurationInMs: 180,
                   showNotation: true,
                 }}
