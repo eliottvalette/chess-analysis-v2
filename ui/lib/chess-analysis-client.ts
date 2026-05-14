@@ -653,6 +653,8 @@ export function buildChartOptions(
       x: {
         ticks: {
           color: '#a7abb7',
+          maxTicksLimit: 8,
+          autoSkip: true,
         },
         grid: {
           color: 'rgba(167, 171, 183, 0.12)',
@@ -671,6 +673,7 @@ export function buildChartOptions(
         suggestedMax: 8,
         ticks: {
           color: '#a7abb7',
+          maxTicksLimit: 7,
           callback(value) {
             return formatChartAxisValue(Number(value));
           },

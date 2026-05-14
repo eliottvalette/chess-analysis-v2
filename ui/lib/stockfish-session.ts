@@ -3,11 +3,20 @@ import 'server-only';
 import { createRequire } from 'node:module';
 import { Chess } from 'chess.js';
 
-import type { AnalysisResult, AnalyzeRequest, PerspectiveWdl, RawWdl, RelativeScore } from '@/lib/analysis-types';
+import type {
+  AnalysisLine,
+  AnalysisResult,
+  AnalyzeRequest,
+  PerspectiveWdl,
+  RawWdl,
+  RelativeScore,
+} from '@/lib/analysis-types';
 
 const DEFAULT_DEPTH = 12;
 const MAX_DEPTH = 24;
 const MIN_DEPTH = 6;
+const DEFAULT_MULTIPV = 1;
+const MAX_MULTIPV = 3;
 const ENGINE_TIMEOUT_MS = 15_000;
 
 type StockfishEngine = {
@@ -113,9 +122,10 @@ class StockfishSession {
   analyze(request: AnalyzeRequest) {
     return this.enqueue(async () => {
       const depth = sanitizeDepth(request.depth);
+      const multipv = sanitizeMultiPv(request.multipv);
       const positionCommand = buildPositionCommand(request);
       const lines = await this.run(
-        [positionCommand, `go depth ${depth}`],
+        ['setoption name Clear Hash', `setoption name MultiPV value ${multipv}`, positionCommand, `go depth ${depth}`],
         line => line.startsWith('bestmove '),
         30_000,
       );
@@ -192,6 +202,16 @@ function sanitizeDepth(depth?: number) {
   return Math.min(Math.max(parsed, MIN_DEPTH), MAX_DEPTH);
 }
 
+function sanitizeMultiPv(multipv?: number) {
+  const parsed = Number.parseInt(String(multipv ?? DEFAULT_MULTIPV), 10);
+
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_MULTIPV;
+  }
+
+  return Math.min(Math.max(parsed, DEFAULT_MULTIPV), MAX_MULTIPV);
+}
+
 function buildPositionCommand({ fen, initialFen, moves }: AnalyzeRequest) {
   if (Array.isArray(moves) && moves.length > 0) {
     if (typeof initialFen === 'string' && initialFen.trim()) {
@@ -210,49 +230,29 @@ function buildPositionCommand({ fen, initialFen, moves }: AnalyzeRequest) {
 
 function parseAnalysis(lines: string[], fen: string | undefined, depthRequested: number): AnalysisResult {
   const bestMoveLine = [...lines].reverse().find(line => line.startsWith('bestmove '));
-  const infoLine = [...lines].reverse().find(line => line.startsWith('info ') && /\bscore (cp|mate) /.test(line));
+  const parsedLines = parseAnalysisLines(lines, fen, depthRequested);
+  const primaryLine = parsedLines.find(line => line.multipv === 1) ?? parsedLines[0] ?? null;
+  const infoLine = findBestInfoLine(lines, 1) ?? findBestInfoLine(lines);
 
   const bestMoveMatch = bestMoveLine?.match(/^bestmove\s+(\S+)(?:\s+ponder\s+(\S+))?/);
-  const scoreMatch = infoLine?.match(/\bscore\s+(cp|mate)\s+(-?\d+)/);
-  const pvSection = infoLine?.match(/\bpv\s+(.+)$/)?.[1] ?? '';
   const wdlMatch = infoLine?.match(/\bwdl\s+(\d+)\s+(\d+)\s+(\d+)/);
   const depthMatch = infoLine?.match(/\bdepth\s+(\d+)/);
   const seldepthMatch = infoLine?.match(/\bseldepth\s+(\d+)/);
   const timeMatch = infoLine?.match(/\btime\s+(\d+)/);
   const nodesMatch = infoLine?.match(/\bnodes\s+(\d+)/);
   const npsMatch = infoLine?.match(/\bnps\s+(\d+)/);
-  const multipvMatch = infoLine?.match(/\bmultipv\s+(\d+)/);
 
   const turn = fen?.trim().split(/\s+/)[1] === 'b' ? 'b' : 'w';
   const terminalPerspective = inferTerminalPerspective(fen);
-  const score: RelativeScore | null = scoreMatch
-    ? {
-        type: scoreMatch[1] as RelativeScore['type'],
-        value: Number.parseInt(scoreMatch[2], 10),
-        bound: infoLine?.includes(' lowerbound')
-          ? 'lowerbound'
-          : infoLine?.includes(' upperbound')
-            ? 'upperbound'
-            : 'exact',
-      }
-    : null;
-
-  const whitePerspective: AnalysisResult['whitePerspective'] = score
-    ? {
-        type: score.type,
-        value:
-          score.type === 'mate' && score.value === 0 && terminalPerspective
-            ? terminalPerspective.whiteScore
-            : turn === 'w'
-              ? score.value
-              : -score.value,
-      }
-    : terminalPerspective
+  const score = primaryLine?.score ?? null;
+  const whitePerspective =
+    primaryLine?.whitePerspective ??
+    (terminalPerspective
       ? {
           type: terminalPerspective.whiteScore === 0 ? 'cp' : 'mate',
           value: terminalPerspective.whiteScore,
         }
-    : null;
+      : null);
 
   const wdl: RawWdl | null =
     wdlMatch
@@ -277,14 +277,85 @@ function parseAnalysis(lines: string[], fen: string | undefined, depthRequested:
     timeMs: timeMatch ? Number.parseInt(timeMatch[1], 10) : null,
     nodes: nodesMatch ? Number.parseInt(nodesMatch[1], 10) : null,
     nps: npsMatch ? Number.parseInt(npsMatch[1], 10) : null,
-    multipv: multipvMatch ? Number.parseInt(multipvMatch[1], 10) : 1,
-    pv: pvSection ? pvSection.split(/\s+/) : [],
+    multipv: primaryLine?.multipv ?? 1,
+    pv: primaryLine?.pv ?? [],
     raw: lines,
     score,
     whitePerspective,
     wdl,
     whitePerspectiveWdl,
+    lines: parsedLines.length > 0 ? parsedLines : primaryLine ? [primaryLine] : [],
   };
+}
+
+function parseAnalysisLines(lines: string[], fen: string | undefined, depthRequested: number) {
+  const byMultiPv = new Map<number, AnalysisLine>();
+
+  for (const line of lines) {
+    if (!line.startsWith('info ') || !/\bscore (cp|mate) /.test(line)) {
+      continue;
+    }
+
+    const parsed = parseInfoLine(line, fen, depthRequested);
+
+    if (!parsed) {
+      continue;
+    }
+
+    const previous = byMultiPv.get(parsed.multipv);
+
+    if (!previous || parsed.depth >= previous.depth) {
+      byMultiPv.set(parsed.multipv, parsed);
+    }
+  }
+
+  return [...byMultiPv.values()].sort((left, right) => left.multipv - right.multipv);
+}
+
+function parseInfoLine(line: string, fen: string | undefined, depthRequested: number): AnalysisLine | null {
+  const scoreMatch = line.match(/\bscore\s+(cp|mate)\s+(-?\d+)/);
+  const pvSection = line.match(/\bpv\s+(.+)$/)?.[1] ?? '';
+
+  if (!scoreMatch) {
+    return null;
+  }
+
+  const turn = fen?.trim().split(/\s+/)[1] === 'b' ? 'b' : 'w';
+  const terminalPerspective = inferTerminalPerspective(fen);
+  const score: RelativeScore = {
+    type: scoreMatch[1] as RelativeScore['type'],
+    value: Number.parseInt(scoreMatch[2], 10),
+    bound: line.includes(' lowerbound') ? 'lowerbound' : line.includes(' upperbound') ? 'upperbound' : 'exact',
+  };
+  const whitePerspective = {
+    type: score.type,
+    value:
+      score.type === 'mate' && score.value === 0 && terminalPerspective
+        ? terminalPerspective.whiteScore
+        : turn === 'w'
+          ? score.value
+          : -score.value,
+  };
+  const pv = pvSection ? pvSection.split(/\s+/) : [];
+
+  return {
+    multipv: Number.parseInt(line.match(/\bmultipv\s+(\d+)/)?.[1] ?? '1', 10),
+    bestMove: pv[0] ?? null,
+    depth: Number.parseInt(line.match(/\bdepth\s+(\d+)/)?.[1] ?? String(depthRequested), 10),
+    pv,
+    score,
+    whitePerspective,
+  };
+}
+
+function findBestInfoLine(lines: string[], multipv?: number) {
+  const candidates = [...lines].reverse().filter(line => line.startsWith('info ') && /\bscore (cp|mate) /.test(line));
+
+  if (multipv == null) {
+    return candidates[0];
+  }
+
+  return candidates.find(line => Number.parseInt(line.match(/\bmultipv\s+(\d+)/)?.[1] ?? '1', 10) === multipv);
 }
 
 function inferTerminalPerspective(fen: string | undefined) {

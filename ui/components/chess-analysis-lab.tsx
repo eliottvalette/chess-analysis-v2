@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { Chess, type Square } from 'chess.js';
 import {
   CategoryScale,
@@ -15,7 +15,7 @@ import {
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 
-import type { AnalysisResult } from '@/lib/analysis-types';
+import type { AnalysisLine, AnalysisResult } from '@/lib/analysis-types';
 import {
   analyzeGamePositions,
   analyzeSinglePosition,
@@ -25,6 +25,7 @@ import {
   buildTimelineSequencePositions,
   classifyTimelineMoves,
   extractMetadataFromGame,
+  formatBestMove,
   filterReviewMoments,
   formatPrincipalVariation,
   formatScoreLabel,
@@ -38,7 +39,6 @@ import {
   type StoredMove,
   reviewCategoryMeta,
   reviewCategoryOrder,
-  summarizeTimelineReviews,
 } from '@/lib/chess-analysis-client';
 import styles from './chess-analysis-lab.module.css';
 
@@ -50,6 +50,10 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
 });
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
+
+const POSITION_DEPTH = 16;
+const POSITION_MULTIPV = 3;
+const PRELOAD_AHEAD = 2;
 
 export function ChessAnalysisLab() {
   const [game, setGame] = useState(() => new Chess());
@@ -79,6 +83,8 @@ export function ChessAnalysisLab() {
   const evalRailRef = useRef<HTMLDivElement | null>(null);
   const positionRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
+  const positionCacheRef = useRef(new Map<string, AnalysisResult>());
+  const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
 
   const currentFen = useMemo(() => game.fen(), [game]);
   const currentMoves = useMemo(() => moveHistory.slice(0, historyIndex), [moveHistory, historyIndex]);
@@ -92,7 +98,6 @@ export function ChessAnalysisLab() {
     () => classifyTimelineMoves(moveHistory, preMoveAnalyses, timelineAnalyses, initialFen, metadata),
     [initialFen, metadata, moveHistory, preMoveAnalyses, timelineAnalyses],
   );
-  const reviewSummary = useMemo(() => summarizeTimelineReviews(timelineReviews), [timelineReviews]);
   const gameReview = useMemo(() => buildGameReview(timelineReviews, metadata), [metadata, timelineReviews]);
   const reviewMoments = useMemo(
     () => filterReviewMoments(gameReview.keyMoments, reviewSide),
@@ -118,12 +123,12 @@ export function ChessAnalysisLab() {
           backgroundColor: 'rgba(124, 109, 255, 0.14)',
           fill: true,
           borderWidth: 2,
-          pointRadius: timelineReviews.map(review => (review.category ? 4.8 : 0)),
-          pointHoverRadius: timelineReviews.map(review => (review.category ? 6.2 : 3.4)),
-          pointBorderWidth: timelineReviews.map(review => (review.category ? 1.5 : 0)),
-          pointBackgroundColor: timelineReviews.map(review => review.colorHex ?? '#7c6dff'),
-          pointBorderColor: timelineReviews.map(review => review.colorHex ?? '#7c6dff'),
-          pointStyle: timelineReviews.map(review => review.pointStyle),
+          pointRadius: timelineReviews.map(review => (review.isKeyMoment ? 4.6 : 0)),
+          pointHoverRadius: timelineReviews.map(review => (review.isKeyMoment ? 6 : 3)),
+          pointBorderWidth: timelineReviews.map(review => (review.isKeyMoment ? 1.5 : 0)),
+          pointBackgroundColor: timelineReviews.map(review => (review.isKeyMoment ? (review.colorHex ?? '#7c6dff') : '#7c6dff')),
+          pointBorderColor: timelineReviews.map(review => (review.isKeyMoment ? (review.colorHex ?? '#7c6dff') : '#7c6dff')),
+          pointStyle: timelineReviews.map(review => (review.isKeyMoment ? review.pointStyle : 'circle')),
           tension: 0.28,
         },
       ],
@@ -180,30 +185,30 @@ export function ChessAnalysisLab() {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
     const requestId = ++positionRequestIdRef.current;
+    const cacheKey = getPositionCacheKey(initialFen, currentMoveList);
+    const cachedAnalysis = positionCacheRef.current.get(cacheKey);
+
+    if (cachedAnalysis) {
+      setPositionAnalysis(cachedAnalysis);
+      setPositionLoading(false);
+      setServerError('');
+      return undefined;
+    }
 
     setPositionLoading(true);
     setServerError('');
 
-    analyzeSinglePosition(
-      {
-        fen: currentFen,
-        initialFen,
-        moves: currentMoveList,
-        depth: 12,
-      },
-      controller.signal,
-    )
+    fetchCachedPositionAnalysis(cacheKey, currentFen, currentMoveList)
       .then(analysis => {
-        if (controller.signal.aborted || positionRequestIdRef.current !== requestId) {
+        if (positionRequestIdRef.current !== requestId) {
           return;
         }
 
         setPositionAnalysis(analysis);
       })
       .catch(error => {
-        if (error.name === 'AbortError' || positionRequestIdRef.current !== requestId) {
+        if (positionRequestIdRef.current !== requestId) {
           return;
         }
 
@@ -211,13 +216,35 @@ export function ChessAnalysisLab() {
         setServerError(error.message);
       })
       .finally(() => {
-        if (!controller.signal.aborted && positionRequestIdRef.current === requestId) {
+        if (positionRequestIdRef.current === requestId) {
           setPositionLoading(false);
         }
       });
 
-    return () => controller.abort();
+    return undefined;
   }, [currentFen, currentLineKey, currentMoveList, initialFen]);
+
+  useEffect(() => {
+    if (moveHistory.length === 0 || historyIndex >= moveHistory.length) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      for (let index = historyIndex + 1; index <= Math.min(moveHistory.length, historyIndex + PRELOAD_AHEAD); index += 1) {
+        const moves = buildMoveUciHistory(moveHistory.slice(0, index));
+        const cacheKey = getPositionCacheKey(initialFen, moves);
+
+        if (positionCacheRef.current.has(cacheKey) || positionInFlightRef.current.has(cacheKey)) {
+          continue;
+        }
+
+        const nextGame = restoreGameFromHistory(moveHistory, initialFen, index);
+        void fetchCachedPositionAnalysis(cacheKey, nextGame.fen(), moves).catch(() => undefined);
+      }
+    }, 180);
+
+    return () => window.clearTimeout(timer);
+  }, [historyIndex, initialFen, moveHistory]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -350,7 +377,7 @@ export function ChessAnalysisLab() {
     try {
       const response = await analyzeGamePositions({
         positions: buildTimelineSequencePositions(nextMoves, nextInitialFen),
-        depth: 10,
+        depth: 12,
       });
 
       if (timelineRequestIdRef.current !== requestId) {
@@ -397,6 +424,8 @@ export function ChessAnalysisLab() {
       setTimelineAnalyses([]);
       setTimelineError('');
       setServerError('');
+      positionCacheRef.current.clear();
+      positionInFlightRef.current.clear();
       clearSelection();
 
       await runTimelineAnalysis(nextHistory, nextInitialFen);
@@ -429,6 +458,42 @@ export function ChessAnalysisLab() {
     }
 
     await loadPgnText('Pasted PGN', pgnDraft.trim());
+  }
+
+  function getPositionCacheKey(nextInitialFen: string | null, moves: string[]) {
+    return `${nextInitialFen ?? 'startpos'}|${moves.join(' ')}`;
+  }
+
+  function fetchCachedPositionAnalysis(cacheKey: string, fen: string, moves: string[]) {
+    const cachedAnalysis = positionCacheRef.current.get(cacheKey);
+
+    if (cachedAnalysis) {
+      return Promise.resolve(cachedAnalysis);
+    }
+
+    const inFlight = positionInFlightRef.current.get(cacheKey);
+
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = analyzeSinglePosition({
+      fen,
+      initialFen,
+      moves,
+      depth: POSITION_DEPTH,
+      multipv: POSITION_MULTIPV,
+    })
+      .then(analysis => {
+        positionCacheRef.current.set(cacheKey, analysis);
+        return analysis;
+      })
+      .finally(() => {
+        positionInFlightRef.current.delete(cacheKey);
+      });
+
+    positionInFlightRef.current.set(cacheKey, request);
+    return request;
   }
 
   return (
@@ -517,6 +582,8 @@ export function ChessAnalysisLab() {
                 setTimelineLoading(false);
                 setServerError('');
                 setTimelineError('');
+                positionCacheRef.current.clear();
+                positionInFlightRef.current.clear();
                 clearSelection();
               }}
             >
@@ -609,11 +676,7 @@ export function ChessAnalysisLab() {
               />
             </div>
           </div>
-
-          <section className={`${styles.card} ${styles.analysis}`}>
-            <p className={styles.copy}>{formatPrincipalVariation(currentFen, positionAnalysis?.pv ?? [])}</p>
-            {serverError ? <p className={styles.error}>{serverError}</p> : null}
-          </section>
+          {serverError ? <p className={styles.error}>{serverError}</p> : null}
         </section>
 
         <aside className={`${styles.panel} ${styles.infoPanel}`}>
@@ -763,18 +826,7 @@ export function ChessAnalysisLab() {
             </>
           ) : (
             <>
-              <ChartSection
-                chartConfig={chartConfig}
-                chartData={chartData}
-                historyIndex={historyIndex}
-                moveHistoryLength={moveHistory.length}
-                reviewSummary={reviewSummary}
-                timelineAnalysesLength={timelineAnalyses.length}
-                timelineError={timelineError}
-                timelineLoading={timelineLoading}
-                whiteReviewName={whiteReviewName}
-                blackReviewName={blackReviewName}
-              />
+              <EngineLinesSection currentFen={currentFen} positionAnalysis={positionAnalysis} positionLoading={positionLoading} />
               <section className={`${styles.card} ${styles.movesCard}`}>
                 <div className={styles.panelHeader}>
                   <h2 className={styles.sectionTitle}>Moves</h2>
@@ -790,14 +842,14 @@ export function ChessAnalysisLab() {
                           className={`${styles.moveChip} ${historyIndex === pair.whitePly ? styles.activeMove : ''}`}
                           onClick={() => jumpToIndex(pair.whitePly)}
                         >
-                          {pair.white?.san ?? '...'}
+                          {pair.white ? formatMoveFigurine(pair.white.san) : '...'}
                         </button>
                         <button
                           className={`${styles.moveChip} ${historyIndex === pair.blackPly ? styles.activeMove : ''}`}
                           onClick={() => jumpToIndex(pair.blackPly)}
                           disabled={!pair.black}
                         >
-                          {pair.black?.san ?? ''}
+                          {pair.black ? formatMoveFigurine(pair.black.san) : ''}
                         </button>
                       </div>
                     ))
@@ -817,23 +869,17 @@ function ChartSection({
   chartData,
   historyIndex,
   moveHistoryLength,
-  reviewSummary,
   timelineAnalysesLength,
   timelineError,
   timelineLoading,
-  whiteReviewName,
-  blackReviewName,
 }: {
   chartConfig: ReturnType<typeof buildChartOptions>;
   chartData: ChartData<'line', number[], number>;
   historyIndex: number;
   moveHistoryLength: number;
-  reviewSummary?: ReturnType<typeof summarizeTimelineReviews>;
   timelineAnalysesLength: number;
   timelineError: string;
   timelineLoading: boolean;
-  whiteReviewName?: string;
-  blackReviewName?: string;
 }) {
   return (
     <section className={`${styles.card} ${styles.chartCard}`}>
@@ -850,33 +896,44 @@ function ChartSection({
           </div>
         )}
       </div>
-      {reviewSummary && whiteReviewName && blackReviewName ? (
-        <div className={styles.reviewLegend}>
-          {reviewCategoryOrder.map(category => {
-            const meta = reviewCategoryMeta[category];
-            const whiteCount = reviewSummary.white[category];
-            const blackCount = reviewSummary.black[category];
-
-            if (!whiteCount && !blackCount) {
-              return null;
-            }
-
-            return (
-              <div className={styles.reviewChip} key={category} style={{ ['--review-color' as string]: meta.color }}>
-                <span className={styles.reviewDot} />
-                <span className={styles.reviewLabel}>{meta.label}</span>
-                <span className={styles.reviewCount}>
-                  {whiteReviewName} {whiteCount}
-                </span>
-                <span className={styles.reviewCount}>
-                  {blackReviewName} {blackCount}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
       {timelineError ? <p className={styles.error}>{timelineError}</p> : null}
+    </section>
+  );
+}
+
+function EngineLinesSection({
+  currentFen,
+  positionAnalysis,
+  positionLoading,
+}: {
+  currentFen: string;
+  positionAnalysis: AnalysisResult | null;
+  positionLoading: boolean;
+}) {
+  const lines = positionAnalysis?.lines?.slice(0, 3) ?? [];
+
+  return (
+    <section className={`${styles.card} ${styles.engineCard}`}>
+      <div className={styles.panelHeader}>
+        <h2 className={styles.sectionTitle}>Engine</h2>
+        <span className={styles.statusText}>{positionLoading ? 'analyzing' : `depth ${positionAnalysis?.depth ?? '--'}`}</span>
+      </div>
+      <div className={styles.engineLines}>
+        {lines.length > 0 ? (
+          lines.map(line => (
+            <div className={styles.engineLine} key={line.multipv}>
+              <div className={styles.engineLineHead}>
+                <span className={styles.engineRank}>#{line.multipv}</span>
+                <strong>{line.bestMove ? formatBestMove(currentFen, line.bestMove) : '--'}</strong>
+                <span>{formatLineScore(line)}</span>
+              </div>
+              <p className={styles.enginePv}>{formatPrincipalVariation(currentFen, line.pv)}</p>
+            </div>
+          ))
+        ) : (
+          <p className={styles.empty}>{positionLoading ? 'Analyzing candidate lines.' : 'No engine lines yet.'}</p>
+        )}
+      </div>
     </section>
   );
 }
@@ -887,4 +944,31 @@ function formatNullable(value: number | null) {
 
 function formatExpectedLoss(value: number | null) {
   return value == null ? '--' : `${(value * 100).toFixed(1)}%`;
+}
+
+function formatLineScore(line: AnalysisLine) {
+  const score = line.whitePerspective;
+
+  if (!score) {
+    return '--';
+  }
+
+  if (score.type === 'mate') {
+    return score.value > 0 ? `#${score.value}` : `-#${Math.abs(score.value)}`;
+  }
+
+  const pawns = score.value / 100;
+  return `${pawns > 0 ? '+' : ''}${pawns.toFixed(2)}`;
+}
+
+function formatMoveFigurine(san: string) {
+  const pieces: Record<string, string> = {
+    K: '♔',
+    Q: '♕',
+    R: '♖',
+    B: '♗',
+    N: '♘',
+  };
+
+  return san.replace(/^[KQRBN]/, piece => pieces[piece] ?? piece);
 }

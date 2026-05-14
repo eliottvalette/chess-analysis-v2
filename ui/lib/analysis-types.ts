@@ -38,6 +38,7 @@ export type AnalysisResult = {
   whitePerspective: PerspectiveScore | null;
   wdl: RawWdl | null;
   whitePerspectiveWdl: PerspectiveWdl | null;
+  lines: AnalysisLine[];
 };
 
 export type AnalyzeRequest = {
@@ -45,4 +46,14 @@ export type AnalyzeRequest = {
   initialFen?: string | null;
   moves?: string[];
   depth?: number;
+  multipv?: number;
+};
+
+export type AnalysisLine = {
+  multipv: number;
+  bestMove: string | null;
+  depth: number;
+  pv: string[];
+  score: RelativeScore | null;
+  whitePerspective: PerspectiveScore | null;
 };
