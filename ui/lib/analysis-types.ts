@@ -46,6 +46,7 @@ export type AnalyzeRequest = {
   initialFen?: string | null;
   moves?: string[];
   depth?: number;
+  movetimeMs?: number;
   multipv?: number;
 };
 

@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       positions?: AnalyzeRequest[];
       depth?: number;
+      movetimeMs?: number;
     };
     const positions = Array.isArray(body.positions) ? body.positions : [];
 
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
     const analyses = [];
 
     for (const position of positions) {
-      analyses.push(await session.analyze({ ...position, depth: body.depth }));
+      analyses.push(await session.analyze({ ...position, depth: body.depth, movetimeMs: body.movetimeMs }));
     }
 
     return NextResponse.json({ analyses });

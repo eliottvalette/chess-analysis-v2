@@ -170,6 +170,7 @@ export async function analyzeGamePositions(
   payload: {
     positions: AnalyzeRequest[];
     depth?: number;
+    movetimeMs?: number;
   },
   signal?: AbortSignal,
 ) {

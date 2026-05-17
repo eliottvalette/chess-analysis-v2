@@ -17,8 +17,11 @@ const MAX_DEPTH = 24;
 const MIN_DEPTH = 6;
 const DEFAULT_MULTIPV = 1;
 const MAX_MULTIPV = 3;
+const MIN_MOVETIME_MS = 1;
+const MAX_MOVETIME_MS = 5_000;
 const ENGINE_TIMEOUT_MS = 15_000;
 const DEFAULT_STOCKFISH_PATHS = ['/opt/homebrew/bin/stockfish', '/usr/local/bin/stockfish', 'stockfish'];
+const MAX_ANALYSIS_CACHE_ENTRIES = 4_000;
 
 type StockfishEngine = {
   addMessageListener(listener: (line: string) => void): void;
@@ -197,22 +200,34 @@ class StockfishSession {
   analyze(request: AnalyzeRequest) {
     return this.enqueue(async () => {
       const depth = sanitizeDepth(request.depth);
+      const movetimeMs = sanitizeMovetime(request.movetimeMs);
       const multipv = sanitizeMultiPv(request.multipv);
       const positionCommand = buildPositionCommand(request);
       const analysisFen = getAnalysisFen(request);
+      const searchCommand = movetimeMs == null ? `go depth ${depth}` : `go movetime ${movetimeMs}`;
+      const cacheKey = getAnalysisCacheKey(positionCommand, depth, movetimeMs, multipv);
+      const cachedAnalysis = getCachedAnalysis(cacheKey);
+
+      if (cachedAnalysis) {
+        return cachedAnalysis;
+      }
+
       const lines = await this.run(
-        ['setoption name Clear Hash', `setoption name MultiPV value ${multipv}`, positionCommand, `go depth ${depth}`],
+        ['setoption name Clear Hash', `setoption name MultiPV value ${multipv}`, positionCommand, searchCommand],
         line => line.startsWith('bestmove '),
-        30_000,
+        movetimeMs == null ? 30_000 : Math.max(ENGINE_TIMEOUT_MS, movetimeMs + 5_000),
       );
 
-      return parseAnalysis(lines, analysisFen, depth);
+      const analysis = parseAnalysis(lines, analysisFen, depth);
+      setCachedAnalysis(cacheKey, analysis);
+      return analysis;
     });
   }
 }
 
 declare global {
   var __chessAnalysisStockfishSession: Promise<StockfishSession> | undefined;
+  var __chessAnalysisCache: Map<string, AnalysisResult> | undefined;
 }
 
 if (process.env.NODE_ENV !== 'production') {
@@ -238,6 +253,49 @@ export function getStockfishSession() {
   return globalThis.__chessAnalysisStockfishSession;
 }
 
+function getAnalysisCache() {
+  globalThis.__chessAnalysisCache ??= new Map<string, AnalysisResult>();
+  return globalThis.__chessAnalysisCache;
+}
+
+function getAnalysisCacheKey(positionCommand: string, depth: number, movetimeMs: number | null, multipv: number) {
+  return JSON.stringify({
+    engine: 'native-stockfish',
+    depth,
+    movetimeMs,
+    multipv,
+    positionCommand,
+  });
+}
+
+function getCachedAnalysis(cacheKey: string) {
+  const cache = getAnalysisCache();
+  const analysis = cache.get(cacheKey);
+
+  if (!analysis) {
+    return null;
+  }
+
+  cache.delete(cacheKey);
+  cache.set(cacheKey, analysis);
+  return analysis;
+}
+
+function setCachedAnalysis(cacheKey: string, analysis: AnalysisResult) {
+  const cache = getAnalysisCache();
+  cache.set(cacheKey, analysis);
+
+  while (cache.size > MAX_ANALYSIS_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+
+    if (oldestKey == null) {
+      return;
+    }
+
+    cache.delete(oldestKey);
+  }
+}
+
 function sanitizeDepth(depth?: number) {
   const parsed = Number.parseInt(String(depth ?? DEFAULT_DEPTH), 10);
 
@@ -256,6 +314,20 @@ function sanitizeMultiPv(multipv?: number) {
   }
 
   return Math.min(Math.max(parsed, DEFAULT_MULTIPV), MAX_MULTIPV);
+}
+
+function sanitizeMovetime(movetimeMs?: number) {
+  if (movetimeMs == null) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(String(movetimeMs), 10);
+
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.min(Math.max(parsed, MIN_MOVETIME_MS), MAX_MOVETIME_MS);
 }
 
 function buildPositionCommand({ fen, initialFen, moves }: AnalyzeRequest) {

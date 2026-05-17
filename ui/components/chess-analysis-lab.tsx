@@ -52,6 +52,8 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
 const POSITION_DEPTH = 24;
+const POSITION_MOVETIME_MS = 500;
+const TIMELINE_MOVETIME_MS = 80;
 const POSITION_MULTIPV = 3;
 const PRELOAD_AHEAD = 1;
 
@@ -177,6 +179,7 @@ export function ChessAnalysisLab() {
         initialFen,
         moves,
         depth: POSITION_DEPTH,
+        movetimeMs: POSITION_MOVETIME_MS,
         multipv: POSITION_MULTIPV,
       })
         .then(analysis => {
@@ -414,6 +417,7 @@ export function ChessAnalysisLab() {
       const response = await analyzeGamePositions({
         positions: buildTimelineSequencePositions(nextMoves, nextInitialFen),
         depth: 12,
+        movetimeMs: TIMELINE_MOVETIME_MS,
       });
 
       if (timelineRequestIdRef.current !== requestId) {
