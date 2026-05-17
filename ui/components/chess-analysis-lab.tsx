@@ -51,9 +51,9 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
-const POSITION_DEPTH = 16;
+const POSITION_DEPTH = 24;
 const POSITION_MULTIPV = 3;
-const PRELOAD_AHEAD = 2;
+const PRELOAD_AHEAD = 1;
 
 export function ChessAnalysisLab() {
   const [game, setGame] = useState(() => new Chess());
@@ -233,6 +233,7 @@ export function ChessAnalysisLab() {
 
     setPositionLoading(true);
     setServerError('');
+    setPositionAnalysis(null);
 
     fetchCachedPositionAnalysis(cacheKey, currentFen, currentMoveList)
       .then(analysis => {

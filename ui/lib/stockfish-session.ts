@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { createRequire } from 'node:module';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { Chess } from 'chess.js';
 
 import type {
@@ -18,13 +18,13 @@ const MIN_DEPTH = 6;
 const DEFAULT_MULTIPV = 1;
 const MAX_MULTIPV = 3;
 const ENGINE_TIMEOUT_MS = 15_000;
+const DEFAULT_STOCKFISH_PATHS = ['/opt/homebrew/bin/stockfish', '/usr/local/bin/stockfish', 'stockfish'];
 
 type StockfishEngine = {
   addMessageListener(listener: (line: string) => void): void;
   postMessage(command: string): void;
+  dispose(): void;
 };
-
-type StockfishFactory = () => Promise<StockfishEngine>;
 
 type PendingRequest = {
   lines: string[];
@@ -34,8 +34,83 @@ type PendingRequest = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-const require = createRequire(import.meta.url);
-const createStockfish = loadStockfishFactory();
+class NativeStockfishEngine implements StockfishEngine {
+  private readonly listeners = new Set<(line: string) => void>();
+  private bufferedOutput = '';
+
+  private constructor(private readonly process: ChildProcessWithoutNullStreams) {
+    this.process.stdout.setEncoding('utf8');
+    this.process.stderr.setEncoding('utf8');
+    this.process.stdout.on('data', chunk => this.handleOutput(String(chunk)));
+    this.process.stderr.on('data', chunk => this.handleOutput(String(chunk)));
+  }
+
+  static async create() {
+    const configuredPath = process.env.STOCKFISH_PATH?.trim();
+    const candidates = configuredPath ? [configuredPath, ...DEFAULT_STOCKFISH_PATHS] : DEFAULT_STOCKFISH_PATHS;
+    const uniqueCandidates = [...new Set(candidates)];
+    const errors: string[] = [];
+
+    for (const candidate of uniqueCandidates) {
+      try {
+        const engine = await NativeStockfishEngine.tryCreate(candidate);
+        return engine;
+      } catch (error) {
+        errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    throw new Error(`Unable to start Stockfish. Tried ${errors.join(' | ')}`);
+  }
+
+  private static tryCreate(command: string) {
+    return new Promise<NativeStockfishEngine>((resolve, reject) => {
+      const child = spawn(command, [], { stdio: 'pipe' });
+
+      child.once('spawn', () => resolve(new NativeStockfishEngine(child)));
+      child.once('error', reject);
+      child.once('exit', code => {
+        if (code !== null) {
+          reject(new Error(`exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  addMessageListener(listener: (line: string) => void) {
+    this.listeners.add(listener);
+  }
+
+  postMessage(command: string) {
+    this.process.stdin.write(`${command}\n`);
+  }
+
+  dispose() {
+    this.listeners.clear();
+
+    if (!this.process.killed) {
+      this.process.kill();
+    }
+  }
+
+  private handleOutput(output: string) {
+    this.bufferedOutput += output;
+    const lines = this.bufferedOutput.split(/\r?\n/);
+    this.bufferedOutput = lines.pop() ?? '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        continue;
+      }
+
+      for (const listener of this.listeners) {
+        listener(trimmed);
+      }
+    }
+  }
+}
 
 class StockfishSession {
   private readonly engine: StockfishEngine;
@@ -124,13 +199,14 @@ class StockfishSession {
       const depth = sanitizeDepth(request.depth);
       const multipv = sanitizeMultiPv(request.multipv);
       const positionCommand = buildPositionCommand(request);
+      const analysisFen = getAnalysisFen(request);
       const lines = await this.run(
         ['setoption name Clear Hash', `setoption name MultiPV value ${multipv}`, positionCommand, `go depth ${depth}`],
         line => line.startsWith('bestmove '),
         30_000,
       );
 
-      return parseAnalysis(lines, request.fen, depth);
+      return parseAnalysis(lines, analysisFen, depth);
     });
   }
 }
@@ -145,7 +221,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 export function getStockfishSession() {
   if (!globalThis.__chessAnalysisStockfishSession) {
-    const sessionPromise = withGlobalFetchDisabledAsync(() => createStockfish())
+    const sessionPromise = NativeStockfishEngine.create()
       .then(async engine => {
         const session = new StockfishSession(engine);
         await session.initialize();
@@ -160,36 +236,6 @@ export function getStockfishSession() {
   }
 
   return globalThis.__chessAnalysisStockfishSession;
-}
-
-function loadStockfishFactory() {
-  return withGlobalFetchDisabledSync(() => {
-    return require('stockfish.wasm') as StockfishFactory;
-  });
-}
-
-function withGlobalFetchDisabledSync<T>(task: () => T) {
-  const originalFetch = Reflect.get(globalThis, 'fetch');
-
-  Reflect.set(globalThis, 'fetch', undefined);
-
-  try {
-    return task();
-  } finally {
-    Reflect.set(globalThis, 'fetch', originalFetch);
-  }
-}
-
-async function withGlobalFetchDisabledAsync<T>(task: () => T | Promise<T>) {
-  const originalFetch = Reflect.get(globalThis, 'fetch');
-
-  Reflect.set(globalThis, 'fetch', undefined);
-
-  try {
-    return await task();
-  } finally {
-    Reflect.set(globalThis, 'fetch', originalFetch);
-  }
 }
 
 function sanitizeDepth(depth?: number) {
@@ -226,6 +272,28 @@ function buildPositionCommand({ fen, initialFen, moves }: AnalyzeRequest) {
   }
 
   return 'position startpos';
+}
+
+function getAnalysisFen({ fen, initialFen, moves }: AnalyzeRequest) {
+  if (typeof fen === 'string' && fen.trim()) {
+    return fen.trim();
+  }
+
+  try {
+    const chess = initialFen?.trim() ? new Chess(initialFen.trim()) : new Chess();
+
+    for (const move of moves ?? []) {
+      chess.move({
+        from: move.slice(0, 2),
+        to: move.slice(2, 4),
+        ...(move.length > 4 ? { promotion: move[4] } : {}),
+      });
+    }
+
+    return chess.fen();
+  } catch {
+    return fen;
+  }
 }
 
 function parseAnalysis(lines: string[], fen: string | undefined, depthRequested: number): AnalysisResult {
