@@ -19,6 +19,7 @@
 
 # production
 /build
+/bin/stockfish
 
 # misc
 .DS_Store

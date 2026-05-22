@@ -3,5 +3,8 @@
   command = "npm run build"
   publish = ".next"
 
+[functions]
+  included_files = ["bin/stockfish"]
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"

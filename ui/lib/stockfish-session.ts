@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import path from 'node:path';
 import { Chess } from 'chess.js';
 
 import type {
@@ -20,7 +21,14 @@ const MAX_MULTIPV = 3;
 const MIN_MOVETIME_MS = 1;
 const MAX_MOVETIME_MS = 5_000;
 const ENGINE_TIMEOUT_MS = 15_000;
-const DEFAULT_STOCKFISH_PATHS = ['/opt/homebrew/bin/stockfish', '/usr/local/bin/stockfish', 'stockfish'];
+const DEFAULT_STOCKFISH_PATHS = [
+  path.join(process.cwd(), 'bin', 'stockfish'),
+  path.join(process.cwd(), 'ui', 'bin', 'stockfish'),
+  '/var/task/bin/stockfish',
+  '/opt/homebrew/bin/stockfish',
+  '/usr/local/bin/stockfish',
+  'stockfish',
+];
 const MAX_ANALYSIS_CACHE_ENTRIES = 4_000;
 
 type StockfishEngine = {
