@@ -286,31 +286,6 @@ export function ChessAnalysisLab() {
   }, [fetchCachedPositionAnalysis, historyIndex, initialFen, moveHistory]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'ArrowLeft') {
-        const boundedIndex = Math.max(0, Math.min(historyIndex - 1, moveHistory.length));
-        const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
-
-        setHistoryIndex(boundedIndex);
-        setGame(nextGame);
-        clearSelection();
-      }
-
-      if (event.key === 'ArrowRight') {
-        const boundedIndex = Math.max(0, Math.min(historyIndex + 1, moveHistory.length));
-        const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
-
-        setHistoryIndex(boundedIndex);
-        setGame(nextGame);
-        clearSelection();
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [historyIndex, initialFen, moveHistory]);
-
-  useEffect(() => {
     setReviewIndex(value => Math.max(0, Math.min(value, Math.max(0, reviewMoments.length - 1))));
   }, [reviewMoments.length]);
 
@@ -345,7 +320,7 @@ export function ChessAnalysisLab() {
     setSquareStyles(nextStyles);
   }
 
-  function commitMove(nextGame: Chess, move: StoredMove) {
+  const commitMove = useCallback((nextGame: Chess, move: StoredMove) => {
     const nextHistory = [...moveHistory.slice(0, historyIndex), move];
 
     setMoveHistory(nextHistory);
@@ -353,17 +328,18 @@ export function ChessAnalysisLab() {
     setGame(nextGame);
     setTimelineAnalyses([]);
     setTimelineError('');
-    clearSelection();
-  }
+    setSelectedSquare(null);
+    setSquareStyles({});
+  }, [historyIndex, moveHistory]);
 
-  function tryMove(from: string, to: string) {
+  const tryMove = useCallback((from: string, to: string, promotion = 'q') => {
     const nextGame = new Chess(currentFen);
     const move = (() => {
       try {
         return nextGame.move({
           from,
           to,
-          promotion: 'q',
+          promotion,
         });
       } catch {
         return null;
@@ -376,7 +352,55 @@ export function ChessAnalysisLab() {
 
     commitMove(nextGame, toStoredMove(move));
     return true;
-  }
+  }, [commitMove, currentFen]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT' ||
+        target?.isContentEditable;
+
+      if (isTyping) {
+        return;
+      }
+
+      if (event.code === 'Space') {
+        event.preventDefault();
+
+        const bestMove = positionAnalysis?.bestMove;
+
+        if (bestMove && bestMove.length >= 4) {
+          tryMove(bestMove.slice(0, 2), bestMove.slice(2, 4), bestMove[4]);
+        }
+
+        return;
+      }
+
+      if (event.key === 'ArrowLeft') {
+        const boundedIndex = Math.max(0, Math.min(historyIndex - 1, moveHistory.length));
+        const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
+
+        setHistoryIndex(boundedIndex);
+        setGame(nextGame);
+        clearSelection();
+      }
+
+      if (event.key === 'ArrowRight') {
+        const boundedIndex = Math.max(0, Math.min(historyIndex + 1, moveHistory.length));
+        const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
+
+        setHistoryIndex(boundedIndex);
+        setGame(nextGame);
+        clearSelection();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [historyIndex, initialFen, moveHistory, positionAnalysis?.bestMove, tryMove]);
 
   function jumpToIndex(index: number) {
     const boundedIndex = Math.max(0, Math.min(index, moveHistory.length));
@@ -527,25 +551,6 @@ export function ChessAnalysisLab() {
             <p className={styles.support}>{fileName}</p>
           </section>
 
-          <section className={styles.modeTabs}>
-            {(['overview', 'review', 'analysis'] satisfies LabMode[]).map(nextMode => (
-              <button
-                className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
-                key={nextMode}
-                onClick={() => {
-                  if (nextMode === 'review') {
-                    goToReviewMoment(reviewIndex);
-                    return;
-                  }
-
-                  setMode(nextMode);
-                }}
-              >
-                {nextMode === 'overview' ? 'Overview' : nextMode === 'review' ? 'Review' : 'Analysis'}
-              </button>
-            ))}
-          </section>
-
           <section className={styles.actions}>
             <button className={styles.action} onClick={() => jumpToIndex(historyIndex - 1)} disabled={historyIndex === 0}>
               Prev move
@@ -684,6 +689,25 @@ export function ChessAnalysisLab() {
         </section>
 
         <aside className={`${styles.panel} ${styles.infoPanel}`}>
+          <section className={styles.modeTabs}>
+            {(['overview', 'review', 'analysis'] satisfies LabMode[]).map(nextMode => (
+              <button
+                className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
+                key={nextMode}
+                onClick={() => {
+                  if (nextMode === 'review') {
+                    goToReviewMoment(reviewIndex);
+                    return;
+                  }
+
+                  setMode(nextMode);
+                }}
+              >
+                {nextMode === 'overview' ? 'Overview' : nextMode === 'review' ? 'Review' : 'Analysis'}
+              </button>
+            ))}
+          </section>
+
           {mode === 'overview' ? (
             <>
               <section className={`${styles.card} ${styles.overviewCard}`}>

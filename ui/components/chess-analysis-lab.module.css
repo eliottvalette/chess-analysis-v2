@@ -63,7 +63,7 @@
 
 .sidePanel {
   display: grid;
-  grid-template-rows: minmax(0, 0.9fr) auto auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 0.9fr) auto minmax(0, 1fr);
 }
 
 .infoPanel {
@@ -71,6 +71,17 @@
   flex-direction: column;
   overflow: hidden auto;
   max-height: 100%;
+}
+
+.infoPanel > .modeTabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex: 0 0 auto;
+  padding: 2px 0;
+  background: linear-gradient(180deg, rgba(10, 16, 26, 0.82), rgba(10, 16, 26, 0.34));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .boardPanel {
