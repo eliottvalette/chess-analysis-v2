@@ -102,7 +102,7 @@ export function ChessAnalysisLab() {
   const currentMoveList = useMemo(() => buildMoveUciHistory(currentMoves), [currentMoves]);
   const currentLineKey = currentMoveList.join(' ');
   const whiteAdvantage = getAdvantageMeter(positionAnalysis);
-  const bestMoveArrow = showArrow ? getBestMoveArrow(positionAnalysis?.bestMove ?? null) : [];
+  const bestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(positionAnalysis?.bestMove ?? null) : [];
   const deckAnswerArrow = deckFeedback && activeDeckCard ? getBestMoveArrow(activeDeckCard.answerUci) : [];
   const boardArrows = activeDeckCard ? deckAnswerArrow : bestMoveArrow;
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
@@ -444,6 +444,7 @@ export function ChessAnalysisLab() {
     setMode('deck');
     setActiveDeckCard(card);
     setDeckFeedback(null);
+    setOrientation(card.side);
     setShowArrow(false);
     setPositionAnalysis(null);
     setTimelineAnalyses([]);
@@ -638,8 +639,13 @@ export function ChessAnalysisLab() {
               <button className={styles.iconButton} onClick={() => setOrientation(value => (value === 'white' ? 'black' : 'white'))} title="Flip board">
                 F
               </button>
-              <button className={styles.iconButton} onClick={() => setShowArrow(value => !value)} title={showArrow ? 'Hide best arrow' : 'Show best arrow'}>
-                {showArrow ? 'A' : 'a'}
+              <button
+                className={styles.iconButton}
+                onClick={() => setShowArrow(value => !value)}
+                disabled={Boolean(activeDeckCard && !deckFeedback)}
+                title={activeDeckCard ? 'Best arrow hidden during deck review' : showArrow ? 'Hide best arrow' : 'Show best arrow'}
+              >
+                {activeDeckCard ? '-' : showArrow ? 'A' : 'a'}
               </button>
               <button className={styles.iconButton} onClick={() => void runTimelineAnalysis()} disabled={timelineLoading || moveHistory.length === 0} title="Refresh line">
                 R

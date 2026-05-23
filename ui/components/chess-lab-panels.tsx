@@ -360,13 +360,14 @@ export function DeckPanel({
   startCard: (card: DeckCard | null) => void;
 }) {
   const card = activeCard ?? nextCard;
+  const cardLoaded = Boolean(activeCard && card && activeCard.id === card.id);
 
   return (
     <>
       <section className={`${styles.card} ${styles.deckCard}`}>
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Deck</h2>
-          <span className={styles.statusText}>{deckCards.length} auto-filled</span>
+          <span className={styles.statusText}>{cardLoaded ? 'loaded' : `${deckCards.length} auto-filled`}</span>
         </div>
         {card ? (
           <>
@@ -376,6 +377,10 @@ export function DeckPanel({
               </span>
               <strong>{card.prompt}</strong>
               <p>{card.context}</p>
+              <div className={styles.deckLoadState}>
+                <span>{cardLoaded ? 'Card loaded on board' : 'Ready to load'}</span>
+                <strong>{card.side} repertoire</strong>
+              </div>
             </div>
             {deckFeedback ? (
               <div className={`${styles.feedbackBox} ${deckFeedback.correct ? styles.feedbackGood : styles.feedbackBad}`}>
@@ -385,11 +390,13 @@ export function DeckPanel({
                 </span>
               </div>
             ) : (
-              <p className={styles.copy}>Load the card, then play the exact move on the board.</p>
+              <p className={styles.copy}>
+                {cardLoaded ? 'Play the exact move on the board. The answer is strict.' : 'Load the card to put its position on the board.'}
+              </p>
             )}
             <div className={styles.deckActions}>
-              <button className={`${styles.action} ${styles.primary}`} onClick={() => startCard(card)}>
-                Load card
+              <button className={`${styles.action} ${styles.primary}`} onClick={() => startCard(card)} disabled={cardLoaded && !deckFeedback}>
+                {cardLoaded ? 'Loaded' : 'Load card'}
               </button>
               <button className={styles.action} onClick={onRepeat} disabled={!activeCard}>
                 Repeat
