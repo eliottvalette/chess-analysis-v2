@@ -45,7 +45,15 @@ import {
   type ReviewSide,
   type StoredMove,
 } from '@/lib/chess-analysis-client';
-import { OPENING_REPERTOIRE, buildDeckCards, type DeckCard, type DeckFeedback } from '@/lib/opening-training';
+import {
+  OPENING_REPERTOIRE,
+  buildPunishCardsFromAnalysis,
+  buildTrainingCandidates,
+  scoreToCpForSide,
+  type DeckCard,
+  type DeckFeedback,
+  type GeneratedDeckCard,
+} from '@/lib/opening-training';
 import styles from './chess-analysis-lab.module.css';
 
 const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
@@ -89,6 +97,9 @@ export function ChessAnalysisLab() {
   const [activeDeckCard, setActiveDeckCard] = useState<DeckCard | null>(null);
   const [deckFeedback, setDeckFeedback] = useState<DeckFeedback | null>(null);
   const [deckStats, setDeckStats] = useState({ correct: 0, misses: 0 });
+  const [generatedDeckCards, setGeneratedDeckCards] = useState<GeneratedDeckCard[]>([]);
+  const [deckGenerating, setDeckGenerating] = useState(false);
+  const [deckGenerationError, setDeckGenerationError] = useState('');
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
   const evalRailRef = useRef<HTMLDivElement | null>(null);
@@ -96,6 +107,7 @@ export function ChessAnalysisLab() {
   const timelineRequestIdRef = useRef(0);
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
+  const punishCardCacheRef = useRef(new Map<string, GeneratedDeckCard[]>());
 
   const currentFen = useMemo(() => game.fen(), [game]);
   const currentMoves = useMemo(() => moveHistory.slice(0, historyIndex), [historyIndex, moveHistory]);
@@ -108,7 +120,8 @@ export function ChessAnalysisLab() {
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
   const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
-  const deckCards = useMemo(() => buildDeckCards(OPENING_REPERTOIRE), []);
+  const trainingCandidates = useMemo(() => buildTrainingCandidates(OPENING_REPERTOIRE), []);
+  const deckCards = generatedDeckCards.filter(card => card.kind === 'punish_mistake');
   const nextDeckCard = deckCards[deckIndex % Math.max(1, deckCards.length)] ?? null;
 
   const timelineReviews = useMemo(
@@ -344,6 +357,7 @@ export function ChessAnalysisLab() {
           correct,
           expectedSan: activeDeckCard.answerSan,
           playedSan: move.san,
+          scoreSwingCp: activeDeckCard.scoreSwingCp,
         });
         setDeckStats(stats => ({
           correct: stats.correct + (correct ? 1 : 0),
@@ -521,6 +535,78 @@ export function ChessAnalysisLab() {
     }
   }
 
+  async function generatePunishDeck(startAfterGenerate = false) {
+    if (deckGenerating) {
+      return;
+    }
+
+    const thresholdCp = 60;
+    const generatedCards: GeneratedDeckCard[] = [];
+
+    setDeckGenerating(true);
+    setDeckGenerationError('');
+
+    try {
+      for (const candidate of trainingCandidates) {
+        const punishCacheKey = `${candidate.fen}|${candidate.side}|${thresholdCp}`;
+        const cachedCards = punishCardCacheRef.current.get(punishCacheKey);
+
+        if (cachedCards) {
+          generatedCards.push(...cachedCards);
+          continue;
+        }
+
+        const baseAnalysis = await fetchCachedPositionAnalysis(`punish-base|${candidate.fen}`, candidate.fen, []);
+        const baseScoreCp = scoreToCpForSide(baseAnalysis.whitePerspective, candidate.side);
+
+        if (baseScoreCp == null) {
+          punishCardCacheRef.current.set(punishCacheKey, []);
+          continue;
+        }
+
+        const opponentReplies = [];
+
+        for (const line of baseAnalysis.lines.slice(0, POSITION_MULTIPV)) {
+          if (!line.bestMove) {
+            continue;
+          }
+
+          const replyFen = getFenAfterMove(candidate.fen, line.bestMove);
+
+          if (!replyFen) {
+            continue;
+          }
+
+          const analysisAfterReply = await fetchCachedPositionAnalysis(`punish-after|${replyFen}`, replyFen, []);
+          opponentReplies.push({ line, analysisAfterReply });
+        }
+
+        const cards = buildPunishCardsFromAnalysis(
+          {
+            ...candidate,
+            scoreCp: baseScoreCp,
+          },
+          opponentReplies,
+          thresholdCp,
+        );
+
+        punishCardCacheRef.current.set(punishCacheKey, cards);
+        generatedCards.push(...cards);
+      }
+
+      setGeneratedDeckCards(generatedCards);
+      setDeckIndex(0);
+
+      if (startAfterGenerate && generatedCards[0]) {
+        loadDeckCard(generatedCards[0]);
+      }
+    } catch (error) {
+      setDeckGenerationError(error instanceof Error ? error.message : 'Unable to generate punish cards.');
+    } finally {
+      setDeckGenerating(false);
+    }
+  }
+
   async function loadPgnText(name: string, content: string) {
     try {
       const loadedGame = new Chess();
@@ -548,6 +634,7 @@ export function ChessAnalysisLab() {
       setPgnDialogOpen(false);
       positionCacheRef.current.clear();
       positionInFlightRef.current.clear();
+      punishCardCacheRef.current.clear();
       clearSelection();
 
       await runTimelineAnalysis(nextHistory, nextInitialFen);
@@ -602,8 +689,11 @@ export function ChessAnalysisLab() {
     setTimelineError('');
     setActiveDeckCard(null);
     setDeckFeedback(null);
+    setGeneratedDeckCards([]);
+    setDeckGenerationError('');
     positionCacheRef.current.clear();
     positionInFlightRef.current.clear();
+    punishCardCacheRef.current.clear();
     clearSelection();
   }
 
@@ -637,7 +727,7 @@ export function ChessAnalysisLab() {
           <div className={styles.boardWorkspace}>
             <div className={styles.boardTools} aria-label="Board tools">
               <button className={styles.iconButton} onClick={() => setOrientation(value => (value === 'white' ? 'black' : 'white'))} title="Flip board">
-                F
+                <FlipIcon />
               </button>
               <button
                 className={styles.iconButton}
@@ -645,13 +735,13 @@ export function ChessAnalysisLab() {
                 disabled={Boolean(activeDeckCard && !deckFeedback)}
                 title={activeDeckCard ? 'Best arrow hidden during deck review' : showArrow ? 'Hide best arrow' : 'Show best arrow'}
               >
-                {activeDeckCard ? '-' : showArrow ? 'A' : 'a'}
+                <ArrowIcon off={!showArrow || Boolean(activeDeckCard)} />
               </button>
-              <button className={styles.iconButton} onClick={() => void runTimelineAnalysis()} disabled={timelineLoading || moveHistory.length === 0} title="Refresh line">
-                R
+              <button className={styles.iconButton} onClick={() => void runTimelineAnalysis()} disabled={timelineLoading || moveHistory.length === 0} title="Refresh analysis">
+                <RefreshIcon />
               </button>
               <button className={styles.iconButton} onClick={resetWorkspace} title="Reset board">
-                X
+                <ResetIcon />
               </button>
             </div>
 
@@ -722,7 +812,7 @@ export function ChessAnalysisLab() {
               Ply {historyIndex}/{moveHistory.length}
               {activeDeckCard
                 ? ` · ${activeDeckCard.prompt}`
-                : positionAnalysis?.bestMove
+                : mode === 'analyze' && positionAnalysis?.bestMove
                   ? ` · best ${formatBestMove(currentFen, positionAnalysis.bestMove)}`
                   : ''}
             </span>
@@ -791,16 +881,23 @@ export function ChessAnalysisLab() {
               <LearnPanel
                 currentFen={currentFen}
                 deckCards={deckCards}
+                deckGenerationError={deckGenerationError}
+                deckGenerating={deckGenerating}
+                generateCards={generatePunishDeck}
                 nextDeckCard={nextDeckCard}
                 openingLines={OPENING_REPERTOIRE}
+                positionAnalysis={positionAnalysis}
                 startCard={loadDeckCard}
               />
             ) : (
               <DeckPanel
                 activeCard={activeDeckCard}
                 deckCards={deckCards}
+                deckGenerationError={deckGenerationError}
+                deckGenerating={deckGenerating}
                 deckFeedback={deckFeedback}
                 deckStats={deckStats}
+                generateCards={generatePunishDeck}
                 nextCard={nextDeckCard}
                 onNext={advanceDeckCard}
                 onRepeat={repeatDeckCard}
@@ -827,4 +924,59 @@ export function ChessAnalysisLab() {
 
 function getPositionCacheKey(initialFen: string | null, moves: string[]) {
   return `${initialFen ?? 'startpos'}|${moves.join(' ')}`;
+}
+
+function getFenAfterMove(fen: string, moveUci: string) {
+  const chess = new Chess(fen);
+
+  try {
+    chess.move({
+      from: moveUci.slice(0, 2),
+      to: moveUci.slice(2, 4),
+      ...(moveUci[4] ? { promotion: moveUci[4] } : {}),
+    });
+    return chess.fen();
+  } catch {
+    return null;
+  }
+}
+
+function FlipIcon() {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 7h8.5a4.5 4.5 0 0 1 4.5 4.5v0A4.5 4.5 0 0 1 15.5 16H9" />
+      <path d="M7 7l3-3M7 7l3 3M17 17H8.5A4.5 4.5 0 0 1 4 12.5v0A4.5 4.5 0 0 1 8.5 8H15" />
+      <path d="M17 17l-3-3M17 17l-3 3" />
+    </svg>
+  );
+}
+
+function ArrowIcon({ off }: { off: boolean }) {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 19 18 6" />
+      <path d="M10 6h8v8" />
+      {off ? <path d="M4 4l16 16" /> : null}
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M20 11a8 8 0 0 0-14.5-4.6L4 8" />
+      <path d="M4 4v4h4" />
+      <path d="M4 13a8 8 0 0 0 14.5 4.6L20 16" />
+      <path d="M20 20v-4h-4" />
+    </svg>
+  );
+}
+
+function ResetIcon() {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 6l12 12" />
+      <path d="M18 6 6 18" />
+    </svg>
+  );
 }

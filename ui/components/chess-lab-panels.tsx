@@ -274,25 +274,34 @@ export function GameReviewPanel({
 export function LearnPanel({
   currentFen,
   deckCards,
+  deckGenerationError,
+  deckGenerating,
+  generateCards,
   nextDeckCard,
   openingLines,
+  positionAnalysis,
   startCard,
 }: {
   currentFen: string;
   deckCards: DeckCard[];
+  deckGenerationError: string;
+  deckGenerating: boolean;
+  generateCards: (startAfterGenerate?: boolean) => void;
   nextDeckCard: DeckCard | null;
   openingLines: OpeningSeedLine[];
+  positionAnalysis: AnalysisResult | null;
   startCard: (card: DeckCard | null) => void;
 }) {
   const whiteCards = deckCards.filter(card => card.side === 'white').length;
   const blackCards = deckCards.length - whiteCards;
+  const legitOptions = positionAnalysis?.lines?.slice(0, 3) ?? [];
 
   return (
     <>
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
         <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Learn openings</h2>
-          <span className={styles.statusText}>{deckCards.length} cards</span>
+          <h2 className={styles.sectionTitle}>Learn punishments</h2>
+          <span className={styles.statusText}>{deckGenerating ? 'generating' : `${deckCards.length} punish cards`}</span>
         </div>
         <div className={styles.deckStats}>
           <div>
@@ -308,33 +317,53 @@ export function LearnPanel({
             <span>black</span>
           </div>
         </div>
-        <button className={`${styles.action} ${styles.primary}`} onClick={() => startCard(nextDeckCard)}>
-          Start auto deck
+        <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => (nextDeckCard ? startCard(nextDeckCard) : generateCards(true))} disabled={deckGenerating}>
+          {deckGenerating ? 'Generating' : nextDeckCard ? 'Start punish deck' : 'Generate punish deck'}
         </button>
+        {deckGenerationError ? <p className={styles.error}>{deckGenerationError}</p> : null}
+      </section>
+      <section className={`${styles.card} ${styles.engineCard}`}>
+        <div className={styles.panelHeader}>
+          <h2 className={styles.sectionTitle}>Legit options</h2>
+          <span className={styles.statusText}>{legitOptions.length ? 'not graded' : 'waiting'}</span>
+        </div>
+        <div className={styles.engineLines}>
+          {legitOptions.length > 0 ? (
+            legitOptions.map(line => (
+              <div className={styles.engineLine} key={line.multipv}>
+                <div className={styles.engineLineHead}>
+                  <span className={styles.engineRank}>#{line.multipv}</span>
+                  <strong>{line.bestMove ? formatBestMove(currentFen, line.bestMove) : '--'}</strong>
+                  <span>{formatLineScore(line)}</span>
+                </div>
+                <p className={styles.enginePv}>{formatPvLine(currentFen, line.pv)}</p>
+              </div>
+            ))
+          ) : (
+            <p className={styles.empty}>Analyze a position to see acceptable candidate moves.</p>
+          )}
+        </div>
       </section>
       <section className={`${styles.card} ${styles.openingListCard}`}>
         <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Seed repertoire</h2>
-          <span className={styles.statusText}>auto-fill</span>
+          <h2 className={styles.sectionTitle}>Punishable replies</h2>
+          <span className={styles.statusText}>strict deck only</span>
         </div>
         <div className={styles.openingList}>
           {openingLines.map(line => {
-            const firstCard = deckCards.find(card => card.lineId === line.id) ?? null;
+            const lineCards = deckCards.filter(card => card.lineId === line.id);
+            const firstCard = lineCards[0] ?? null;
 
             return (
-              <button className={styles.openingButton} key={line.id} onClick={() => startCard(firstCard)}>
+              <button className={styles.openingButton} key={line.id} onClick={() => startCard(firstCard)} disabled={!firstCard}>
                 <span>
                   {line.eco} · {line.name}
                 </span>
-                <strong>{line.side}</strong>
+                <strong>{lineCards.length}</strong>
               </button>
             );
           })}
         </div>
-      </section>
-      <section className={`${styles.card} ${styles.dataCard}`}>
-        <span className={styles.metaLabel}>Current position</span>
-        <p className={styles.monoLine}>{currentFen}</p>
       </section>
     </>
   );
@@ -343,8 +372,11 @@ export function LearnPanel({
 export function DeckPanel({
   activeCard,
   deckCards,
+  deckGenerationError,
+  deckGenerating,
   deckFeedback,
   deckStats,
+  generateCards,
   nextCard,
   onNext,
   onRepeat,
@@ -352,8 +384,11 @@ export function DeckPanel({
 }: {
   activeCard: DeckCard | null;
   deckCards: DeckCard[];
+  deckGenerationError: string;
+  deckGenerating: boolean;
   deckFeedback: DeckFeedback | null;
   deckStats: { correct: number; misses: number };
+  generateCards: (startAfterGenerate?: boolean) => void;
   nextCard: DeckCard | null;
   onNext: () => void;
   onRepeat: () => void;
@@ -367,7 +402,7 @@ export function DeckPanel({
       <section className={`${styles.card} ${styles.deckCard}`}>
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Deck</h2>
-          <span className={styles.statusText}>{cardLoaded ? 'loaded' : `${deckCards.length} auto-filled`}</span>
+          <span className={styles.statusText}>{cardLoaded ? 'loaded' : deckGenerating ? 'generating' : `${deckCards.length} punish cards`}</span>
         </div>
         {card ? (
           <>
@@ -387,6 +422,7 @@ export function DeckPanel({
                 <strong>{deckFeedback.correct ? 'Correct' : 'Best or nothing'}</strong>
                 <span>
                   played {deckFeedback.playedSan} · expected {deckFeedback.expectedSan}
+                  {deckFeedback.scoreSwingCp != null ? ` · swing ${formatCpSwing(deckFeedback.scoreSwingCp)}` : ''}
                 </span>
               </div>
             ) : (
@@ -407,7 +443,13 @@ export function DeckPanel({
             </div>
           </>
         ) : (
-          <p className={styles.empty}>No deck cards generated.</p>
+          <>
+            <p className={styles.empty}>{deckGenerating ? 'Generating punish cards from Stockfish.' : 'No punish cards generated yet.'}</p>
+            <button className={`${styles.action} ${styles.primary}`} onClick={() => generateCards(true)} disabled={deckGenerating}>
+              {deckGenerating ? 'Generating' : 'Generate deck'}
+            </button>
+            {deckGenerationError ? <p className={styles.error}>{deckGenerationError}</p> : null}
+          </>
         )}
       </section>
       <section className={`${styles.card} ${styles.dataCard}`}>
@@ -542,7 +584,7 @@ function EngineLinesSection({
                 <strong>{line.bestMove ? formatBestMove(currentFen, line.bestMove) : '--'}</strong>
                 <span>{formatLineScore(line)}</span>
               </div>
-              <p className={styles.enginePv}>{formatPrincipalVariation(currentFen, line.pv)}</p>
+              <p className={styles.enginePv}>{formatPvLine(currentFen, line.pv)}</p>
             </div>
           ))
         ) : (
@@ -561,6 +603,10 @@ function formatExpectedLoss(value: number | null) {
   return value == null ? '--' : `${(value * 100).toFixed(1)}%`;
 }
 
+function formatCpSwing(value: number) {
+  return `${(value / 100).toFixed(2)} pawns`;
+}
+
 function formatLineScore(line: AnalysisLine) {
   const score = line.whitePerspective;
 
@@ -574,6 +620,11 @@ function formatLineScore(line: AnalysisLine) {
 
   const pawns = score.value / 100;
   return `${pawns > 0 ? '+' : ''}${pawns.toFixed(2)}`;
+}
+
+function formatPvLine(fen: string, pv: string[]) {
+  const line = formatPrincipalVariation(fen, pv);
+  return formatMoveFigurine(line).replaceAll(' ', '  →  ');
 }
 
 function formatMoveFigurine(san: string) {
