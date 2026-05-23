@@ -742,6 +742,137 @@
   gap: 10px;
 }
 
+.openingListCard,
+.deckCard {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.openingList {
+  min-height: 0;
+  max-height: 330px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.openingButton {
+  min-width: 0;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(9, 14, 23, 0.38);
+  color: var(--text-muted);
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.openingButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openingButton strong {
+  color: var(--accent-strong);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.deckStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.deckStats div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(9, 14, 23, 0.42);
+  padding: 10px;
+}
+
+.deckStats strong {
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.deckStats span {
+  color: var(--text-soft);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.deckPrompt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(9, 14, 23, 0.42);
+  padding: 12px;
+}
+
+.deckPrompt strong {
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.deckPrompt p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.feedbackBox {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 13px;
+}
+
+.feedbackBox strong {
+  color: var(--text);
+}
+
+.feedbackBox span {
+  color: var(--text-muted);
+}
+
+.feedbackGood {
+  border: 1px solid rgba(138, 227, 193, 0.38);
+  background: rgba(56, 148, 115, 0.14);
+}
+
+.feedbackBad {
+  border: 1px solid rgba(255, 141, 145, 0.42);
+  background: rgba(180, 58, 66, 0.16);
+}
+
+.deckActions {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 8px;
+}
+
 .monoLine {
   margin: 0;
   color: var(--text-muted);
