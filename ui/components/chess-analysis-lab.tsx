@@ -19,34 +19,63 @@ import type { AnalysisLine, AnalysisResult } from '@/lib/analysis-types';
 import {
   analyzeGamePositions,
   analyzeSinglePosition,
-  buildGameReview,
   buildChartOptions,
+  buildGameReview,
   buildMoveUciHistory,
   buildTimelineSequencePositions,
   classifyTimelineMoves,
   extractMetadataFromGame,
-  formatBestMove,
   filterReviewMoments,
+  formatBestMove,
   formatPrincipalVariation,
   formatScoreLabel,
   getAdvantageMeter,
   getBestMoveArrow,
   restoreGameFromHistory,
+  reviewCategoryMeta,
+  reviewCategoryOrder,
   toChartScore,
   toStoredMove,
   type GameMetadata,
   type ReviewSide,
   type StoredMove,
-  reviewCategoryMeta,
-  reviewCategoryOrder,
 } from '@/lib/chess-analysis-client';
 import styles from './chess-analysis-lab.module.css';
 
-type LabMode = 'overview' | 'review' | 'analysis';
+type WorkspaceMode = 'analyze' | 'gameReview' | 'learn' | 'deck';
+type TrainingSide = 'white' | 'black';
+
+type OpeningSeedLine = {
+  id: string;
+  name: string;
+  eco: string;
+  side: TrainingSide;
+  moves: string[];
+};
+
+type DeckCard = {
+  id: string;
+  lineId: string;
+  lineName: string;
+  eco: string;
+  side: TrainingSide;
+  ply: number;
+  fen: string;
+  answerUci: string;
+  answerSan: string;
+  prompt: string;
+  context: string;
+};
+
+type DeckFeedback = {
+  correct: boolean;
+  expectedSan: string;
+  playedSan: string;
+};
 
 const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
   ssr: false,
-  loading: () => <div className={styles.boardFallback}>Loading board…</div>,
+  loading: () => <div className={styles.boardFallback}>Loading board...</div>,
 });
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
@@ -56,6 +85,16 @@ const POSITION_MOVETIME_MS = 500;
 const TIMELINE_MOVETIME_MS = 80;
 const POSITION_MULTIPV = 3;
 const PRELOAD_AHEAD = 1;
+const OPENING_REPERTOIRE: OpeningSeedLine[] = [
+  { id: 'italian-main', name: 'Italian Game', eco: 'C50', side: 'white', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bc4', 'Bc5', 'c3', 'Nf6', 'd4'] },
+  { id: 'ruy-lopez', name: 'Ruy Lopez', eco: 'C60', side: 'white', moves: ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5', 'a6', 'Ba4', 'Nf6', 'O-O', 'Be7'] },
+  { id: 'queens-gambit', name: "Queen's Gambit Declined", eco: 'D30', side: 'white', moves: ['d4', 'd5', 'c4', 'e6', 'Nc3', 'Nf6', 'Bg5', 'Be7', 'e3'] },
+  { id: 'london', name: 'London System', eco: 'D02', side: 'white', moves: ['d4', 'Nf6', 'Bf4', 'd5', 'e3', 'e6', 'Nf3', 'c5', 'c3'] },
+  { id: 'sicilian-najdorf', name: 'Sicilian Najdorf', eco: 'B90', side: 'black', moves: ['e4', 'c5', 'Nf3', 'd6', 'd4', 'cxd4', 'Nxd4', 'Nf6', 'Nc3', 'a6'] },
+  { id: 'french-advance', name: 'French Advance', eco: 'C02', side: 'black', moves: ['e4', 'e6', 'd4', 'd5', 'e5', 'c5', 'c3', 'Nc6', 'Nf3'] },
+  { id: 'caro-kann', name: 'Caro-Kann Classical', eco: 'B18', side: 'black', moves: ['e4', 'c6', 'd4', 'd5', 'Nc3', 'dxe4', 'Nxe4', 'Bf5', 'Ng3'] },
+  { id: 'kings-indian', name: "King's Indian Defense", eco: 'E60', side: 'black', moves: ['d4', 'Nf6', 'c4', 'g6', 'Nc3', 'Bg7', 'e4', 'd6', 'Nf3', 'O-O'] },
+];
 
 export function ChessAnalysisLab() {
   const [game, setGame] = useState(() => new Chess());
@@ -66,12 +105,13 @@ export function ChessAnalysisLab() {
   const [squareStyles, setSquareStyles] = useState<Record<string, CSSProperties>>({});
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [showArrow, setShowArrow] = useState(true);
-  const [mode, setMode] = useState<LabMode>('overview');
+  const [mode, setMode] = useState<WorkspaceMode>('analyze');
   const [reviewSide, setReviewSide] = useState<ReviewSide>('both');
   const [reviewIndex, setReviewIndex] = useState(0);
   const [metadata, setMetadata] = useState<GameMetadata | null>(null);
-  const [fileName, setFileName] = useState('No PGN loaded');
+  const [fileName, setFileName] = useState('');
   const [pgnDraft, setPgnDraft] = useState('');
+  const [pgnDialogOpen, setPgnDialogOpen] = useState(false);
   const [positionAnalysis, setPositionAnalysis] = useState<AnalysisResult | null>(null);
   const [preMoveAnalyses, setPreMoveAnalyses] = useState<AnalysisResult[]>([]);
   const [timelineAnalyses, setTimelineAnalyses] = useState<AnalysisResult[]>([]);
@@ -80,6 +120,10 @@ export function ChessAnalysisLab() {
   const [serverError, setServerError] = useState('');
   const [timelineError, setTimelineError] = useState('');
   const [boardWidth, setBoardWidth] = useState(640);
+  const [deckIndex, setDeckIndex] = useState(0);
+  const [activeDeckCard, setActiveDeckCard] = useState<DeckCard | null>(null);
+  const [deckFeedback, setDeckFeedback] = useState<DeckFeedback | null>(null);
+  const [deckStats, setDeckStats] = useState({ correct: 0, misses: 0 });
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
   const evalRailRef = useRef<HTMLDivElement | null>(null);
@@ -94,8 +138,13 @@ export function ChessAnalysisLab() {
   const currentLineKey = currentMoveList.join(' ');
   const whiteAdvantage = getAdvantageMeter(positionAnalysis);
   const bestMoveArrow = showArrow ? getBestMoveArrow(positionAnalysis?.bestMove ?? null) : [];
+  const deckAnswerArrow = deckFeedback && activeDeckCard ? getBestMoveArrow(activeDeckCard.answerUci) : [];
+  const boardArrows = activeDeckCard ? deckAnswerArrow : bestMoveArrow;
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
+  const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
+  const deckCards = useMemo(() => buildDeckCards(OPENING_REPERTOIRE), []);
+  const nextDeckCard = deckCards[deckIndex % Math.max(1, deckCards.length)] ?? null;
   const timelineReviews = useMemo(
     () => classifyTimelineMoves(moveHistory, preMoveAnalyses, timelineAnalyses, initialFen, metadata),
     [initialFen, metadata, moveHistory, preMoveAnalyses, timelineAnalyses],
@@ -107,12 +156,7 @@ export function ChessAnalysisLab() {
   );
   const activeReviewMoment = reviewMoments[reviewIndex] ?? null;
   const chartConfig = buildChartOptions(moveHistory, timelineReviews, ply => {
-    const boundedIndex = Math.max(0, Math.min(ply, moveHistory.length));
-    const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
-
-    setHistoryIndex(boundedIndex);
-    setGame(nextGame);
-    clearSelection();
+    jumpToIndex(ply);
   });
 
   const chartData = useMemo<ChartData<'line', number[], number>>(
@@ -121,15 +165,15 @@ export function ChessAnalysisLab() {
       datasets: [
         {
           data: timelineAnalyses.map(analysis => toChartScore(analysis)),
-          borderColor: '#7c6dff',
-          backgroundColor: 'rgba(124, 109, 255, 0.14)',
+          borderColor: '#98b8ff',
+          backgroundColor: 'rgba(152, 184, 255, 0.14)',
           fill: true,
           borderWidth: 2,
-          pointRadius: timelineReviews.map(review => (review.isKeyMoment ? 4.6 : 0)),
+          pointRadius: timelineReviews.map(review => (review.isKeyMoment ? 4.4 : 0)),
           pointHoverRadius: timelineReviews.map(review => (review.isKeyMoment ? 6 : 3)),
           pointBorderWidth: timelineReviews.map(review => (review.isKeyMoment ? 1.5 : 0)),
-          pointBackgroundColor: timelineReviews.map(review => (review.isKeyMoment ? (review.colorHex ?? '#7c6dff') : '#7c6dff')),
-          pointBorderColor: timelineReviews.map(review => (review.isKeyMoment ? (review.colorHex ?? '#7c6dff') : '#7c6dff')),
+          pointBackgroundColor: timelineReviews.map(review => (review.isKeyMoment ? (review.colorHex ?? '#98b8ff') : '#98b8ff')),
+          pointBorderColor: timelineReviews.map(review => (review.isKeyMoment ? (review.colorHex ?? '#98b8ff') : '#98b8ff')),
           pointStyle: timelineReviews.map(review => (review.isKeyMoment ? review.pointStyle : 'circle')),
           tension: 0.28,
         },
@@ -207,7 +251,7 @@ export function ChessAnalysisLab() {
       const railRect = evalRailRef.current?.getBoundingClientRect();
       const stageWidth = entry.contentRect.width;
       const stageHeight = entry.contentRect.height;
-      const gap = 28;
+      const gap = 26;
       const railWidth = railRect?.width ?? 0;
       const railHeight = railRect?.height ?? 0;
       const isHorizontalRail = railWidth > railHeight * 1.6;
@@ -297,8 +341,8 @@ export function ChessAnalysisLab() {
   function highlightMoves(square: string) {
     const nextStyles: Record<string, CSSProperties> = {
       [square]: {
-        boxShadow: 'inset 0 0 0 3px rgba(124, 109, 255, 0.9)',
-        backgroundColor: 'rgba(124, 109, 255, 0.18)',
+        boxShadow: 'inset 0 0 0 3px rgba(152, 184, 255, 0.9)',
+        backgroundColor: 'rgba(152, 184, 255, 0.18)',
       },
     };
 
@@ -309,7 +353,7 @@ export function ChessAnalysisLab() {
         ? {
             boxShadow: 'inset 0 0 0 2px rgba(242, 243, 245, 0.34)',
             background:
-              'radial-gradient(circle, rgba(124, 109, 255, 0.28) 0%, rgba(124, 109, 255, 0.08) 54%, transparent 56%)',
+              'radial-gradient(circle, rgba(152, 184, 255, 0.28) 0%, rgba(152, 184, 255, 0.08) 54%, transparent 56%)',
           }
         : {
             background:
@@ -320,39 +364,59 @@ export function ChessAnalysisLab() {
     setSquareStyles(nextStyles);
   }
 
-  const commitMove = useCallback((nextGame: Chess, move: StoredMove) => {
-    const nextHistory = [...moveHistory.slice(0, historyIndex), move];
+  const commitMove = useCallback(
+    (nextGame: Chess, move: StoredMove) => {
+      const nextHistory = [...moveHistory.slice(0, historyIndex), move];
 
-    setMoveHistory(nextHistory);
-    setHistoryIndex(nextHistory.length);
-    setGame(nextGame);
-    setTimelineAnalyses([]);
-    setTimelineError('');
-    setSelectedSquare(null);
-    setSquareStyles({});
-  }, [historyIndex, moveHistory]);
+      setMoveHistory(nextHistory);
+      setHistoryIndex(nextHistory.length);
+      setGame(nextGame);
+      setTimelineAnalyses([]);
+      setTimelineError('');
+      setSelectedSquare(null);
+      setSquareStyles({});
 
-  const tryMove = useCallback((from: string, to: string, promotion = 'q') => {
-    const nextGame = new Chess(currentFen);
-    const move = (() => {
-      try {
-        return nextGame.move({
-          from,
-          to,
-          promotion,
+      if (activeDeckCard) {
+        const correct = move.uci === activeDeckCard.answerUci;
+
+        setDeckFeedback({
+          correct,
+          expectedSan: activeDeckCard.answerSan,
+          playedSan: move.san,
         });
-      } catch {
-        return null;
+        setDeckStats(stats => ({
+          correct: stats.correct + (correct ? 1 : 0),
+          misses: stats.misses + (correct ? 0 : 1),
+        }));
       }
-    })();
+    },
+    [activeDeckCard, historyIndex, moveHistory],
+  );
 
-    if (!move) {
-      return false;
-    }
+  const tryMove = useCallback(
+    (from: string, to: string, promotion = 'q') => {
+      const nextGame = new Chess(currentFen);
+      const move = (() => {
+        try {
+          return nextGame.move({
+            from,
+            to,
+            promotion,
+          });
+        } catch {
+          return null;
+        }
+      })();
 
-    commitMove(nextGame, toStoredMove(move));
-    return true;
-  }, [commitMove, currentFen]);
+      if (!move) {
+        return false;
+      }
+
+      commitMove(nextGame, toStoredMove(move));
+      return true;
+    },
+    [commitMove, currentFen],
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -363,7 +427,7 @@ export function ChessAnalysisLab() {
         target?.tagName === 'SELECT' ||
         target?.isContentEditable;
 
-      if (isTyping) {
+      if (isTyping || pgnDialogOpen) {
         return;
       }
 
@@ -400,7 +464,7 @@ export function ChessAnalysisLab() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [historyIndex, initialFen, moveHistory, positionAnalysis?.bestMove, tryMove]);
+  }, [historyIndex, initialFen, moveHistory, pgnDialogOpen, positionAnalysis?.bestMove, tryMove]);
 
   function jumpToIndex(index: number) {
     const boundedIndex = Math.max(0, Math.min(index, moveHistory.length));
@@ -411,11 +475,45 @@ export function ChessAnalysisLab() {
     clearSelection();
   }
 
+  function loadDeckCard(card: DeckCard | null) {
+    if (!card) {
+      return;
+    }
+
+    const nextGame = new Chess(card.fen);
+    setInitialFen(card.fen);
+    setMoveHistory([]);
+    setHistoryIndex(0);
+    setGame(nextGame);
+    setMode('deck');
+    setActiveDeckCard(card);
+    setDeckFeedback(null);
+    setShowArrow(false);
+    setPositionAnalysis(null);
+    setTimelineAnalyses([]);
+    setTimelineError('');
+    clearSelection();
+  }
+
+  function advanceDeckCard() {
+    if (deckCards.length === 0) {
+      return;
+    }
+
+    const nextIndex = (deckIndex + 1) % deckCards.length;
+    setDeckIndex(nextIndex);
+    loadDeckCard(deckCards[nextIndex]);
+  }
+
+  function repeatDeckCard() {
+    loadDeckCard(activeDeckCard ?? nextDeckCard);
+  }
+
   function goToReviewMoment(index: number) {
     const boundedIndex = Math.max(0, Math.min(index, Math.max(0, reviewMoments.length - 1)));
     const moment = reviewMoments[boundedIndex] ?? null;
 
-    setMode('review');
+    setMode('gameReview');
     setReviewIndex(boundedIndex);
 
     if (moment) {
@@ -481,13 +579,16 @@ export function ChessAnalysisLab() {
       setGame(nextGame);
       setMetadata(extractMetadataFromGame(loadedGame));
       setFileName(name);
-      setMode('overview');
+      setMode('gameReview');
       setReviewIndex(0);
+      setActiveDeckCard(null);
+      setDeckFeedback(null);
       setPositionAnalysis(null);
       setPreMoveAnalyses([]);
       setTimelineAnalyses([]);
       setTimelineError('');
       setServerError('');
+      setPgnDialogOpen(false);
       positionCacheRef.current.clear();
       positionInFlightRef.current.clear();
       clearSelection();
@@ -524,178 +625,161 @@ export function ChessAnalysisLab() {
     await loadPgnText('Pasted PGN', pgnDraft.trim());
   }
 
+  function resetWorkspace() {
+    positionRequestIdRef.current += 1;
+    timelineRequestIdRef.current += 1;
+    setGame(new Chess());
+    setInitialFen(null);
+    setMoveHistory([]);
+    setHistoryIndex(0);
+    setMetadata(null);
+    setFileName('');
+    setMode('analyze');
+    setReviewIndex(0);
+    setPositionAnalysis(null);
+    setPreMoveAnalyses([]);
+    setTimelineAnalyses([]);
+    setPositionLoading(false);
+    setTimelineLoading(false);
+    setServerError('');
+    setTimelineError('');
+    setActiveDeckCard(null);
+    setDeckFeedback(null);
+    positionCacheRef.current.clear();
+    positionInFlightRef.current.clear();
+    clearSelection();
+  }
+
   return (
     <main className={styles.page}>
-      <div className={styles.grid}>
-        <aside className={`${styles.panel} ${styles.sidePanel}`}>
-          <section className={`${styles.card} ${styles.pgnCard}`}>
-            <div className={styles.pgnHeader}>
-              <h2 className={styles.sectionTitle}>PGN</h2>
+      <div className={styles.appShell}>
+        <section className={`${styles.panel} ${styles.boardPanel}`}>
+          <div className={styles.topBar}>
+            <div className={styles.titleBlock}>
+              <h1 className={styles.appTitle}>Chess Lab</h1>
+              <span className={styles.contextLine}>
+                {hasLoadedGame
+                  ? `${whiteReviewName} vs ${blackReviewName} · ${moveHistory.length} plies`
+                  : 'Analyze, learn openings, and drill best moves'}
+              </span>
             </div>
-            <div className={styles.pgnControls}>
-              <label className={`${styles.action} ${styles.primary}`} htmlFor="pgn-upload">
-                Load file
-              </label>
-              <button className={`${styles.action} ${styles.secondary}`} onClick={() => void handlePgnPaste()} disabled={!pgnDraft.trim()}>
-                Paste PGN
+            <div className={styles.topActions}>
+              <button className={`${styles.action} ${styles.compactAction}`} onClick={() => setPgnDialogOpen(true)}>
+                Import PGN
+              </button>
+              <span
+                className={`${styles.statusPill} ${
+                  serverError ? styles.statusError : positionLoading ? styles.statusPending : styles.statusReady
+                }`}
+              >
+                {serverError ? 'engine issue' : positionLoading ? 'analyzing' : 'ready'}
+              </span>
+            </div>
+          </div>
+
+          <div className={styles.boardWorkspace}>
+            <div className={styles.boardTools} aria-label="Board tools">
+              <button className={styles.iconButton} onClick={() => setOrientation(value => (value === 'white' ? 'black' : 'white'))} title="Flip board">
+                F
+              </button>
+              <button className={styles.iconButton} onClick={() => setShowArrow(value => !value)} title={showArrow ? 'Hide best arrow' : 'Show best arrow'}>
+                {showArrow ? 'A' : 'a'}
+              </button>
+              <button className={styles.iconButton} onClick={() => void runTimelineAnalysis()} disabled={timelineLoading || moveHistory.length === 0} title="Refresh line">
+                R
+              </button>
+              <button className={styles.iconButton} onClick={resetWorkspace} title="Reset board">
+                X
               </button>
             </div>
-            <input className={styles.hiddenInput} id="pgn-upload" type="file" accept=".pgn" onChange={handleUpload} />
-            <textarea
-              className={styles.pgnInput}
-              value={pgnDraft}
-              onChange={event => setPgnDraft(event.target.value)}
-              placeholder={'[Event "Live Chess"]\n[White "LosValettos"]\n[Black "rafaelpiresrj"]\n\n1. e4 e5 2. Nf3 Nc6'}
-              spellCheck={false}
-            />
-            <p className={styles.support}>{fileName}</p>
-          </section>
 
-          <section className={styles.actions}>
-            <button className={styles.action} onClick={() => jumpToIndex(historyIndex - 1)} disabled={historyIndex === 0}>
-              Prev move
-            </button>
-            <button
-              className={styles.action}
-              onClick={() => jumpToIndex(historyIndex + 1)}
-              disabled={historyIndex === moveHistory.length}
-            >
-              Next move
-            </button>
-            <button className={styles.action} onClick={() => setOrientation(value => (value === 'white' ? 'black' : 'white'))}>
-              Flip board
-            </button>
-            <button className={styles.action} onClick={() => setShowArrow(value => !value)}>
-              {showArrow ? 'Hide best' : 'Show best'}
-            </button>
-            <button className={styles.action} onClick={() => void runTimelineAnalysis()} disabled={timelineLoading}>
-              {timelineLoading ? 'Refreshing' : 'Refresh line'}
-            </button>
-            <button
-              className={styles.action}
-              onClick={() => {
-                positionRequestIdRef.current += 1;
-                timelineRequestIdRef.current += 1;
-                setGame(new Chess());
-                setInitialFen(null);
-                setMoveHistory([]);
-                setHistoryIndex(0);
-                setMetadata(null);
-                setFileName('No PGN loaded');
-                setMode('overview');
-                setReviewIndex(0);
-                setPositionAnalysis(null);
-                setPreMoveAnalyses([]);
-                setTimelineAnalyses([]);
-                setPositionLoading(false);
-                setTimelineLoading(false);
-                setServerError('');
-                setTimelineError('');
-                positionCacheRef.current.clear();
-                positionInFlightRef.current.clear();
-                clearSelection();
-              }}
-            >
-              Reset
-            </button>
-          </section>
-
-          <section className={`${styles.card} ${styles.metaList}`}>
-            {[
-              ['Event', metadata?.event ?? 'Manual board'],
-              ['White', metadata ? `${metadata.whitePlayer} · ${metadata.whiteElo}` : 'White'],
-              ['Black', metadata ? `${metadata.blackPlayer} · ${metadata.blackElo}` : 'Black'],
-              ['Result', metadata?.result ?? '*'],
-              ['Date', metadata?.date ?? 'Live board'],
-            ].map(([label, value]) => (
-              <div className={styles.metaRow} key={label}>
-                <span className={styles.metaLabel}>{label}</span>
-                <span className={styles.metaValue}>{value}</span>
+            <div className={styles.boardStage} ref={boardStageRef}>
+              <div className={styles.evalRail} ref={evalRailRef}>
+                <div className={styles.evalShell} style={{ ['--white-share' as string]: `${whiteAdvantage}%` }}>
+                  <div className={styles.evalBlack} />
+                  <div className={styles.evalWhite} />
+                  <div className={styles.evalDivider} />
+                </div>
+                <div className={styles.evalCopy}>
+                  <span className={styles.score}>{formatScoreLabel(positionAnalysis)}</span>
+                </div>
               </div>
-            ))}
-          </section>
-        </aside>
 
-        <section className={`${styles.panel} ${styles.boardPanel}`}>
-          <div className={styles.panelHeader}>
-            <h2 className={styles.sectionTitle}>Position</h2>
-            <span
-              className={`${styles.statusPill} ${
-                serverError ? styles.statusError : positionLoading ? styles.statusPending : styles.statusReady
-              }`}
-            >
-              {serverError ? 'backend issue' : positionLoading ? 'analyzing' : 'ready'}
-            </span>
-          </div>
+              <div className={styles.boardFrame} style={{ width: `${boardWidth}px`, height: `${boardWidth}px` }}>
+                <Chessboard
+                  options={{
+                    id: 'analysis-board',
+                    position: currentFen,
+                    boardOrientation: orientation,
+                    boardStyle: {
+                      width: `${boardWidth}px`,
+                      maxWidth: '100%',
+                      height: `${boardWidth}px`,
+                      borderRadius: '10px',
+                    },
+                    onPieceDrop: ({ sourceSquare, targetSquare }) =>
+                      targetSquare ? tryMove(sourceSquare, targetSquare) : false,
+                    onSquareClick: ({ square }) => {
+                      if (selectedSquare) {
+                        const movePlayed = tryMove(selectedSquare, square);
 
-          <div className={styles.boardStage} ref={boardStageRef}>
-            <div className={styles.evalRail} ref={evalRailRef}>
-              <div className={styles.evalShell} style={{ ['--white-share' as string]: `${whiteAdvantage}%` }}>
-                <div className={styles.evalBlack} />
-                <div className={styles.evalWhite} />
-                <div className={styles.evalDivider} />
-              </div>
-              <div className={styles.evalCopy}>
-                <span className={styles.score}>{formatScoreLabel(positionAnalysis)}</span>
-              </div>
-            </div>
+                        if (!movePlayed) {
+                          clearSelection();
+                        }
 
-            <div className={styles.boardFrame} style={{ width: `${boardWidth}px`, height: `${boardWidth}px` }}>
-              <Chessboard
-                options={{
-                  id: 'analysis-board',
-                  position: currentFen,
-                  boardOrientation: orientation,
-                  boardStyle: {
-                    width: `${boardWidth}px`,
-                    maxWidth: '100%',
-                    height: `${boardWidth}px`,
-                    borderRadius: '10px',
-                  },
-                  onPieceDrop: ({ sourceSquare, targetSquare }) =>
-                    targetSquare ? tryMove(sourceSquare, targetSquare) : false,
-                  onSquareClick: ({ square }) => {
-                    if (selectedSquare) {
-                      const movePlayed = tryMove(selectedSquare, square);
-
-                      if (!movePlayed) {
-                        clearSelection();
+                        return;
                       }
 
-                      return;
-                    }
+                      const piece = game.get(square as Square);
 
-                    const piece = game.get(square as Square);
+                      if (!piece || piece.color !== game.turn()) {
+                        return;
+                      }
 
-                    if (!piece || piece.color !== game.turn()) {
-                      return;
-                    }
-
-                    setSelectedSquare(square);
-                    highlightMoves(square);
-                  },
-                  onSquareRightClick: () => clearSelection(),
-                  squareStyles,
-                  arrows: bestMoveArrow,
-                  lightSquareStyle: { backgroundColor: '#728092' },
-                  darkSquareStyle: { backgroundColor: '#253140' },
-                  animationDurationInMs: 180,
-                  showNotation: true,
-                }}
-              />
+                      setSelectedSquare(square);
+                      highlightMoves(square);
+                    },
+                    onSquareRightClick: () => clearSelection(),
+                    squareStyles,
+                    arrows: boardArrows,
+                    lightSquareStyle: { backgroundColor: '#728092' },
+                    darkSquareStyle: { backgroundColor: '#253140' },
+                    animationDurationInMs: 180,
+                    showNotation: true,
+                  }}
+                />
+              </div>
             </div>
           </div>
+
+          <div className={styles.boardFooter}>
+            <button className={styles.navButton} onClick={() => jumpToIndex(historyIndex - 1)} disabled={historyIndex === 0}>
+              Prev
+            </button>
+            <span className={styles.footerCopy}>
+              Ply {historyIndex}/{moveHistory.length}
+              {activeDeckCard
+                ? ` · ${activeDeckCard.prompt}`
+                : positionAnalysis?.bestMove
+                  ? ` · best ${formatBestMove(currentFen, positionAnalysis.bestMove)}`
+                  : ''}
+            </span>
+            <button className={styles.navButton} onClick={() => jumpToIndex(historyIndex + 1)} disabled={historyIndex === moveHistory.length}>
+              Next
+            </button>
+          </div>
+
           {serverError ? <p className={styles.error}>{serverError}</p> : null}
         </section>
 
-        <aside className={`${styles.panel} ${styles.infoPanel}`}>
+        <aside className={`${styles.panel} ${styles.contextPanel}`}>
           <section className={styles.modeTabs}>
-            {(['overview', 'review', 'analysis'] satisfies LabMode[]).map(nextMode => (
+            {(['analyze', 'gameReview', 'learn', 'deck'] satisfies WorkspaceMode[]).map(nextMode => (
               <button
                 className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
                 key={nextMode}
                 onClick={() => {
-                  if (nextMode === 'review') {
+                  if (nextMode === 'gameReview' && reviewMoments.length > 0) {
                     goToReviewMoment(reviewIndex);
                     return;
                   }
@@ -703,192 +787,401 @@ export function ChessAnalysisLab() {
                   setMode(nextMode);
                 }}
               >
-                {nextMode === 'overview' ? 'Overview' : nextMode === 'review' ? 'Review' : 'Analysis'}
+                {getModeLabel(nextMode)}
               </button>
             ))}
           </section>
 
-          {mode === 'overview' ? (
-            <>
-              <section className={`${styles.card} ${styles.overviewCard}`}>
-                <div className={styles.panelHeader}>
-                  <h2 className={styles.sectionTitle}>Overview</h2>
-                  <span className={styles.statusText}>{timelineLoading ? 'building' : `${gameReview.keyMoments.length} moments`}</span>
-                </div>
-                <div className={styles.accuracyGrid}>
-                  <div className={styles.accuracyCard}>
-                    <span className={styles.metaLabel}>{whiteReviewName}</span>
-                    <strong>{formatNullable(gameReview.accuracy.white)}%</strong>
-                    <span className={styles.statusText}>rating {formatNullable(gameReview.gameRating.white)}</span>
-                  </div>
-                  <div className={styles.accuracyCard}>
-                    <span className={styles.metaLabel}>{blackReviewName}</span>
-                    <strong>{formatNullable(gameReview.accuracy.black)}%</strong>
-                    <span className={styles.statusText}>rating {formatNullable(gameReview.gameRating.black)}</span>
-                  </div>
-                </div>
-                <div className={styles.openingBox}>
-                  <span className={styles.metaLabel}>Opening</span>
-                  <strong>{gameReview.opening.name}</strong>
-                  <span className={styles.statusText}>
-                    {gameReview.opening.eco !== '-' ? `${gameReview.opening.eco} · ` : ''}
-                    {gameReview.opening.lastBookPly ? `book through ply ${gameReview.opening.lastBookPly}` : 'book not detected'}
-                  </span>
-                </div>
-                <div className={styles.categoryGrid}>
-                  {reviewCategoryOrder.map(category => {
-                    const meta = reviewCategoryMeta[category];
-                    const whiteCount = gameReview.counts.white[category];
-                    const blackCount = gameReview.counts.black[category];
-
-                    if (!whiteCount && !blackCount) {
-                      return null;
-                    }
-
-                    return (
-                      <div className={styles.categoryTile} key={category} style={{ ['--review-color' as string]: meta.color }}>
-                        <span>{meta.label}</span>
-                        <strong>{whiteCount + blackCount}</strong>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-              <ChartSection
+          <div className={styles.panelScroll}>
+            {mode === 'analyze' ? (
+              <AnalyzePanel
+                currentFen={currentFen}
+                movePairs={movePairs}
+                historyIndex={historyIndex}
+                jumpToIndex={jumpToIndex}
+                positionAnalysis={positionAnalysis}
+                positionLoading={positionLoading}
+              />
+            ) : mode === 'gameReview' ? (
+              <GameReviewPanel
+                activeReviewMoment={activeReviewMoment}
+                blackReviewName={blackReviewName}
                 chartConfig={chartConfig}
                 chartData={chartData}
+                gameReview={gameReview}
+                goToReviewMoment={goToReviewMoment}
+                hasLoadedGame={hasLoadedGame}
                 historyIndex={historyIndex}
                 moveHistoryLength={moveHistory.length}
+                openPgnDialog={() => setPgnDialogOpen(true)}
+                reviewIndex={reviewIndex}
+                reviewMoments={reviewMoments}
+                reviewSide={reviewSide}
+                setReviewIndex={setReviewIndex}
+                setReviewSide={setReviewSide}
+                setShowArrow={setShowArrow}
                 timelineAnalysesLength={timelineAnalyses.length}
                 timelineError={timelineError}
                 timelineLoading={timelineLoading}
+                whiteReviewName={whiteReviewName}
               />
-            </>
-          ) : mode === 'review' ? (
-            <>
-              <section className={`${styles.card} ${styles.reviewCard}`}>
-                <div className={styles.panelHeader}>
-                  <h2 className={styles.sectionTitle}>Review</h2>
-                  <span className={styles.statusText}>
-                    {reviewMoments.length ? `${reviewIndex + 1}/${reviewMoments.length}` : 'no moments'}
-                  </span>
-                </div>
-                <div className={styles.reviewSideTabs}>
-                  {[
-                    ['both', 'Both'],
-                    ['white', whiteReviewName],
-                    ['black', blackReviewName],
-                  ].map(([side, label]) => (
-                    <button
-                      className={`${styles.sideTab} ${reviewSide === side ? styles.activeSideTab : ''}`}
-                      key={side}
-                      onClick={() => {
-                        setReviewSide(side as ReviewSide);
-                        setReviewIndex(0);
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {activeReviewMoment ? (
-                  <div className={styles.coachBox}>
-                    <div className={styles.coachHeader}>
-                      <span
-                        className={styles.reviewBadge}
-                        style={{ ['--review-color' as string]: activeReviewMoment.colorHex ?? '#8f75ff' }}
-                      >
-                        {activeReviewMoment.label}
-                      </span>
-                      <strong>{activeReviewMoment.moveLabel}</strong>
-                    </div>
-                    <p className={styles.copy}>{activeReviewMoment.coachText}</p>
-                    <div className={styles.reviewFacts}>
-                      <span>played {activeReviewMoment.san}</span>
-                      <span>best {activeReviewMoment.bestMoveSan ?? '...'}</span>
-                      <span>loss {formatExpectedLoss(activeReviewMoment.expectedPointsLost)}</span>
-                    </div>
-                    <div className={styles.reviewNav}>
-                      <button className={styles.action} onClick={() => goToReviewMoment(reviewIndex - 1)} disabled={reviewIndex === 0}>
-                        Prev
-                      </button>
-                      <button
-                        className={styles.action}
-                        onClick={() => {
-                          setShowArrow(true);
-                          goToReviewMoment(reviewIndex);
-                        }}
-                      >
-                        Show best
-                      </button>
-                      <button
-                        className={styles.action}
-                        onClick={() => goToReviewMoment(reviewIndex + 1)}
-                        disabled={reviewIndex >= reviewMoments.length - 1}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <p className={styles.empty}>Load a PGN and refresh the line to build key moments.</p>
-                )}
-              </section>
-              <section className={`${styles.card} ${styles.momentListCard}`}>
-                <div className={styles.panelHeader}>
-                  <h2 className={styles.sectionTitle}>Moments</h2>
-                </div>
-                <div className={styles.momentList}>
-                  {reviewMoments.map((moment, index) => (
-                    <button
-                      className={`${styles.momentButton} ${index === reviewIndex ? styles.activeMoment : ''}`}
-                      key={`${moment.ply}-${moment.category}`}
-                      onClick={() => goToReviewMoment(index)}
-                    >
-                      <span>{moment.moveLabel}</span>
-                      <strong>{moment.label}</strong>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            </>
-          ) : (
-            <>
-              <EngineLinesSection currentFen={currentFen} positionAnalysis={positionAnalysis} positionLoading={positionLoading} />
-              <section className={`${styles.card} ${styles.movesCard}`}>
-                <div className={styles.panelHeader}>
-                  <h2 className={styles.sectionTitle}>Moves</h2>
-                </div>
-                <div className={styles.moveList}>
-                  {movePairs.length === 0 ? (
-                    <p className={styles.empty}>No moves yet.</p>
-                  ) : (
-                    movePairs.map(pair => (
-                      <div className={styles.moveRow} key={pair.moveNumber}>
-                        <span className={styles.moveNumber}>{pair.moveNumber}</span>
-                        <button
-                          className={`${styles.moveChip} ${historyIndex === pair.whitePly ? styles.activeMove : ''}`}
-                          onClick={() => jumpToIndex(pair.whitePly)}
-                        >
-                          {pair.white ? formatMoveFigurine(pair.white.san) : '...'}
-                        </button>
-                        <button
-                          className={`${styles.moveChip} ${historyIndex === pair.blackPly ? styles.activeMove : ''}`}
-                          onClick={() => jumpToIndex(pair.blackPly)}
-                          disabled={!pair.black}
-                        >
-                          {pair.black ? formatMoveFigurine(pair.black.san) : ''}
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-            </>
-          )}
+            ) : mode === 'learn' ? (
+              <LearnPanel
+                currentFen={currentFen}
+                deckCards={deckCards}
+                nextDeckCard={nextDeckCard}
+                openingLines={OPENING_REPERTOIRE}
+                startCard={loadDeckCard}
+              />
+            ) : (
+              <DeckPanel
+                activeCard={activeDeckCard}
+                deckCards={deckCards}
+                deckFeedback={deckFeedback}
+                deckStats={deckStats}
+                nextCard={nextDeckCard}
+                onNext={advanceDeckCard}
+                onRepeat={repeatDeckCard}
+                startCard={loadDeckCard}
+              />
+            )}
+          </div>
         </aside>
       </div>
+
+      {pgnDialogOpen ? (
+        <PgnImportDialog
+          fileName={fileName}
+          handlePgnPaste={handlePgnPaste}
+          handleUpload={handleUpload}
+          onClose={() => setPgnDialogOpen(false)}
+          pgnDraft={pgnDraft}
+          setPgnDraft={setPgnDraft}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function AnalyzePanel({
+  currentFen,
+  historyIndex,
+  jumpToIndex,
+  movePairs,
+  positionAnalysis,
+  positionLoading,
+}: {
+  currentFen: string;
+  historyIndex: number;
+  jumpToIndex: (index: number) => void;
+  movePairs: Array<{
+    moveNumber: number;
+    white: StoredMove | null;
+    whitePly: number;
+    black: StoredMove | null;
+    blackPly: number;
+  }>;
+  positionAnalysis: AnalysisResult | null;
+  positionLoading: boolean;
+}) {
+  return (
+    <>
+      <EngineLinesSection currentFen={currentFen} positionAnalysis={positionAnalysis} positionLoading={positionLoading} />
+      <section className={`${styles.card} ${styles.movesCard}`}>
+        <div className={styles.panelHeader}>
+          <h2 className={styles.sectionTitle}>Line</h2>
+          <span className={styles.statusText}>{movePairs.length ? `${movePairs.length} moves` : 'manual board'}</span>
+        </div>
+        <div className={styles.moveList}>
+          {movePairs.length === 0 ? (
+            <p className={styles.empty}>Play on the board or import a PGN.</p>
+          ) : (
+            movePairs.map(pair => (
+              <div className={styles.moveRow} key={pair.moveNumber}>
+                <span className={styles.moveNumber}>{pair.moveNumber}</span>
+                <button
+                  className={`${styles.moveChip} ${historyIndex === pair.whitePly ? styles.activeMove : ''}`}
+                  onClick={() => jumpToIndex(pair.whitePly)}
+                >
+                  {pair.white ? formatMoveFigurine(pair.white.san) : '...'}
+                </button>
+                <button
+                  className={`${styles.moveChip} ${historyIndex === pair.blackPly ? styles.activeMove : ''}`}
+                  onClick={() => jumpToIndex(pair.blackPly)}
+                  disabled={!pair.black}
+                >
+                  {pair.black ? formatMoveFigurine(pair.black.san) : ''}
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function GameReviewPanel({
+  activeReviewMoment,
+  blackReviewName,
+  chartConfig,
+  chartData,
+  gameReview,
+  goToReviewMoment,
+  hasLoadedGame,
+  historyIndex,
+  moveHistoryLength,
+  openPgnDialog,
+  reviewIndex,
+  reviewMoments,
+  reviewSide,
+  setReviewIndex,
+  setReviewSide,
+  setShowArrow,
+  timelineAnalysesLength,
+  timelineError,
+  timelineLoading,
+  whiteReviewName,
+}: {
+  activeReviewMoment: ReturnType<typeof filterReviewMoments>[number] | null;
+  blackReviewName: string;
+  chartConfig: ReturnType<typeof buildChartOptions>;
+  chartData: ChartData<'line', number[], number>;
+  gameReview: ReturnType<typeof buildGameReview>;
+  goToReviewMoment: (index: number) => void;
+  hasLoadedGame: boolean;
+  historyIndex: number;
+  moveHistoryLength: number;
+  openPgnDialog: () => void;
+  reviewIndex: number;
+  reviewMoments: ReturnType<typeof filterReviewMoments>;
+  reviewSide: ReviewSide;
+  setReviewIndex: (index: number) => void;
+  setReviewSide: (side: ReviewSide) => void;
+  setShowArrow: (value: boolean) => void;
+  timelineAnalysesLength: number;
+  timelineError: string;
+  timelineLoading: boolean;
+  whiteReviewName: string;
+}) {
+  if (!hasLoadedGame) {
+    return (
+      <section className={`${styles.card} ${styles.emptyStateCard}`}>
+        <h2 className={styles.sectionTitle}>Game Review</h2>
+        <p className={styles.copy}>Import a PGN only when you want full-game review. The workspace stays board-first otherwise.</p>
+        <button className={`${styles.action} ${styles.primary}`} onClick={openPgnDialog}>
+          Import PGN
+        </button>
+      </section>
+    );
+  }
+
+  return (
+    <>
+      <section className={`${styles.card} ${styles.overviewCard}`}>
+        <div className={styles.panelHeader}>
+          <h2 className={styles.sectionTitle}>Game</h2>
+          <span className={styles.statusText}>{timelineLoading ? 'building' : `${gameReview.keyMoments.length} moments`}</span>
+        </div>
+        <div className={styles.accuracyGrid}>
+          <div className={styles.accuracyCard}>
+            <span className={styles.metaLabel}>{whiteReviewName}</span>
+            <strong>{formatNullable(gameReview.accuracy.white)}%</strong>
+            <span className={styles.statusText}>rating {formatNullable(gameReview.gameRating.white)}</span>
+          </div>
+          <div className={styles.accuracyCard}>
+            <span className={styles.metaLabel}>{blackReviewName}</span>
+            <strong>{formatNullable(gameReview.accuracy.black)}%</strong>
+            <span className={styles.statusText}>rating {formatNullable(gameReview.gameRating.black)}</span>
+          </div>
+        </div>
+        <div className={styles.openingBox}>
+          <span className={styles.metaLabel}>Opening</span>
+          <strong>{gameReview.opening.name}</strong>
+          <span className={styles.statusText}>
+            {gameReview.opening.eco !== '-' ? `${gameReview.opening.eco} · ` : ''}
+            {gameReview.opening.lastBookPly ? `book through ply ${gameReview.opening.lastBookPly}` : 'book not detected'}
+          </span>
+        </div>
+        <div className={styles.categoryGrid}>
+          {reviewCategoryOrder.map(category => {
+            const meta = reviewCategoryMeta[category];
+            const whiteCount = gameReview.counts.white[category];
+            const blackCount = gameReview.counts.black[category];
+
+            if (!whiteCount && !blackCount) {
+              return null;
+            }
+
+            return (
+              <div className={styles.categoryTile} key={category} style={{ ['--review-color' as string]: meta.color }}>
+                <span>{meta.label}</span>
+                <strong>{whiteCount + blackCount}</strong>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <ChartSection
+        chartConfig={chartConfig}
+        chartData={chartData}
+        historyIndex={historyIndex}
+        moveHistoryLength={moveHistoryLength}
+        timelineAnalysesLength={timelineAnalysesLength}
+        timelineError={timelineError}
+        timelineLoading={timelineLoading}
+      />
+
+      <section className={`${styles.card} ${styles.reviewCard}`}>
+        <div className={styles.panelHeader}>
+          <h2 className={styles.sectionTitle}>Moment</h2>
+          <span className={styles.statusText}>{reviewMoments.length ? `${reviewIndex + 1}/${reviewMoments.length}` : 'no moments'}</span>
+        </div>
+        <div className={styles.reviewSideTabs}>
+          {[
+            ['both', 'Both'],
+            ['white', whiteReviewName],
+            ['black', blackReviewName],
+          ].map(([side, label]) => (
+            <button
+              className={`${styles.sideTab} ${reviewSide === side ? styles.activeSideTab : ''}`}
+              key={side}
+              onClick={() => {
+                setReviewSide(side as ReviewSide);
+                setReviewIndex(0);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {activeReviewMoment ? (
+          <div className={styles.coachBox}>
+            <div className={styles.coachHeader}>
+              <span className={styles.reviewBadge} style={{ ['--review-color' as string]: activeReviewMoment.colorHex ?? '#8f75ff' }}>
+                {activeReviewMoment.label}
+              </span>
+              <strong>{activeReviewMoment.moveLabel}</strong>
+            </div>
+            <p className={styles.copy}>{activeReviewMoment.coachText}</p>
+            <div className={styles.reviewFacts}>
+              <span>played {activeReviewMoment.san}</span>
+              <span>best {activeReviewMoment.bestMoveSan ?? '...'}</span>
+              <span>loss {formatExpectedLoss(activeReviewMoment.expectedPointsLost)}</span>
+            </div>
+            <div className={styles.reviewNav}>
+              <button className={styles.action} onClick={() => goToReviewMoment(reviewIndex - 1)} disabled={reviewIndex === 0}>
+                Prev
+              </button>
+              <button
+                className={styles.action}
+                onClick={() => {
+                  setShowArrow(true);
+                  goToReviewMoment(reviewIndex);
+                }}
+              >
+                Show best
+              </button>
+              <button
+                className={styles.action}
+                onClick={() => goToReviewMoment(reviewIndex + 1)}
+                disabled={reviewIndex >= reviewMoments.length - 1}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className={styles.empty}>No key moments yet.</p>
+        )}
+      </section>
+    </>
+  );
+}
+
+function LearnPanel({ currentFen }: { currentFen: string }) {
+  return (
+    <>
+      <section className={`${styles.card} ${styles.emptyStateCard}`}>
+        <div className={styles.panelHeader}>
+          <h2 className={styles.sectionTitle}>Learn openings</h2>
+          <span className={styles.statusText}>next</span>
+        </div>
+        <p className={styles.copy}>
+          This panel is ready for the repertoire flow: known opening seed, cached explorer positions, and engine-ranked best moves.
+        </p>
+      </section>
+      <section className={`${styles.card} ${styles.dataCard}`}>
+        <span className={styles.metaLabel}>Current position</span>
+        <p className={styles.monoLine}>{currentFen}</p>
+      </section>
+    </>
+  );
+}
+
+function DeckPanel() {
+  return (
+    <section className={`${styles.card} ${styles.emptyStateCard}`}>
+      <div className={styles.panelHeader}>
+        <h2 className={styles.sectionTitle}>Deck</h2>
+        <span className={styles.statusText}>FSRS next</span>
+      </div>
+      <p className={styles.copy}>
+        The deck view will drill one or more board moves, stop on mistakes, and grade cards as best-or-nothing.
+      </p>
+    </section>
+  );
+}
+
+function PgnImportDialog({
+  fileName,
+  handlePgnPaste,
+  handleUpload,
+  onClose,
+  pgnDraft,
+  setPgnDraft,
+}: {
+  fileName: string;
+  handlePgnPaste: () => void;
+  handleUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  onClose: () => void;
+  pgnDraft: string;
+  setPgnDraft: (value: string) => void;
+}) {
+  return (
+    <div className={styles.modalLayer} role="presentation" onMouseDown={onClose}>
+      <section className={styles.importDialog} role="dialog" aria-modal="true" aria-labelledby="pgn-import-title" onMouseDown={event => event.stopPropagation()}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2 className={styles.sectionTitle} id="pgn-import-title">
+              Import PGN
+            </h2>
+            <p className={styles.support}>Use this only when you want full-game review.</p>
+          </div>
+          <button className={styles.iconButton} onClick={onClose} title="Close import">
+            X
+          </button>
+        </div>
+        <div className={styles.pgnControls}>
+          <label className={`${styles.action} ${styles.primary}`} htmlFor="pgn-upload">
+            Load file
+          </label>
+          <button className={`${styles.action} ${styles.secondary}`} onClick={() => void handlePgnPaste()} disabled={!pgnDraft.trim()}>
+            Paste PGN
+          </button>
+        </div>
+        <input className={styles.hiddenInput} id="pgn-upload" type="file" accept=".pgn" onChange={handleUpload} />
+        <textarea
+          className={styles.pgnInput}
+          value={pgnDraft}
+          onChange={event => setPgnDraft(event.target.value)}
+          placeholder={'[Event "Live Chess"]\n[White "LosValettos"]\n[Black "rafaelpiresrj"]\n\n1. e4 e5 2. Nf3 Nc6'}
+          spellCheck={false}
+        />
+        <p className={styles.support}>{fileName || 'No PGN loaded'}</p>
+      </section>
+    </div>
   );
 }
 
@@ -919,9 +1212,7 @@ function ChartSection({
         {timelineAnalysesLength > 0 ? (
           <Line data={chartData} options={chartConfig} />
         ) : (
-          <div className={styles.boardFallback}>
-            {timelineLoading ? 'Analyzing the whole line…' : 'Load a PGN or refresh the current line.'}
-          </div>
+          <div className={styles.boardFallback}>{timelineLoading ? 'Analyzing the whole line...' : 'Import a PGN to build review.'}</div>
         )}
       </div>
       {timelineError ? <p className={styles.error}>{timelineError}</p> : null}
@@ -964,6 +1255,19 @@ function EngineLinesSection({
       </div>
     </section>
   );
+}
+
+function getModeLabel(mode: WorkspaceMode) {
+  switch (mode) {
+    case 'analyze':
+      return 'Analyze';
+    case 'gameReview':
+      return 'Game';
+    case 'learn':
+      return 'Learn';
+    case 'deck':
+      return 'Deck';
+  }
 }
 
 function formatNullable(value: number | null) {
