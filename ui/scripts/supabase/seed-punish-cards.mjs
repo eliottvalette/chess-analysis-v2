@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { Chess } from 'chess.js';
+import { pathToFileURL } from 'node:url';
 
 import { loadLocalEnv, requireAdminKey, requireEnv } from './env.mjs';
 
@@ -15,21 +16,20 @@ const OPENING_REPERTOIRE = [
 ];
 
 const DECK_ID = 'opening-punishments-v1';
+const DEFAULT_PUNISH_THRESHOLD_CP = 30;
+const DEFAULT_PUNISH_DEPTH = 14;
+const DEFAULT_PUNISH_MOVETIME_MS = 250;
+const DEFAULT_PUNISH_MULTIPV = 3;
 
-main().catch(error => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
-
-async function main() {
+export async function main() {
   const env = loadLocalEnv();
   const supabaseUrl = requireEnv(env, 'NEXT_PUBLIC_SUPABASE_URL');
   const serviceRoleKey = requireAdminKey(env);
   const analyzeUrl = env.ANALYZE_BASE_URL?.trim() || 'http://localhost:3000';
-  const thresholdCp = Number(env.PUNISH_THRESHOLD_CP || 60);
-  const depth = Number(env.PUNISH_DEPTH || 14);
-  const movetimeMs = Number(env.PUNISH_MOVETIME_MS || 250);
-  const multipv = Number(env.PUNISH_MULTIPV || 3);
+  const thresholdCp = Number(env.PUNISH_THRESHOLD_CP || DEFAULT_PUNISH_THRESHOLD_CP);
+  const depth = Number(env.PUNISH_DEPTH || DEFAULT_PUNISH_DEPTH);
+  const movetimeMs = Number(env.PUNISH_MOVETIME_MS || DEFAULT_PUNISH_MOVETIME_MS);
+  const multipv = Number(env.PUNISH_MULTIPV || DEFAULT_PUNISH_MULTIPV);
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: {
@@ -119,7 +119,21 @@ async function main() {
   }
 
   if (cards.length === 0) {
-    console.log(JSON.stringify({ generated_cards: 0, upserted_cards: 0 }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          candidate_positions: candidates.length,
+          generated_cards: 0,
+          upserted_cards: 0,
+          threshold_cp: thresholdCp,
+          multipv,
+          depth,
+          movetime_ms: movetimeMs,
+        },
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -129,10 +143,24 @@ async function main() {
     throw new Error(`deck_cards: ${error.message}`);
   }
 
-  console.log(JSON.stringify({ generated_cards: cards.length, upserted_cards: cards.length }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        candidate_positions: candidates.length,
+        generated_cards: cards.length,
+        upserted_cards: cards.length,
+        threshold_cp: thresholdCp,
+        multipv,
+        depth,
+        movetime_ms: movetimeMs,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
-function buildTrainingCandidates() {
+export function buildTrainingCandidates() {
   const candidates = [];
 
   for (const line of OPENING_REPERTOIRE) {
@@ -169,18 +197,12 @@ function buildTrainingCandidates() {
   return candidates;
 }
 
-async function assertAnalyzeApi(baseUrl) {
-  const response = await fetch(`${baseUrl}/api/analyze-position`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      fen: new Chess().fen(),
-      depth: 1,
-      movetimeMs: 10,
-      multipv: 1,
-    }),
+export async function assertAnalyzeApi(baseUrl) {
+  const response = await postAnalyzeRequest(baseUrl, {
+    fen: new Chess().fen(),
+    depth: 1,
+    movetimeMs: 10,
+    multipv: 1,
   });
 
   if (!response.ok) {
@@ -188,14 +210,8 @@ async function assertAnalyzeApi(baseUrl) {
   }
 }
 
-async function analyzePosition(baseUrl, payload) {
-  const response = await fetch(`${baseUrl}/api/analyze-position`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
+export async function analyzePosition(baseUrl, payload) {
+  const response = await postAnalyzeRequest(baseUrl, payload);
 
   if (!response.ok) {
     throw new Error(`Analyze API failed: HTTP ${response.status} ${await response.text()}`);
@@ -204,7 +220,22 @@ async function analyzePosition(baseUrl, payload) {
   return response.json();
 }
 
-function scoreToCpForSide(score, side) {
+async function postAnalyzeRequest(baseUrl, payload) {
+  try {
+    return await fetch(`${baseUrl}/api/analyze-position`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    const detail = error instanceof Error && error.message ? ` ${error.message}` : '';
+    throw new Error(`Analyze API is unreachable at ${baseUrl}. Start the local app or set ANALYZE_BASE_URL.${detail}`);
+  }
+}
+
+export function scoreToCpForSide(score, side) {
   if (!score) {
     return null;
   }
@@ -213,10 +244,9 @@ function scoreToCpForSide(score, side) {
   return side === 'white' ? whiteScore : -whiteScore;
 }
 
-function moveFromFen(fen, uci) {
-  const chess = new Chess(fen);
-
+export function moveFromFen(fen, uci) {
   try {
+    const chess = new Chess(fen);
     const move = chess.move({
       from: uci.slice(0, 2),
       to: uci.slice(2, 4),
@@ -230,4 +260,13 @@ function moveFromFen(fen, uci) {
   } catch {
     return null;
   }
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
+  main().catch(error => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
 }

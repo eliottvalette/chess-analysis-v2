@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 import pg from 'pg';
 
@@ -6,12 +7,7 @@ import { loadLocalEnv, requireEnv } from './env.mjs';
 
 const { Client } = pg;
 
-main().catch(error => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
-
-async function main() {
+export async function main() {
   const sql = readFileSync('supabase/migrations/0001_learning_decks.sql', 'utf8');
   const client = new Client(getPgConfig(loadLocalEnv()));
 
@@ -26,7 +22,7 @@ async function main() {
   console.log('migration applied: supabase/migrations/0001_learning_decks.sql');
 }
 
-function getPgConfig(env) {
+export function getPgConfig(env) {
   const password = env.SUPABASE_DB_PASSWORD?.trim();
   const supabaseUrl = requireEnv(env, 'NEXT_PUBLIC_SUPABASE_URL');
   const ref = new URL(supabaseUrl).hostname.split('.')[0];
@@ -64,4 +60,13 @@ function getPgConfig(env) {
   }
 
   requireEnv(env, 'SUPABASE_DB_PASSWORD');
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
+  main().catch(error => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
 }

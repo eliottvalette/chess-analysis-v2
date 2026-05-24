@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --test",
     "supabase:migrate": "node scripts/supabase/migrate.mjs",
     "supabase:seed": "node scripts/supabase/seed-decks.mjs",
     "supabase:seed:cards": "node scripts/supabase/seed-punish-cards.mjs",
