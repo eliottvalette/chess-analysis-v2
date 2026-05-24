@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: uiRoot,
   },
+  outputFileTracingIncludes: {
+    '/api/analyze-game': ['./bin/**/*'],
+    '/api/analyze-position': ['./bin/**/*'],
+  },
 };
 
 export default nextConfig;

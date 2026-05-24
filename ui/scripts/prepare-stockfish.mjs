@@ -12,10 +12,12 @@ const STOCKFISH_URL =
 const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(scriptsDir, '..');
 const outputPath = path.join(projectDir, 'bin', 'stockfish');
-const shouldPrepare = process.env.NETLIFY === 'true' || process.env.PREPARE_STOCKFISH === 'true';
+const outputDir = path.dirname(outputPath);
+const shouldPrepare =
+  process.env.NETLIFY === 'true' || process.env.VERCEL === '1' || process.env.PREPARE_STOCKFISH === 'true';
 
 if (!shouldPrepare) {
-  console.log('Skipping Linux Stockfish binary preparation outside Netlify.');
+  console.log('Skipping Linux Stockfish binary preparation outside Netlify/Vercel.');
   process.exit(0);
 }
 
@@ -39,9 +41,10 @@ if (!extractedBinary) {
   throw new Error('Stockfish archive did not contain the expected Linux binary.');
 }
 
-await mkdir(path.dirname(outputPath), { recursive: true });
+await mkdir(outputDir, { recursive: true });
 await copyFile(extractedBinary, outputPath);
 await chmod(outputPath, 0o755);
+await copySiblingAssets(extractedBinary, outputDir);
 await rm(workDir, { recursive: true, force: true });
 
 console.log(`Prepared Stockfish Linux binary at ${path.relative(projectDir, outputPath)}.`);
@@ -121,4 +124,17 @@ async function findStockfishBinary(directory) {
   }
 
   return null;
+}
+
+async function copySiblingAssets(binaryPath, destinationDir) {
+  const sourceDir = path.dirname(binaryPath);
+  const entries = await readdir(sourceDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.nnue')) {
+      continue;
+    }
+
+    await copyFile(path.join(sourceDir, entry.name), path.join(destinationDir, entry.name));
+  }
 }

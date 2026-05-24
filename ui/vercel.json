@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "fluid": true,
+  "regions": ["cdg1"],
+  "functions": {
+    "app/api/analyze-game/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/analyze-position/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}
