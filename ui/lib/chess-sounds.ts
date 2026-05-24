@@ -14,17 +14,17 @@ export type ChessSoundKey =
   | 'illegal';
 
 export const CHESS_SOUND_URLS: Record<ChessSoundKey, string> = {
-  'game-start': 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/game-start.mp3',
-  'game-end': 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/game-end.mp3',
-  capture: 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/capture.mp3',
-  castle: 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/castle.mp3',
-  premove: 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/premove.mp3',
-  'move-self': 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-self.mp3',
-  'move-opponent': 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-opponent.mp3',
-  'move-check': 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/move-check.mp3',
-  promote: 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/promote.mp3',
-  notify: 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/notify.mp3',
-  illegal: 'http://images.chesscomfiles.com/chess-themes/sounds/_MP3_/default/illegal.mp3',
+  'game-start': '/sounds/chesscom/game-start.mp3',
+  'game-end': '/sounds/chesscom/game-end.mp3',
+  capture: '/sounds/chesscom/capture.mp3',
+  castle: '/sounds/chesscom/castle.mp3',
+  premove: '/sounds/chesscom/premove.mp3',
+  'move-self': '/sounds/chesscom/move-self.mp3',
+  'move-opponent': '/sounds/chesscom/move-opponent.mp3',
+  'move-check': '/sounds/chesscom/move-check.mp3',
+  promote: '/sounds/chesscom/promote.mp3',
+  notify: '/sounds/chesscom/notify.mp3',
+  illegal: '/sounds/chesscom/illegal.mp3',
 };
 
 export function getMoveSoundSequence({

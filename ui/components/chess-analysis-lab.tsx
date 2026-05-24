@@ -43,7 +43,7 @@ import {
   type ReviewSide,
   type StoredMove,
 } from '@/lib/chess-analysis-client';
-import { CHESS_SOUND_URLS, getMoveSoundSequence, type ChessSoundKey } from '@/lib/chess-sounds';
+import { CHESS_SOUND_URLS, getMoveSoundSequence, getPrimaryMoveSound, type ChessSoundKey } from '@/lib/chess-sounds';
 import {
   buildPendingDeckFeedback,
   finalizeDeckFeedback,
@@ -86,6 +86,8 @@ export function ChessAnalysisLab() {
   const [initialFen, setInitialFen] = useState<string | null>(null);
   const [moveHistory, setMoveHistory] = useState<StoredMove[]>([]);
   const [historyIndex, setHistoryIndex] = useState(0);
+  const [variationBaseIndex, setVariationBaseIndex] = useState<number | null>(null);
+  const [variationMoves, setVariationMoves] = useState<StoredMove[]>([]);
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [squareStyles, setSquareStyles] = useState<Record<string, CSSProperties>>({});
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
@@ -129,7 +131,14 @@ export function ChessAnalysisLab() {
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
 
   const currentFen = useMemo(() => game.fen(), [game]);
-  const currentMoves = useMemo(() => moveHistory.slice(0, historyIndex), [historyIndex, moveHistory]);
+  const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
+  const currentMoves = useMemo(() => {
+    if (variationBaseIndex != null) {
+      return [...moveHistory.slice(0, variationBaseIndex), ...variationMoves];
+    }
+
+    return moveHistory.slice(0, historyIndex);
+  }, [historyIndex, moveHistory, variationBaseIndex, variationMoves]);
   const currentMoveList = useMemo(() => buildMoveUciHistory(currentMoves), [currentMoves]);
   const currentLineKey = currentMoveList.join(' ');
   const whiteAdvantage = getAdvantageMeter(positionAnalysis);
@@ -154,7 +163,6 @@ export function ChessAnalysisLab() {
   const boardArrows = activeDeckCard ? dedupeBoardArrows([...deckAnswerArrow, ...deckOpponentArrow]) : bestMoveArrow;
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
-  const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
   const availableDeckCards = useMemo(
     () => deckCards.filter(card => !getDeckProgressEntry(deckProgress, card.id).ignored),
     [deckCards, deckProgress],
@@ -246,6 +254,27 @@ export function ChessAnalysisLab() {
 
     return pairs;
   }, [moveHistory]);
+
+  const playSound = useCallback((soundKey: ChessSoundKey) => {
+    const base = soundPlayersRef.current[soundKey];
+
+    if (!base) {
+      return;
+    }
+
+    const player = base.cloneNode(true) as HTMLAudioElement;
+    player.currentTime = 0;
+    void player.play().catch(() => undefined);
+  }, []);
+
+  const playSoundSequence = useCallback(
+    (soundKeys: ChessSoundKey[]) => {
+      soundKeys.forEach((soundKey, index) => {
+        window.setTimeout(() => playSound(soundKey), index * 110);
+      });
+    },
+    [playSound],
+  );
 
   const fetchCachedPositionAnalysis = useCallback(
     (cacheKey: string, fen: string, moves: string[]) => {
@@ -627,6 +656,11 @@ export function ChessAnalysisLab() {
     setSquareStyles({});
   }
 
+  function clearVariation() {
+    setVariationBaseIndex(null);
+    setVariationMoves([]);
+  }
+
   function highlightMoves(square: string) {
     const nextStyles: Record<string, CSSProperties> = {
       [square]: {
@@ -655,10 +689,34 @@ export function ChessAnalysisLab() {
 
   const commitMove = useCallback(
     (nextGame: Chess, move: StoredMove) => {
+      if (hasLoadedGame && !activeDeckCard) {
+        const baseIndex = variationBaseIndex ?? historyIndex;
+        const nextVariationMoves = [...variationMoves, move];
+
+        setVariationBaseIndex(baseIndex);
+        setVariationMoves(nextVariationMoves);
+        setGame(nextGame);
+        setPositionAnalysis(null);
+        setServerError('');
+        setSelectedSquare(null);
+        setSquareStyles({});
+        playSoundSequence(
+          getMoveSoundSequence({
+            move,
+            isSelfMove: true,
+            isCheck: nextGame.isCheck(),
+            isCheckmate: nextGame.isCheckmate(),
+            isGameOver: nextGame.isGameOver(),
+          }),
+        );
+        return;
+      }
+
       const nextHistory = [...moveHistory.slice(0, historyIndex), move];
 
       setMoveHistory(nextHistory);
       setHistoryIndex(nextHistory.length);
+      clearVariation();
       setGame(nextGame);
       setPositionAnalysis(null);
       setTimelineAnalyses([]);
@@ -688,7 +746,7 @@ export function ChessAnalysisLab() {
         }
       }
     },
-    [activeDeckCard, deckFeedback, historyIndex, moveHistory],
+    [activeDeckCard, deckFeedback, hasLoadedGame, historyIndex, moveHistory, playSoundSequence, variationBaseIndex, variationMoves],
   );
 
   const tryMove = useCallback(
@@ -710,7 +768,7 @@ export function ChessAnalysisLab() {
       commitMove(nextGame, toStoredMove(move));
       return true;
     },
-    [commitMove, currentFen],
+    [commitMove, currentFen, playSound],
   );
 
   function jumpToIndex(index: number) {
@@ -718,6 +776,7 @@ export function ChessAnalysisLab() {
     const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
     setHistoryIndex(boundedIndex);
+    clearVariation();
     setGame(nextGame);
     clearSelection();
   }
@@ -732,6 +791,7 @@ export function ChessAnalysisLab() {
     setInitialFen(deckState.initialFen);
     setMoveHistory(deckState.moveHistory);
     setHistoryIndex(deckState.historyIndex);
+    clearVariation();
     setGame(deckState.game);
     setMetadata(null);
     setFileName('');
@@ -746,7 +806,7 @@ export function ChessAnalysisLab() {
     setTimelineError('');
     clearSelection();
     playSound('game-start');
-  }, [openingLines]);
+  }, [openingLines, playSound]);
 
   const advanceDeckCard = useCallback(() => {
     if (availableDeckCards.length === 0) {
@@ -814,7 +874,22 @@ export function ChessAnalysisLab() {
         const boundedIndex = Math.max(0, Math.min(historyIndex - 1, moveHistory.length));
         const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
+        if (boundedIndex === historyIndex - 1) {
+          const replayedMove = moveHistory[boundedIndex];
+
+          if (replayedMove) {
+            const playerSide = activeDeckCard?.side ?? reviewPlayerSide;
+            const isSelfMove =
+              playerSide == null
+                ? orientation === 'white'
+                : (playerSide === 'white' && replayedMove.color === 'w') || (playerSide === 'black' && replayedMove.color === 'b');
+
+            playSoundSequence([getPrimaryMoveSound(replayedMove, isSelfMove)]);
+          }
+        }
+
         setHistoryIndex(boundedIndex);
+        clearVariation();
         setGame(nextGame);
         clearSelection();
       }
@@ -846,6 +921,7 @@ export function ChessAnalysisLab() {
         }
 
         setHistoryIndex(boundedIndex);
+        clearVariation();
         setGame(nextGame);
         clearSelection();
       }
@@ -867,7 +943,7 @@ export function ChessAnalysisLab() {
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp, true);
     };
-  }, [activeDeckCard, advanceDeckCard, deckFeedback, historyIndex, initialFen, mode, moveHistory, orientation, pgnDialogOpen, positionAnalysis?.bestMove, reviewPlayerSide, tryMove]);
+  }, [activeDeckCard, advanceDeckCard, deckFeedback, historyIndex, initialFen, mode, moveHistory, orientation, pgnDialogOpen, playSoundSequence, positionAnalysis?.bestMove, reviewPlayerSide, tryMove]);
 
   function goToReviewMoment(index: number) {
     const boundedIndex = Math.max(0, Math.min(index, Math.max(0, reviewMoments.length - 1)));
@@ -936,6 +1012,7 @@ export function ChessAnalysisLab() {
       setInitialFen(nextInitialFen);
       setMoveHistory(nextHistory);
       setHistoryIndex(nextHistory.length);
+      clearVariation();
       setGame(nextGame);
       setMetadata(extractMetadataFromGame(loadedGame));
       setFileName(name);
@@ -1000,6 +1077,7 @@ export function ChessAnalysisLab() {
     setInitialFen(null);
     setMoveHistory([]);
     setHistoryIndex(0);
+    clearVariation();
     setMetadata(null);
     setFileName('');
     setMode('review');
@@ -1017,24 +1095,6 @@ export function ChessAnalysisLab() {
     positionInFlightRef.current.clear();
     clearSelection();
     playSound('game-start');
-  }
-
-  function playSound(soundKey: ChessSoundKey) {
-    const base = soundPlayersRef.current[soundKey];
-
-    if (!base) {
-      return;
-    }
-
-    const player = base.cloneNode(true) as HTMLAudioElement;
-    player.currentTime = 0;
-    void player.play().catch(() => undefined);
-  }
-
-  function playSoundSequence(soundKeys: ChessSoundKey[]) {
-    soundKeys.forEach((soundKey, index) => {
-      window.setTimeout(() => playSound(soundKey), index * 110);
-    });
   }
 
   return (
@@ -1186,6 +1246,7 @@ export function ChessAnalysisLab() {
                   setInitialFen(null);
                   setMoveHistory([]);
                   setHistoryIndex(0);
+                  clearVariation();
                   setMetadata(null);
                   setFileName('');
                   setReviewIndex(0);
@@ -1210,7 +1271,6 @@ export function ChessAnalysisLab() {
                   }
                 }}
                 onFetchRecentGames={() => void fetchRecentChessGames()}
-                openPgnDialog={() => setPgnDialogOpen(true)}
                 positionAnalysis={positionAnalysis}
                 positionLoading={positionLoading}
                 recentGames={recentChessGames}
@@ -1247,6 +1307,7 @@ export function ChessAnalysisLab() {
                   setInitialFen(null);
                   setMoveHistory([]);
                   setHistoryIndex(0);
+                  clearVariation();
                   setMetadata(null);
                   setFileName('');
                   setPositionAnalysis(null);

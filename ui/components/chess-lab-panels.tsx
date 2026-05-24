@@ -1,6 +1,6 @@
 'use client';
 
-import type { ChangeEvent } from 'react';
+import { Fragment, type ChangeEvent, type ReactNode } from 'react';
 import type { ChartData } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 
@@ -53,7 +53,6 @@ export function ReviewPanel({
   onChesscomUsernameChange,
   onRecentGameTimeClassChange,
   onFetchRecentGames,
-  openPgnDialog,
   positionAnalysis,
   positionLoading,
   recentGames,
@@ -96,7 +95,6 @@ export function ReviewPanel({
   onChesscomUsernameChange: (value: string) => void;
   onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
   onFetchRecentGames: () => void;
-  openPgnDialog: () => void;
   positionAnalysis: AnalysisResult | null;
   positionLoading: boolean;
   recentGames: ChessComRecentGameSummary[];
@@ -131,7 +129,6 @@ export function ReviewPanel({
         onChesscomUsernameChange={onChesscomUsernameChange}
         onRecentGameTimeClassChange={onRecentGameTimeClassChange}
         onFetchRecentGames={onFetchRecentGames}
-        openPgnDialog={openPgnDialog}
         recentGames={recentGames}
         recentGamesError={recentGamesError}
         recentGamesLoading={recentGamesLoading}
@@ -194,7 +191,6 @@ export function ReviewPanel({
         onChesscomUsernameChange={onChesscomUsernameChange}
         onRecentGameTimeClassChange={onRecentGameTimeClassChange}
         onFetchRecentGames={onFetchRecentGames}
-        openPgnDialog={openPgnDialog}
         recentGames={recentGames}
         recentGamesError={recentGamesError}
         recentGamesLoading={recentGamesLoading}
@@ -338,24 +334,31 @@ export function AnalyzePanel({
           {movePairs.length === 0 ? (
             <p className={styles.empty}>Play on the board or import a PGN.</p>
           ) : (
-            movePairs.map(pair => (
-              <div className={styles.moveRow} key={pair.moveNumber}>
-                <span className={styles.moveNumber}>{pair.moveNumber}</span>
-                <button
-                  className={`${styles.moveChip} ${historyIndex === pair.whitePly ? styles.activeMove : ''}`}
-                  onClick={() => jumpToIndex(pair.whitePly)}
-                >
-                  {pair.white ? formatMoveFigurine(pair.white.san) : '...'}
-                </button>
-                <button
-                  className={`${styles.moveChip} ${historyIndex === pair.blackPly ? styles.activeMove : ''}`}
-                  onClick={() => jumpToIndex(pair.blackPly)}
-                  disabled={!pair.black}
-                >
-                  {pair.black ? formatMoveFigurine(pair.black.san) : ''}
-                </button>
+            <>
+              <div className={styles.moveTableHeader} aria-hidden="true">
+                <span />
+                <span>White</span>
+                <span>Black</span>
               </div>
-            ))
+              {movePairs.map(pair => (
+                <div className={styles.moveRow} key={pair.moveNumber}>
+                  <span className={styles.moveNumber}>{pair.moveNumber}.</span>
+                  <button
+                    className={`${styles.moveCellButton} ${historyIndex === pair.whitePly ? styles.activeMoveCell : ''}`}
+                    onClick={() => jumpToIndex(pair.whitePly)}
+                  >
+                    {pair.white ? renderMoveFigurine(pair.white.san) : '...'}
+                  </button>
+                  <button
+                    className={`${styles.moveCellButton} ${historyIndex === pair.blackPly ? styles.activeMoveCell : ''}`}
+                    onClick={() => jumpToIndex(pair.blackPly)}
+                    disabled={!pair.black}
+                  >
+                    {pair.black ? renderMoveFigurine(pair.black.san) : ''}
+                  </button>
+                </div>
+              ))}
+            </>
           )}
         </div>
       </section>
@@ -378,7 +381,6 @@ export function GameReviewPanel({
   onChesscomUsernameChange,
   onRecentGameTimeClassChange,
   onFetchRecentGames,
-  openPgnDialog,
   recentGames,
   recentGamesError,
   recentGamesLoading,
@@ -408,7 +410,6 @@ export function GameReviewPanel({
   onChesscomUsernameChange: (value: string) => void;
   onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
   onFetchRecentGames: () => void;
-  openPgnDialog: () => void;
   recentGames: ChessComRecentGameSummary[];
   recentGamesError: string;
   recentGamesLoading: boolean;
@@ -432,7 +433,7 @@ export function GameReviewPanel({
             <h2 className={styles.sectionTitle}>Game Review</h2>
             <span className={styles.statusText}>{recentGamesLoading ? 'loading' : recentGames.length ? `${recentGames.length} games` : 'ready'}</span>
           </div>
-          <p className={styles.copy}>Use your Chess.com username to pull recent public games, or import a PGN manually.</p>
+          <p className={styles.copy}>Use your Chess.com username to pull recent public games.</p>
           <div className={styles.inlineForm}>
             <input
               className={styles.inlineInput}
@@ -455,11 +456,6 @@ export function GameReviewPanel({
                 {timeClass}
               </button>
             ))}
-          </div>
-          <div className={styles.reviewImportActions}>
-            <button className={styles.action} onClick={openPgnDialog}>
-              Import PGN
-            </button>
           </div>
           {recentGamesError ? <p className={styles.error}>{recentGamesError}</p> : null}
         </section>
@@ -975,7 +971,7 @@ function EngineLinesSection({
   positionAnalysis: AnalysisResult | null;
   positionLoading: boolean;
 }) {
-  const lines = positionAnalysis?.lines?.slice(0, 3) ?? [];
+  const lines = (positionAnalysis?.lines ?? []).filter(line => Boolean(line.bestMove) || line.pv.length > 0).slice(0, 3);
 
   return (
     <section className={`${styles.card} ${styles.engineCard}`}>
@@ -1031,7 +1027,16 @@ function formatLineScore(line: AnalysisLine) {
 }
 
 function formatPvLine(fen: string, pv: string[]) {
+  if (pv.length === 0) {
+    return 'No principal variation yet.';
+  }
+
   const line = formatPrincipalVariation(fen, pv);
+
+  if (line === 'No principal variation yet.') {
+    return line;
+  }
+
   return formatMoveFigurine(line).replaceAll(' ', '  →  ');
 }
 
@@ -1045,4 +1050,29 @@ function formatMoveFigurine(san: string) {
   };
 
   return san.replace(/^[KQRBN]/, piece => pieces[piece] ?? piece);
+}
+
+function renderMoveFigurine(san: string): ReactNode {
+  const pieces: Record<string, string> = {
+    K: '♔',
+    Q: '♕',
+    R: '♖',
+    B: '♗',
+    N: '♘',
+  };
+
+  const pieceCode = san[0] ?? '';
+  const icon = pieces[pieceCode];
+
+  if (!icon) {
+    return <>{san}</>;
+  }
+
+  return (
+    <>
+      <span className={styles.movePieceIcon}>{icon}</span>
+      <span className={styles.movePieceGap} aria-hidden="true" />
+      <span className={styles.movePieceText}>{san.slice(1)}</span>
+    </>
+  );
 }

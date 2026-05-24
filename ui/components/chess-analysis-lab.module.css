@@ -187,7 +187,7 @@
 
 .modeTabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   flex: 0 0 auto;
 }
@@ -563,29 +563,103 @@
 .moveList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   flex: 1 1 auto;
   padding-right: 4px;
+  border: 1px solid rgba(214, 226, 244, 0.12);
+  border-radius: 12px;
+  background: rgba(6, 10, 17, 0.38);
+  overflow: hidden auto;
+}
+
+.moveTableHeader {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(214, 226, 244, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .moveRow {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
   align-items: center;
+  min-height: 42px;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(214, 226, 244, 0.07);
+}
+
+.moveRow:last-child {
+  border-bottom: 0;
 }
 
 .moveNumber {
+  font-size: 13px;
+  font-weight: 700;
   color: var(--text-soft);
 }
 
-.moveChip {
+.moveCellButton {
   min-width: 0;
-  min-height: 38px;
-  border-radius: 10px;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 1.5em 0.72em minmax(0, 1fr);
+  align-items: center;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  box-shadow: none;
+}
+
+.movePieceIcon {
+  font-size: 1.95em;
+  line-height: 1;
+  text-align: center;
+}
+
+.movePieceGap {
+  width: 0.72em;
+}
+
+.movePieceText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moveCellButton:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.035);
+  border: 0;
+}
+
+.moveCellButton:disabled {
+  border: 0;
+  background: transparent;
+  opacity: 0.34;
+}
+
+.activeMoveCell {
+  background: rgba(198, 215, 255, 0.14);
+  color: var(--accent-strong);
+  box-shadow: inset 0 -2px 0 rgba(198, 215, 255, 0.7);
 }
 
 .accuracyGrid {
@@ -629,6 +703,8 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
+  min-height: 88px;
+  padding: 18px;
 }
 
 .stateHeaderMain {
@@ -1293,6 +1369,7 @@
 
   .stateHeaderCard {
     grid-template-columns: 1fr;
+    min-height: 0;
   }
 
   .stateHeaderMain,
