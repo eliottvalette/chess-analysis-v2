@@ -32,6 +32,14 @@ const PGN = `[Event "Live Chess"]
 1. e4 e5 2. Nf3 Nc6 3. d4 d6 4. d5 Nce7 5. Nc3 Nf6 6. Bc4 g6 7. Bg5 Bg7 8. O-O O-O 9. Qd2 Bg4 10. Be2 a6 11. Bh6 c6 12. Qg5 Bxf3 13. Bxf3 Nd7 14. Bg4 cxd5 15. exd5 Bxh6 16. Qxh6 f5 17. Bh3 Rc8 18. Rfe1 Qb6 19. Rab1 Qd4 20. Re3 Nxd5 21. Rd3 Nxc3 22. Rxd4 Nxb1 23. Rxd6 Rxc2 24. Rxd7 Rf7 25. Rd8+ Rf8 26. Qxf8#`;
 
 const ANALYZE_BASE_URL = process.env.ANALYZE_BASE_URL?.trim() || 'https://chess-analysis-v2.vercel.app';
+const DEPTH = Number(process.env.COMPARE_DEPTH || 12);
+const MOVETIME_MS = Number(process.env.COMPARE_MOVETIME_MS || 80);
+const ONLY_PLIES = new Set(
+  (process.env.COMPARE_PLIES ?? '')
+    .split(',')
+    .map(value => Number.parseInt(value.trim(), 10))
+    .filter(Number.isFinite),
+);
 
 main().catch(error => {
   console.error(error instanceof Error ? error.message : error);
@@ -56,8 +64,8 @@ async function main() {
         fen: position.fen,
         initialFen: position.initialFen,
         moves: position.moves,
-        depth: 12,
-        movetimeMs: 80,
+        depth: DEPTH,
+        movetimeMs: MOVETIME_MS,
         multipv: 3,
       }),
     });
@@ -79,13 +87,62 @@ async function main() {
 
   const filtered = reviews
     .filter(review => review.category)
+    .filter(review => ONLY_PLIES.size === 0 || ONLY_PLIES.has(review.ply))
     .map(review => ({
       ply: review.ply,
       san: review.san,
+      color: review.color,
       category: review.category,
       best: review.bestMoveSan,
       expected_points_lost: review.expectedPointsLost,
+      before_cp: toCentipawns(analyses[review.ply - 1], review.color),
+      after_cp: toCentipawns(analyses[review.ply], review.color),
+      cp_loss: cpLoss(analyses[review.ply - 1], analyses[review.ply], review.color),
+      before_mate: mateForSide(analyses[review.ply - 1], review.color),
+      after_mate: mateForSide(analyses[review.ply], review.color),
     }));
 
-  console.log(JSON.stringify(filtered, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        depth: DEPTH,
+        movetime_ms: MOVETIME_MS,
+        reviews: filtered,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+function toCentipawns(analysis, color) {
+  const score = analysis?.whitePerspective;
+
+  if (!score) {
+    return null;
+  }
+
+  const value = score.type === 'mate' ? Math.sign(score.value) * 100000 : score.value;
+  return color === 'w' ? value : -value;
+}
+
+function cpLoss(beforeAnalysis, afterAnalysis, color) {
+  const before = toCentipawns(beforeAnalysis, color);
+  const after = toCentipawns(afterAnalysis, color);
+
+  if (before == null || after == null) {
+    return null;
+  }
+
+  return Math.max(0, before - after);
+}
+
+function mateForSide(analysis, color) {
+  const score = analysis?.whitePerspective;
+
+  if (!score || score.type !== 'mate') {
+    return null;
+  }
+
+  return color === 'w' ? score.value : -score.value;
 }

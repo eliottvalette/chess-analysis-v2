@@ -61,6 +61,11 @@ export type TimelineReview = {
   beforeExpected: number | null;
   afterExpected: number | null;
   expectedPointsLost: number | null;
+  beforeCp: number | null;
+  afterCp: number | null;
+  cpLossCp: number | null;
+  beforeMate: number | null;
+  afterMate: number | null;
   moveAccuracy: number | null;
   isKeyMoment: boolean;
   coachText: string;
@@ -431,60 +436,38 @@ export function classifyTimelineMoves(
     const afterExpected = getExpectedPoints(afterAnalysis, color);
     const expectedPointsLost =
       beforeExpected == null || afterExpected == null ? null : Math.max(0, beforeExpected - afterExpected);
+    const beforeCp = getScoreCpForColor(beforeAnalysis, color);
+    const afterCp = getScoreCpForColor(afterAnalysis, color);
+    const cpLossCp = getCpLoss(beforeAnalysis, afterAnalysis, color);
+    const beforeMate = getMateForColor(beforeAnalysis, color);
+    const afterMate = getMateForColor(afterAnalysis, color);
     const bestMovePlayed = Boolean(beforeAnalysis?.bestMove && beforeAnalysis.bestMove === move.uci);
     const sacrifice = isPieceSacrifice(beforeFen, afterGame.fen(), color);
     const afterWinning = isWinningOutcome(afterAnalysis, color);
     const beforeCompletelyWinning = isCompletelyWinning(beforeAnalysis, color);
     const decisiveMove = move.san.includes('#') || move.san.includes('+') || isMateForColor(afterAnalysis, color);
     const bestMoveSan = beforeAnalysis?.bestMove ? formatBestMove(beforeFen, beforeAnalysis.bestMove) : null;
+    const secondBestGapCp = getSecondBestGapCp(beforeAnalysis, color);
 
-    let category: ReviewCategory | null = null;
+    const category = classifyReviewCategory({
+      index,
+      san: move.san,
+      bestMovePlayed,
+      sacrifice,
+      afterWinning,
+      beforeCompletelyWinning,
+      decisiveMove,
+      beforeExpected,
+      afterExpected,
+      cpLossCp,
+      beforeMate,
+      afterMate,
+      secondBestGapCp,
+      ratingFlex,
+    });
 
-    if (isBookCandidate(index, expectedPointsLost, move.san)) {
-      category = 'book';
-    } else if (
-      bestMovePlayed &&
-      sacrifice &&
-      afterWinning &&
-      !beforeCompletelyWinning &&
-      (expectedPointsLost ?? 0) <= 0.025 + ratingFlex
-    ) {
-      category = 'brilliant';
-    } else if (
-      bestMovePlayed &&
-      (expectedPointsLost ?? 0) <= 0.03 + ratingFlex &&
-      (isMateForColor(afterAnalysis, color) ||
-        (decisiveMove && afterWinning) ||
-        ((beforeExpected ?? 0.5) <= 0.38 && (afterExpected ?? 0.5) >= 0.34))
-    ) {
-      category = 'great';
-    } else if (
-      !bestMovePlayed &&
-      beforeExpected != null &&
-      afterExpected != null &&
-      beforeExpected >= 0.74 &&
-      afterExpected >= 0.35 &&
-      beforeExpected - afterExpected >= 0.14
-    ) {
-      category = 'miss';
-    } else if (bestMovePlayed || ((expectedPointsLost ?? Infinity) <= 0.01 + ratingFlex / 2)) {
-      category = 'best';
-    } else if (expectedPointsLost == null) {
-      category = null;
-    } else if (expectedPointsLost <= 0.03 + ratingFlex) {
-      category = 'excellent';
-    } else if (expectedPointsLost <= 0.065 + ratingFlex) {
-      category = 'good';
-    } else if (expectedPointsLost < 0.1) {
-      category = 'inaccuracy';
-    } else if (expectedPointsLost >= 0.2) {
-      category = 'blunder';
-    } else {
-      category = 'mistake';
-    }
-
-    const moveAccuracy = getMoveAccuracy(category, expectedPointsLost);
-    const isKeyMoment = isReviewKeyMoment(category, expectedPointsLost);
+    const moveAccuracy = getMoveAccuracy(category, expectedPointsLost, cpLossCp, afterMate);
+    const isKeyMoment = isReviewKeyMoment(category, expectedPointsLost, cpLossCp, afterMate);
     const coachText = buildCoachText({
       moveLabel,
       category,
@@ -493,6 +476,9 @@ export function classifyTimelineMoves(
       beforeExpected,
       afterExpected,
       expectedPointsLost,
+      cpLossCp,
+      beforeCp,
+      afterCp,
     });
 
     beforeGame.move({
@@ -518,6 +504,11 @@ export function classifyTimelineMoves(
       beforeExpected: beforeExpected == null ? null : Number(beforeExpected.toFixed(3)),
       afterExpected: afterExpected == null ? null : Number(afterExpected.toFixed(3)),
       expectedPointsLost: expectedPointsLost == null ? null : Number(expectedPointsLost.toFixed(3)),
+      beforeCp,
+      afterCp,
+      cpLossCp,
+      beforeMate,
+      afterMate,
       moveAccuracy,
       isKeyMoment,
       coachText,
@@ -643,6 +634,10 @@ export function buildChartOptions(
 
             if (review.expectedPointsLost != null) {
               lines.push(`EP loss ${(review.expectedPointsLost * 100).toFixed(1)}%`);
+            }
+
+            if (review.cpLossCp != null) {
+              lines.push(`CP loss ${review.cpLossCp}`);
             }
 
             return lines;
@@ -790,15 +785,164 @@ function getExpectedPoints(analysis: AnalysisResult | null | undefined, color: '
   return 1 / (1 + Math.exp(-perspectiveValue / 1.35));
 }
 
-function isBookCandidate(index: number, expectedPointsLost: number | null, san: string) {
-  if (index > 9 || san.includes('+') || san.includes('#')) {
+export function getScoreCpForColor(analysis: AnalysisResult | null | undefined, color: 'w' | 'b') {
+  const score = analysis?.whitePerspective;
+
+  if (!score) {
+    return null;
+  }
+
+  const whiteScore = score.type === 'mate' ? Math.sign(score.value) * 100000 : score.value;
+  return color === 'w' ? whiteScore : -whiteScore;
+}
+
+export function getMateForColor(analysis: AnalysisResult | null | undefined, color: 'w' | 'b') {
+  const score = analysis?.whitePerspective;
+
+  if (!score || score.type !== 'mate') {
+    return null;
+  }
+
+  return color === 'w' ? score.value : -score.value;
+}
+
+export function getCpLoss(beforeAnalysis: AnalysisResult | null | undefined, afterAnalysis: AnalysisResult | null | undefined, color: 'w' | 'b') {
+  const before = getScoreCpForColor(beforeAnalysis, color);
+  const after = getScoreCpForColor(afterAnalysis, color);
+
+  if (before == null || after == null) {
+    return null;
+  }
+
+  return Math.max(0, before - after);
+}
+
+export function getSecondBestGapCp(analysis: AnalysisResult | null | undefined, color: 'w' | 'b') {
+  const first = analysis?.lines?.[0];
+  const second = analysis?.lines?.[1];
+  const firstScore = first ? getScoreCpForColor({ ...analysis, whitePerspective: first.whitePerspective } as AnalysisResult, color) : null;
+  const secondScore = second ? getScoreCpForColor({ ...analysis, whitePerspective: second.whitePerspective } as AnalysisResult, color) : null;
+
+  if (firstScore == null || secondScore == null) {
+    return null;
+  }
+
+  return Math.max(0, firstScore - secondScore);
+}
+
+export function classifyReviewCategory({
+  index,
+  san,
+  bestMovePlayed,
+  sacrifice,
+  afterWinning,
+  beforeCompletelyWinning,
+  decisiveMove,
+  beforeExpected,
+  afterExpected,
+  cpLossCp,
+  beforeMate,
+  afterMate,
+  secondBestGapCp,
+  ratingFlex,
+}: {
+  index: number;
+  san: string;
+  bestMovePlayed: boolean;
+  sacrifice: boolean;
+  afterWinning: boolean;
+  beforeCompletelyWinning: boolean;
+  decisiveMove: boolean;
+  beforeExpected: number | null;
+  afterExpected: number | null;
+  cpLossCp: number | null;
+  beforeMate: number | null;
+  afterMate: number | null;
+  secondBestGapCp: number | null;
+  ratingFlex: number;
+}): ReviewCategory | null {
+  if (isBookCandidate(index, cpLossCp, san)) {
+    return 'book';
+  }
+
+  if (afterMate != null && afterMate < 0) {
+    return 'blunder';
+  }
+
+  if (
+    bestMovePlayed &&
+    sacrifice &&
+    afterWinning &&
+    !beforeCompletelyWinning &&
+    (cpLossCp ?? 0) <= 20
+  ) {
+    return 'brilliant';
+  }
+
+  if (
+    bestMovePlayed &&
+    ((afterMate != null && afterMate > 0) ||
+      (decisiveMove && afterWinning) ||
+      ((secondBestGapCp ?? 0) >= 140 && afterWinning) ||
+      ((beforeExpected ?? 0.5) <= 0.38 && (afterExpected ?? 0.5) >= 0.34))
+  ) {
+    return 'great';
+  }
+
+  if (cpLossCp == null) {
+    return bestMovePlayed ? 'best' : null;
+  }
+
+  const bestThresholdCp = 12 + Math.round(ratingFlex * 200);
+  const excellentThresholdCp = 28 + Math.round(ratingFlex * 250);
+  const goodThresholdCp = 55 + Math.round(ratingFlex * 300);
+  const inaccuracyThresholdCp = 100 + Math.round(ratingFlex * 500);
+  const mistakeThresholdCp = 320 + Math.round(ratingFlex * 500);
+
+  if (bestMovePlayed || cpLossCp <= bestThresholdCp) {
+    return 'best';
+  }
+
+  if (cpLossCp <= excellentThresholdCp) {
+    return 'excellent';
+  }
+
+  if (cpLossCp <= goodThresholdCp) {
+    return 'good';
+  }
+
+  if (cpLossCp < inaccuracyThresholdCp) {
+    return 'inaccuracy';
+  }
+
+  if (cpLossCp < mistakeThresholdCp) {
+    return 'mistake';
+  }
+
+  if (
+    beforeMate != null &&
+    afterMate == null &&
+    beforeMate > 0
+  ) {
+    return 'blunder';
+  }
+
+  return 'blunder';
+}
+
+export function isBookCandidate(index: number, cpLossCp: number | null, san: string) {
+  if (index > 5 || san.includes('+') || san.includes('#')) {
     return false;
   }
 
-  return expectedPointsLost != null && expectedPointsLost <= 0.025;
+  return cpLossCp != null && cpLossCp <= 70;
 }
 
-function getMoveAccuracy(category: ReviewCategory | null, expectedPointsLost: number | null) {
+function cpLossToAccuracy(cpLossCp: number) {
+  return Math.round(Math.max(0, Math.min(100, 100 - cpLossCp / 3)));
+}
+
+function getMoveAccuracy(category: ReviewCategory | null, expectedPointsLost: number | null, cpLossCp: number | null, afterMate: number | null) {
   if (!category) {
     return null;
   }
@@ -808,22 +952,34 @@ function getMoveAccuracy(category: ReviewCategory | null, expectedPointsLost: nu
   }
 
   if (expectedPointsLost == null) {
-    return null;
+    if (afterMate != null && afterMate < 0) {
+      return 0;
+    }
+
+    if (cpLossCp == null) {
+      return null;
+    }
+
+    return cpLossToAccuracy(cpLossCp);
   }
 
-  return Math.round(Math.max(0, Math.min(100, 100 - expectedPointsLost * 260)));
+  return cpLossCp != null ? cpLossToAccuracy(cpLossCp) : Math.round(Math.max(0, Math.min(100, 100 - expectedPointsLost * 260)));
 }
 
-function isReviewKeyMoment(category: ReviewCategory | null, expectedPointsLost: number | null) {
+function isReviewKeyMoment(category: ReviewCategory | null, expectedPointsLost: number | null, cpLossCp: number | null, afterMate: number | null) {
   if (!category) {
     return false;
   }
 
-  if (category === 'brilliant' || category === 'great' || category === 'miss' || category === 'mistake' || category === 'blunder') {
+  if (category === 'brilliant' || category === 'great' || category === 'mistake' || category === 'blunder') {
     return true;
   }
 
-  return category === 'inaccuracy' && (expectedPointsLost ?? 0) >= 0.085;
+  if (category === 'inaccuracy') {
+    return (cpLossCp ?? 0) >= 80 || (expectedPointsLost ?? 0) >= 0.085;
+  }
+
+  return afterMate != null && afterMate < 0;
 }
 
 function buildCoachText({
@@ -834,6 +990,9 @@ function buildCoachText({
   beforeExpected,
   afterExpected,
   expectedPointsLost,
+  cpLossCp,
+  beforeCp,
+  afterCp,
 }: {
   moveLabel: string;
   category: ReviewCategory | null;
@@ -842,6 +1001,9 @@ function buildCoachText({
   beforeExpected: number | null;
   afterExpected: number | null;
   expectedPointsLost: number | null;
+  cpLossCp: number | null;
+  beforeCp: number | null;
+  afterCp: number | null;
 }) {
   const swing =
     beforeExpected == null || afterExpected == null
@@ -849,28 +1011,29 @@ function buildCoachText({
       : ` Expected score: ${formatExpected(beforeExpected)} -> ${formatExpected(afterExpected)}.`;
   const best = bestMoveSan ? ` Best was ${bestMoveSan}.` : '';
   const loss = expectedPointsLost == null ? '' : ` Loss: ${(expectedPointsLost * 100).toFixed(1)}%.`;
+  const cp = cpLossCp == null || beforeCp == null || afterCp == null ? '' : ` Eval: ${formatCpScore(beforeCp)} -> ${formatCpScore(afterCp)} (loss ${cpLossCp}cp).`;
 
   switch (category) {
     case 'book':
       return `${moveLabel} ${playedMove} stays in the opening lane.`;
     case 'brilliant':
-      return `${moveLabel} ${playedMove} is a strong sacrifice that keeps or increases the advantage.${swing}`;
+      return `${moveLabel} ${playedMove} is a strong sacrifice that keeps or increases the advantage.${swing}${cp}`;
     case 'great':
-      return `${moveLabel} ${playedMove} is a key engine-aligned move.${swing}`;
+      return `${moveLabel} ${playedMove} is a key engine-aligned move.${swing}${cp}`;
     case 'best':
       return `${moveLabel} ${playedMove} matches the engine's top choice.`;
     case 'excellent':
-      return `${moveLabel} ${playedMove} is accurate with only a tiny practical loss.${loss}`;
+      return `${moveLabel} ${playedMove} is accurate with only a tiny practical loss.${loss}${cp}`;
     case 'good':
-      return `${moveLabel} ${playedMove} is playable, but it leaves a little more on the board.${loss}`;
+      return `${moveLabel} ${playedMove} is playable, but it leaves a little more on the board.${loss}${cp}`;
     case 'inaccuracy':
-      return `${moveLabel} ${playedMove} is an inaccuracy.${swing}${best}`;
+      return `${moveLabel} ${playedMove} is an inaccuracy.${swing}${best}${cp}`;
     case 'miss':
-      return `${moveLabel} ${playedMove} misses a chance to punish the previous move.${swing}${best}`;
+      return `${moveLabel} ${playedMove} misses a chance to punish the previous move.${swing}${best}${cp}`;
     case 'mistake':
-      return `${moveLabel} ${playedMove} is a mistake.${swing}${best}`;
+      return `${moveLabel} ${playedMove} is a mistake.${swing}${best}${cp}`;
     case 'blunder':
-      return `${moveLabel} ${playedMove} is a blunder.${swing}${best}`;
+      return `${moveLabel} ${playedMove} is a blunder.${swing}${best}${cp}`;
     default:
       return `${moveLabel} ${playedMove}.`;
   }
@@ -905,8 +1068,8 @@ function extractKeyMoments(reviews: TimelineReview[]) {
 
   return selected
     .sort((left, right) => {
-      const leftLoss = left.expectedPointsLost ?? 0;
-      const rightLoss = right.expectedPointsLost ?? 0;
+      const leftLoss = left.cpLossCp ?? Math.round((left.expectedPointsLost ?? 0) * 1000);
+      const rightLoss = right.cpLossCp ?? Math.round((right.expectedPointsLost ?? 0) * 1000);
 
       if (left.isKeyMoment !== right.isKeyMoment) {
         return left.isKeyMoment ? -1 : 1;
@@ -916,6 +1079,11 @@ function extractKeyMoments(reviews: TimelineReview[]) {
     })
     .slice(0, 16)
     .sort((left, right) => left.ply - right.ply);
+}
+
+function formatCpScore(scoreCp: number) {
+  const pawns = scoreCp / 100;
+  return `${pawns > 0 ? '+' : ''}${pawns.toFixed(2)}`;
 }
 
 function formatExpected(value: number) {

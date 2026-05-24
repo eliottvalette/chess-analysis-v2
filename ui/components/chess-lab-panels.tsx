@@ -17,6 +17,7 @@ import {
   type StoredMove,
 } from '@/lib/chess-analysis-client';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
+import type { DeckProgressEntry, DeckProgressSummary } from '@/lib/deck-progress';
 import type { DeckCard, DeckFeedback, OpeningSeedLine } from '@/lib/opening-training';
 import styles from './chess-analysis-lab.module.css';
 
@@ -106,11 +107,13 @@ export function GameReviewPanel({
   loadRecentGame,
   moveHistoryLength,
   onChesscomUsernameChange,
+  onRecentGameTimeClassChange,
   onFetchRecentGames,
   openPgnDialog,
   recentGames,
   recentGamesError,
   recentGamesLoading,
+  recentGameTimeClass,
   reviewIndex,
   reviewMoments,
   reviewSide,
@@ -134,11 +137,13 @@ export function GameReviewPanel({
   loadRecentGame: (game: ChessComRecentGameSummary) => void;
   moveHistoryLength: number;
   onChesscomUsernameChange: (value: string) => void;
+  onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
   onFetchRecentGames: () => void;
   openPgnDialog: () => void;
   recentGames: ChessComRecentGameSummary[];
   recentGamesError: string;
   recentGamesLoading: boolean;
+  recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
   reviewIndex: number;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
   reviewSide: ReviewSide;
@@ -171,6 +176,17 @@ export function GameReviewPanel({
               {recentGamesLoading ? 'Loading' : 'Fetch games'}
             </button>
           </div>
+          <div className={styles.reviewSideTabs}>
+            {(['bullet', 'blitz', 'rapid'] as const).map(timeClass => (
+              <button
+                className={`${styles.action} ${recentGameTimeClass === timeClass ? styles.primary : styles.secondary}`}
+                key={timeClass}
+                onClick={() => onRecentGameTimeClassChange(timeClass)}
+              >
+                {timeClass}
+              </button>
+            ))}
+          </div>
           <div className={styles.reviewImportActions}>
             <button className={styles.action} onClick={openPgnDialog}>
               Import PGN
@@ -181,14 +197,26 @@ export function GameReviewPanel({
         {recentGames.length ? (
           <section className={`${styles.card} ${styles.openingListCard}`}>
             <div className={styles.panelHeader}>
-              <h2 className={styles.sectionTitle}>Recent Blitz</h2>
+              <h2 className={styles.sectionTitle}>Recent {capitalizeRecentGameTimeClass(recentGameTimeClass)}</h2>
               <span className={styles.statusText}>click to review</span>
             </div>
             <div className={styles.openingList}>
               {recentGames.map(game => (
-                <button className={styles.openingButton} key={game.link} onClick={() => loadRecentGame(game)}>
-                  <span>{formatRecentGameLabel(game)}</span>
-                  <strong>{game.playerColor}</strong>
+                <button
+                  className={`${styles.openingButton} ${styles.recentGameButton} ${
+                    game.outcome === 'win' ? styles.recentGameWin : game.outcome === 'loss' ? styles.recentGameLoss : styles.recentGameDraw
+                  }`}
+                  key={game.link}
+                  onClick={() => loadRecentGame(game)}
+                >
+                  <span className={styles.recentGameDate}>{game.utcDate ?? 'recent'}</span>
+                  <strong className={styles.recentGamePlayers}>
+                    {formatRecentGamePlayers(game)}
+                  </strong>
+                  <span className={styles.recentGameMoves}>{game.moveCount ? `${game.moveCount} moves` : '-'}</span>
+                  <span className={styles.recentGameMeta}>
+                    {formatRecentGameMeta(game)}
+                  </span>
                 </button>
               ))}
             </div>
@@ -322,11 +350,20 @@ export function GameReviewPanel({
   );
 }
 
-function formatRecentGameLabel(game: ChessComRecentGameSummary) {
-  const date = game.utcDate ?? 'recent';
-  const eco = game.eco ?? 'game';
+function formatRecentGamePlayers(game: ChessComRecentGameSummary) {
+  const player = game.playerUsername ?? 'You';
   const opponent = game.opponentUsername ?? 'opponent';
-  return `${date} · ${eco} · vs ${opponent}`;
+  return game.playerColor === 'black' ? `${opponent} vs ${player}` : `${player} vs ${opponent}`;
+}
+
+function formatRecentGameMeta(game: ChessComRecentGameSummary) {
+  const eco = game.eco ?? 'game';
+  const color = game.playerColor;
+  return `${eco} · ${color}`;
+}
+
+function capitalizeRecentGameTimeClass(value: 'bullet' | 'blitz' | 'rapid') {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 export function LearnPanel({
@@ -442,6 +479,7 @@ export function LearnPanel({
 
 export function DeckPanel({
   activeCard,
+  activeCardProgress,
   deckCounterSan,
   deckCards,
   deckLoadError,
@@ -451,22 +489,26 @@ export function DeckPanel({
   nextCard,
   onNext,
   onRepeat,
+  onToggleIgnore,
   startCard,
 }: {
   activeCard: DeckCard | null;
+  activeCardProgress: DeckProgressEntry | null;
   deckCounterSan: string | null;
   deckCards: DeckCard[];
   deckLoadError: string;
   deckLoading: boolean;
   deckFeedback: DeckFeedback | null;
-  deckStats: { correct: number; misses: number };
+  deckStats: DeckProgressSummary;
   nextCard: DeckCard | null;
   onNext: () => void;
   onRepeat: () => void;
+  onToggleIgnore: () => void;
   startCard: (card: DeckCard | null) => void;
 }) {
   const card = activeCard ?? nextCard;
   const cardLoaded = Boolean(activeCard && card && activeCard.id === card.id);
+  const cardIgnored = activeCardProgress?.ignored ?? false;
 
   return (
     <>
@@ -487,6 +529,13 @@ export function DeckPanel({
                 <span>{cardLoaded ? 'Card loaded on board' : 'Ready to load'}</span>
                 <strong>{card.side} repertoire</strong>
               </div>
+              {activeCardProgress ? (
+                <p className={styles.support}>
+                  seen {activeCardProgress.seenCount} · hit {activeCardProgress.correctCount} · miss {activeCardProgress.missCount} · streak{' '}
+                  {activeCardProgress.streak}
+                  {activeCardProgress.ignored ? ' · ignored' : ''}
+                </p>
+              ) : null}
             </div>
             {deckFeedback ? (
               <div className={`${styles.feedbackBox} ${deckFeedback.pending || deckFeedback.correct ? styles.feedbackGood : styles.feedbackBad}`}>
@@ -523,6 +572,9 @@ export function DeckPanel({
               <button className={styles.action} onClick={onRepeat} disabled={!activeCard}>
                 Repeat
               </button>
+              <button className={styles.action} onClick={onToggleIgnore} disabled={!card}>
+                {cardIgnored ? 'Unignore' : 'Ignore'}
+              </button>
               <button className={styles.action} onClick={onNext}>
                 Next
               </button>
@@ -546,8 +598,12 @@ export function DeckPanel({
             <span>miss</span>
           </div>
           <div>
-            <strong>{deckStats.correct + deckStats.misses}</strong>
+            <strong>{deckStats.seen}</strong>
             <span>seen</span>
+          </div>
+          <div>
+            <strong>{deckStats.ignored}</strong>
+            <span>ignored</span>
           </div>
         </div>
       </section>

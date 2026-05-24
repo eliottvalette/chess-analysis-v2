@@ -53,6 +53,13 @@ import {
   type OpeningSeedLine,
   scoreToCpForSide,
 } from '@/lib/opening-training';
+import {
+  applyDeckAttempt,
+  getDeckProgressEntry,
+  summarizeDeckProgress,
+  toggleDeckIgnored,
+  type DeckProgressMap,
+} from '@/lib/deck-progress';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
 import { createClient as createSupabaseClient } from '@/utils/supabase/client';
 import styles from './chess-analysis-lab.module.css';
@@ -72,6 +79,8 @@ const PRELOAD_AHEAD = 1;
 const DECK_CARD_SELECT =
   'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp';
 const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
+const CHESSCOM_TIME_CLASS_COOKIE = 'chesscom_time_class';
+const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
 
 export function ChessAnalysisLab() {
   const [game, setGame] = useState(() => new Chess());
@@ -100,12 +109,13 @@ export function ChessAnalysisLab() {
   const [deckIndex, setDeckIndex] = useState(0);
   const [activeDeckCard, setActiveDeckCard] = useState<DeckCard | null>(null);
   const [deckFeedback, setDeckFeedback] = useState<DeckFeedback | null>(null);
-  const [deckStats, setDeckStats] = useState({ correct: 0, misses: 0 });
   const [openingLines, setOpeningLines] = useState<OpeningSeedLine[]>([]);
   const [deckCards, setDeckCards] = useState<DeckCard[]>([]);
   const [deckLoading, setDeckLoading] = useState(true);
   const [deckLoadError, setDeckLoadError] = useState('');
+  const [deckProgress, setDeckProgress] = useState<DeckProgressMap>({});
   const [chesscomUsername, setChesscomUsername] = useState('');
+  const [recentGameTimeClass, setRecentGameTimeClass] = useState<'bullet' | 'blitz' | 'rapid'>('blitz');
   const [recentChessGames, setRecentChessGames] = useState<ChessComRecentGameSummary[]>([]);
   const [recentChessGamesLoading, setRecentChessGamesLoading] = useState(false);
   const [recentChessGamesError, setRecentChessGamesError] = useState('');
@@ -114,6 +124,7 @@ export function ChessAnalysisLab() {
   const evalRailRef = useRef<HTMLDivElement | null>(null);
   const positionRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
+  const suppressSpaceKeyUpRef = useRef(false);
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
 
@@ -144,7 +155,17 @@ export function ChessAnalysisLab() {
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
   const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
-  const nextDeckCard = deckCards[deckIndex % Math.max(1, deckCards.length)] ?? null;
+  const availableDeckCards = useMemo(
+    () => deckCards.filter(card => !getDeckProgressEntry(deckProgress, card.id).ignored),
+    [deckCards, deckProgress],
+  );
+  const deckStats = useMemo(() => summarizeDeckProgress(deckCards, deckProgress), [deckCards, deckProgress]);
+  const nextDeckCard = availableDeckCards[deckIndex % Math.max(1, availableDeckCards.length)] ?? null;
+  const viewedDeckCard = activeDeckCard ?? nextDeckCard;
+  const activeDeckProgress = useMemo(
+    () => (viewedDeckCard ? getDeckProgressEntry(deckProgress, viewedDeckCard.id) : null),
+    [deckProgress, viewedDeckCard],
+  );
 
   const timelineReviews = useMemo(
     () => classifyTimelineMoves(moveHistory, preMoveAnalyses, timelineAnalyses, initialFen, metadata),
@@ -267,8 +288,9 @@ export function ChessAnalysisLab() {
   }, []);
 
   const fetchRecentChessGames = useCallback(
-    async (usernameOverride?: string) => {
+    async (usernameOverride?: string, timeClassOverride?: 'bullet' | 'blitz' | 'rapid') => {
       const username = (usernameOverride ?? chesscomUsername).trim().toLowerCase();
+      const timeClass = timeClassOverride ?? recentGameTimeClass;
 
       if (!username) {
         setRecentChessGames([]);
@@ -281,7 +303,8 @@ export function ChessAnalysisLab() {
 
       try {
         writeCookie(CHESSCOM_USERNAME_COOKIE, username);
-        const response = await fetch(`/api/chesscom/recent-games?username=${encodeURIComponent(username)}&timeClass=blitz&count=6`);
+        writeCookie(CHESSCOM_TIME_CLASS_COOKIE, timeClass);
+        const response = await fetch(`/api/chesscom/recent-games?username=${encodeURIComponent(username)}&timeClass=${encodeURIComponent(timeClass)}&count=6`);
         const payload = (await response.json()) as { error?: string; games?: ChessComRecentGameSummary[] };
 
         if (!response.ok) {
@@ -296,18 +319,50 @@ export function ChessAnalysisLab() {
         setRecentChessGamesLoading(false);
       }
     },
-    [chesscomUsername],
+    [chesscomUsername, recentGameTimeClass],
   );
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(DECK_PROGRESS_STORAGE_KEY);
+
+      if (!raw) {
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as DeckProgressMap;
+      setDeckProgress(parsed && typeof parsed === 'object' ? parsed : {});
+    } catch {
+      setDeckProgress({});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(DECK_PROGRESS_STORAGE_KEY, JSON.stringify(deckProgress));
+  }, [deckProgress]);
+
+  useEffect(() => {
     const savedUsername = readCookie(CHESSCOM_USERNAME_COOKIE);
+    const savedTimeClass = readCookie(CHESSCOM_TIME_CLASS_COOKIE);
+
+    if (savedTimeClass === 'bullet' || savedTimeClass === 'blitz' || savedTimeClass === 'rapid') {
+      setRecentGameTimeClass(savedTimeClass);
+    }
 
     if (!savedUsername) {
       return;
     }
 
     setChesscomUsername(savedUsername);
-    void fetchRecentChessGames(savedUsername);
+    void fetchRecentChessGames(savedUsername, savedTimeClass === 'bullet' || savedTimeClass === 'blitz' || savedTimeClass === 'rapid' ? savedTimeClass : 'blitz');
   }, [fetchRecentChessGames]);
 
   useEffect(() => {
@@ -523,10 +578,7 @@ export function ChessAnalysisLab() {
     const gradedFeedback = finalizeDeckFeedback(activeDeckCard, deckFeedback, resultingEvalCp);
 
     setDeckFeedback(gradedFeedback);
-    setDeckStats(stats => ({
-      correct: stats.correct + (gradedFeedback.correct ? 1 : 0),
-      misses: stats.misses + (gradedFeedback.correct ? 0 : 1),
-    }));
+    setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
   }, [activeDeckCard, deckFeedback, historyIndex, moveHistory.length, positionAnalysis, positionLoading]);
 
   useEffect(() => {
@@ -578,7 +630,7 @@ export function ChessAnalysisLab() {
       setSelectedSquare(null);
       setSquareStyles({});
 
-      if (activeDeckCard) {
+      if (activeDeckCard && deckFeedback == null) {
         const nextFeedback = buildPendingDeckFeedback(activeDeckCard, move.uci, move.san);
 
         if (nextFeedback.pending) {
@@ -586,14 +638,11 @@ export function ChessAnalysisLab() {
         } else {
           const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback, null);
           setDeckFeedback(gradedFeedback);
-          setDeckStats(stats => ({
-            correct: stats.correct + (gradedFeedback.correct ? 1 : 0),
-            misses: stats.misses + (gradedFeedback.correct ? 0 : 1),
-          }));
+          setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
         }
       }
     },
-    [activeDeckCard, historyIndex, moveHistory],
+    [activeDeckCard, deckFeedback, historyIndex, moveHistory],
   );
 
   const tryMove = useCallback(
@@ -617,6 +666,64 @@ export function ChessAnalysisLab() {
     [commitMove, currentFen],
   );
 
+  function jumpToIndex(index: number) {
+    const boundedIndex = Math.max(0, Math.min(index, moveHistory.length));
+    const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
+
+    setHistoryIndex(boundedIndex);
+    setGame(nextGame);
+    clearSelection();
+  }
+
+  const loadDeckCard = useCallback((card: DeckCard | null) => {
+    if (!card) {
+      return;
+    }
+
+    const deckState = buildDeckCardState(card, openingLines);
+
+    setInitialFen(deckState.initialFen);
+    setMoveHistory(deckState.moveHistory);
+    setHistoryIndex(deckState.historyIndex);
+    setGame(deckState.game);
+    setMode('deck');
+    setActiveDeckCard(card);
+    setDeckFeedback(null);
+    setOrientation(card.side);
+    setShowArrow(false);
+    setPositionAnalysis(null);
+    setTimelineAnalyses([]);
+    setTimelineError('');
+    clearSelection();
+  }, [openingLines]);
+
+  const advanceDeckCard = useCallback(() => {
+    if (availableDeckCards.length === 0) {
+      return;
+    }
+
+    const currentCardId = activeDeckCard?.id ?? nextDeckCard?.id ?? null;
+    const currentIndex = currentCardId ? availableDeckCards.findIndex(card => card.id === currentCardId) : -1;
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % availableDeckCards.length : deckIndex % availableDeckCards.length;
+
+    setDeckIndex(nextIndex);
+    loadDeckCard(availableDeckCards[nextIndex]);
+  }, [activeDeckCard, availableDeckCards, deckIndex, loadDeckCard, nextDeckCard]);
+
+  const repeatDeckCard = useCallback(() => {
+    loadDeckCard(activeDeckCard ?? nextDeckCard);
+  }, [activeDeckCard, loadDeckCard, nextDeckCard]);
+
+  function toggleActiveDeckCardIgnored() {
+    const card = activeDeckCard ?? nextDeckCard;
+
+    if (!card) {
+      return;
+    }
+
+    setDeckProgress(progress => toggleDeckIgnored(progress, card.id));
+  }
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -632,6 +739,16 @@ export function ChessAnalysisLab() {
 
       if (event.code === 'Space') {
         event.preventDefault();
+        event.stopPropagation();
+        suppressSpaceKeyUpRef.current = true;
+
+        if (mode === 'deck') {
+          if (activeDeckCard && deckFeedback && !deckFeedback.pending) {
+            advanceDeckCard();
+          }
+
+          return;
+        }
 
         const bestMove = positionAnalysis?.bestMove;
 
@@ -661,54 +778,23 @@ export function ChessAnalysisLab() {
       }
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [historyIndex, initialFen, moveHistory, pgnDialogOpen, positionAnalysis?.bestMove, tryMove]);
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || !suppressSpaceKeyUpRef.current) {
+        return;
+      }
 
-  function jumpToIndex(index: number) {
-    const boundedIndex = Math.max(0, Math.min(index, moveHistory.length));
-    const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
+      event.preventDefault();
+      event.stopPropagation();
+      suppressSpaceKeyUpRef.current = false;
+    };
 
-    setHistoryIndex(boundedIndex);
-    setGame(nextGame);
-    clearSelection();
-  }
-
-  function loadDeckCard(card: DeckCard | null) {
-    if (!card) {
-      return;
-    }
-
-    const deckState = buildDeckCardState(card, openingLines);
-
-    setInitialFen(deckState.initialFen);
-    setMoveHistory(deckState.moveHistory);
-    setHistoryIndex(deckState.historyIndex);
-    setGame(deckState.game);
-    setMode('deck');
-    setActiveDeckCard(card);
-    setDeckFeedback(null);
-    setOrientation(card.side);
-    setShowArrow(false);
-    setPositionAnalysis(null);
-    setTimelineAnalyses([]);
-    setTimelineError('');
-    clearSelection();
-  }
-
-  function advanceDeckCard() {
-    if (deckCards.length === 0) {
-      return;
-    }
-
-    const nextIndex = (deckIndex + 1) % deckCards.length;
-    setDeckIndex(nextIndex);
-    loadDeckCard(deckCards[nextIndex]);
-  }
-
-  function repeatDeckCard() {
-    loadDeckCard(activeDeckCard ?? nextDeckCard);
-  }
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
+  }, [activeDeckCard, advanceDeckCard, deckFeedback, historyIndex, initialFen, mode, moveHistory, pgnDialogOpen, positionAnalysis?.bestMove, tryMove]);
 
   function goToReviewMoment(index: number) {
     const boundedIndex = Math.max(0, Math.min(index, Math.max(0, reviewMoments.length - 1)));
@@ -765,7 +851,7 @@ export function ChessAnalysisLab() {
     }
   }
 
-  async function loadPgnText(name: string, content: string) {
+  async function loadPgnText(name: string, content: string, preferredOrientation?: 'white' | 'black') {
     try {
       const loadedGame = new Chess();
       loadedGame.loadPgn(content);
@@ -790,6 +876,9 @@ export function ChessAnalysisLab() {
       setTimelineError('');
       setServerError('');
       setPgnDialogOpen(false);
+      if (preferredOrientation) {
+        setOrientation(preferredOrientation);
+      }
       positionCacheRef.current.clear();
       positionInFlightRef.current.clear();
       clearSelection();
@@ -827,7 +916,7 @@ export function ChessAnalysisLab() {
   }
 
   async function loadRecentChessGame(gameSummary: ChessComRecentGameSummary) {
-    await loadPgnText(gameSummary.link, gameSummary.pgn);
+    await loadPgnText(gameSummary.link, gameSummary.pgn, gameSummary.playerColor === 'black' ? 'black' : 'white');
   }
 
   function resetWorkspace() {
@@ -1010,11 +1099,20 @@ export function ChessAnalysisLab() {
                 loadRecentGame={loadRecentChessGame}
                 moveHistoryLength={moveHistory.length}
                 onChesscomUsernameChange={setChesscomUsername}
+                onRecentGameTimeClassChange={timeClass => {
+                  setRecentGameTimeClass(timeClass);
+                  writeCookie(CHESSCOM_TIME_CLASS_COOKIE, timeClass);
+
+                  if (chesscomUsername.trim()) {
+                    void fetchRecentChessGames(undefined, timeClass);
+                  }
+                }}
                 onFetchRecentGames={() => void fetchRecentChessGames()}
                 openPgnDialog={() => setPgnDialogOpen(true)}
                 recentGames={recentChessGames}
                 recentGamesError={recentChessGamesError}
                 recentGamesLoading={recentChessGamesLoading}
+                recentGameTimeClass={recentGameTimeClass}
                 reviewIndex={reviewIndex}
                 reviewMoments={reviewMoments}
                 reviewSide={reviewSide}
@@ -1040,6 +1138,7 @@ export function ChessAnalysisLab() {
             ) : (
               <DeckPanel
                 activeCard={activeDeckCard}
+                activeCardProgress={activeDeckProgress}
                 deckCounterSan={deckOpponentBestSan}
                 deckCards={deckCards}
                 deckLoadError={deckLoadError}
@@ -1049,6 +1148,7 @@ export function ChessAnalysisLab() {
                 nextCard={nextDeckCard}
                 onNext={advanceDeckCard}
                 onRepeat={repeatDeckCard}
+                onToggleIgnore={toggleActiveDeckCardIgnored}
                 startCard={loadDeckCard}
               />
             )}

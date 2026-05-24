@@ -1,3 +1,5 @@
+import { Chess } from 'chess.js';
+
 export type ChessComRecentGameSummary = {
   url: string;
   link: string;
@@ -12,7 +14,10 @@ export type ChessComRecentGameSummary = {
   result: string | null;
   termination: string | null;
   eco: string | null;
+  timeClass: 'bullet' | 'blitz' | 'rapid' | 'daily' | 'unknown';
   timeControl: string | null;
+  moveCount: number;
+  outcome: 'win' | 'loss' | 'draw' | 'unknown';
   pgn: string;
 };
 
@@ -97,7 +102,10 @@ export function toGameSummary(game: RawChessComGame, username: string): ChessCom
     result: extractTag(game.pgn, 'Result'),
     termination: extractTag(game.pgn, 'Termination'),
     eco: extractTag(game.pgn, 'ECO'),
+    timeClass: normalizeTimeClass(game.time_class),
     timeControl: typeof game.time_control === 'string' ? game.time_control : null,
+    moveCount: countMovesFromPgn(game.pgn),
+    outcome: inferOutcome(player?.result ?? null, extractTag(game.pgn, 'Result')),
     pgn: typeof game.pgn === 'string' ? game.pgn : '',
   };
 }
@@ -135,4 +143,60 @@ function isPlayerInGame(username: string, game: RawChessComGame) {
 
 function inferPlayerColor(game: RawChessComGame, username: string): 'white' | 'black' {
   return game.white?.username?.toLowerCase() === username.toLowerCase() ? 'white' : 'black';
+}
+
+function normalizeTimeClass(timeClass: string | undefined): ChessComRecentGameSummary['timeClass'] {
+  switch (timeClass) {
+    case 'bullet':
+    case 'blitz':
+    case 'rapid':
+    case 'daily':
+      return timeClass;
+    default:
+      return 'unknown';
+  }
+}
+
+function countMovesFromPgn(pgn: string | undefined) {
+  if (typeof pgn !== 'string' || pgn.trim().length === 0) {
+    return 0;
+  }
+
+  try {
+    const chess = new Chess();
+    chess.loadPgn(pgn);
+    return Math.ceil(chess.history().length / 2);
+  } catch {
+    return 0;
+  }
+}
+
+function inferOutcome(playerResult: string | null, resultTag: string | null): ChessComRecentGameSummary['outcome'] {
+  switch (playerResult) {
+    case 'win':
+      return 'win';
+    case 'agreed':
+    case 'repetition':
+    case 'stalemate':
+    case 'insufficient':
+    case '50move':
+    case 'timevsinsufficient':
+      return 'draw';
+    case 'checkmated':
+    case 'timeout':
+    case 'resigned':
+    case 'lose':
+    case 'abandoned':
+      return 'loss';
+  }
+
+  switch (resultTag) {
+    case '1-0':
+    case '0-1':
+      return 'unknown';
+    case '1/2-1/2':
+      return 'draw';
+    default:
+      return 'unknown';
+  }
 }

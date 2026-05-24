@@ -840,9 +840,68 @@
   text-transform: uppercase;
 }
 
+.recentGameButton {
+  min-height: 62px;
+  grid-template-columns: minmax(0, 112px) minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  row-gap: 4px;
+  column-gap: 12px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.recentGameDate {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.recentGamePlayers {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: center;
+  color: var(--text);
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.recentGameMoves {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: end;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.recentGameMeta {
+  grid-column: 2;
+  grid-row: 2;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.recentGameWin {
+  border-color: rgba(138, 227, 193, 0.42);
+  background: rgba(56, 148, 115, 0.12);
+}
+
+.recentGameLoss {
+  border-color: rgba(255, 141, 145, 0.42);
+  background: rgba(180, 58, 66, 0.12);
+}
+
+.recentGameDraw {
+  border-color: rgba(152, 184, 255, 0.28);
+}
+
 .deckStats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   width: 100%;
   min-width: 0;
@@ -943,7 +1002,7 @@
 
 .deckActions {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1180,5 +1239,31 @@
 
   .chartCard {
     height: 260px;
+  }
+
+  .recentGameButton {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto auto;
+  }
+
+  .recentGameDate {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .recentGamePlayers {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+  }
+
+  .recentGameMeta {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .recentGameMoves {
+    grid-column: 2;
+    grid-row: 1 / span 3;
   }
 }
