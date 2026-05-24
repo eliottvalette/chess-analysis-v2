@@ -168,14 +168,6 @@ export function ReviewPanel({
           <span>moves</span>
         </div>
       </section>
-      <AnalyzePanel
-        currentFen={currentFen}
-        historyIndex={historyIndex}
-        jumpToIndex={jumpToIndex}
-        movePairs={movePairs}
-        positionAnalysis={positionAnalysis}
-        positionLoading={positionLoading}
-      />
       <GameReviewPanel
         activeReviewMoment={activeReviewMoment}
         blackReviewName={blackReviewName}
@@ -205,6 +197,14 @@ export function ReviewPanel({
         timelineError={timelineError}
         timelineLoading={timelineLoading}
         whiteReviewName={whiteReviewName}
+      />
+      <AnalyzePanel
+        currentFen={currentFen}
+        historyIndex={historyIndex}
+        jumpToIndex={jumpToIndex}
+        movePairs={movePairs}
+        positionAnalysis={positionAnalysis}
+        positionLoading={positionLoading}
       />
     </>
   );
@@ -322,9 +322,13 @@ export function AnalyzePanel({
   positionAnalysis: AnalysisResult | null;
   positionLoading: boolean;
 }) {
+  const engineLines = getDisplayEngineLines(positionAnalysis);
+
   return (
     <>
-      <EngineLinesSection currentFen={currentFen} positionAnalysis={positionAnalysis} positionLoading={positionLoading} />
+      {engineLines.length > 0 ? (
+        <EngineLinesSection currentFen={currentFen} lines={engineLines} positionAnalysis={positionAnalysis} positionLoading={positionLoading} />
+      ) : null}
       <section className={`${styles.card} ${styles.movesCard}`}>
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Line</h2>
@@ -518,23 +522,29 @@ export function GameReviewPanel({
             {gameReview.opening.lastBookPly ? `book through ply ${gameReview.opening.lastBookPly}` : 'book not detected'}
           </span>
         </div>
-        <div className={styles.categoryGrid}>
-          {reviewCategoryOrder.map(category => {
-            const meta = reviewCategoryMeta[category];
-            const whiteCount = gameReview.counts.white[category];
-            const blackCount = gameReview.counts.black[category];
+        <div className={styles.qualitySection}>
+          <div className={styles.qualityHeader}>
+            <span className={styles.metaLabel}>Move quality</span>
+            <span className={styles.statusText}>both players</span>
+          </div>
+          <div className={styles.categoryGrid}>
+            {reviewCategoryOrder.map(category => {
+              const meta = reviewCategoryMeta[category];
+              const whiteCount = gameReview.counts.white[category];
+              const blackCount = gameReview.counts.black[category];
 
-            if (!whiteCount && !blackCount) {
-              return null;
-            }
+              if (!whiteCount && !blackCount) {
+                return null;
+              }
 
-            return (
-              <div className={styles.categoryTile} key={category} style={{ ['--review-color' as string]: meta.color }}>
-                <span>{meta.label}</span>
-                <strong>{whiteCount + blackCount}</strong>
-              </div>
-            );
-          })}
+              return (
+                <div className={styles.categoryTile} key={category} style={{ ['--review-color' as string]: meta.color }}>
+                  <span>{meta.label}</span>
+                  <strong>{whiteCount + blackCount}</strong>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </section>
 
@@ -579,12 +589,6 @@ export function GameReviewPanel({
               </span>
               <strong>{activeReviewMoment.moveLabel}</strong>
             </div>
-            <p className={styles.copy}>{activeReviewMoment.coachText}</p>
-            <div className={styles.reviewFacts}>
-              <span>played {activeReviewMoment.san}</span>
-              <span>best {activeReviewMoment.bestMoveSan ?? '...'}</span>
-              <span>loss {formatExpectedLoss(activeReviewMoment.expectedPointsLost)}</span>
-            </div>
             <div className={styles.reviewNav}>
               <button className={styles.action} onClick={() => goToReviewMoment(reviewIndex - 1)} disabled={reviewIndex === 0}>
                 Prev
@@ -605,6 +609,28 @@ export function GameReviewPanel({
               >
                 Next
               </button>
+            </div>
+            <div className={styles.momentSummary}>
+              <strong>{formatMomentHeadline(activeReviewMoment)}</strong>
+              <span>{formatMomentImpact(activeReviewMoment)}</span>
+            </div>
+            <div className={styles.reviewFacts}>
+              <div>
+                <span>Played</span>
+                <strong>{activeReviewMoment.san}</strong>
+              </div>
+              <div>
+                <span>Best</span>
+                <strong>{activeReviewMoment.bestMoveSan ?? '-'}</strong>
+              </div>
+              <div>
+                <span>Expected score</span>
+                <strong>{formatExpectedSwing(activeReviewMoment.beforeExpected, activeReviewMoment.afterExpected)}</strong>
+              </div>
+              <div>
+                <span>Eval</span>
+                <strong>{formatEvalSwing(activeReviewMoment.beforeCp, activeReviewMoment.afterCp, activeReviewMoment.cpLossCp)}</strong>
+              </div>
             </div>
           </div>
         ) : (
@@ -964,39 +990,43 @@ function ChartSection({
 
 function EngineLinesSection({
   currentFen,
+  lines,
   positionAnalysis,
   positionLoading,
 }: {
   currentFen: string;
+  lines: AnalysisLine[];
   positionAnalysis: AnalysisResult | null;
   positionLoading: boolean;
 }) {
-  const lines = (positionAnalysis?.lines ?? []).filter(line => Boolean(line.bestMove) || line.pv.length > 0).slice(0, 3);
-
   return (
     <section className={`${styles.card} ${styles.engineCard}`}>
       <div className={styles.panelHeader}>
         <h2 className={styles.sectionTitle}>Engine</h2>
-        <span className={styles.statusText}>{positionLoading ? 'analyzing' : `depth ${positionAnalysis?.depth ?? '--'}`}</span>
+        <span className={styles.statusText}>{positionLoading ? 'updating' : `depth ${positionAnalysis?.depth ?? '--'}`}</span>
       </div>
       <div className={styles.engineLines}>
-        {lines.length > 0 ? (
-          lines.map(line => (
-            <div className={styles.engineLine} key={line.multipv}>
-              <div className={styles.engineLineHead}>
-                <span className={styles.engineRank}>#{line.multipv}</span>
-                <strong>{line.bestMove ? formatBestMove(currentFen, line.bestMove) : '--'}</strong>
-                <span>{formatLineScore(line)}</span>
-              </div>
-              <p className={styles.enginePv}>{formatPvLine(currentFen, line.pv)}</p>
+        {lines.map(line => (
+          <div className={styles.engineLine} key={line.multipv}>
+            <div className={styles.engineLineHead}>
+              <span className={styles.engineRank}>#{line.multipv}</span>
+              <strong>{line.bestMove ? formatBestMove(currentFen, line.bestMove) : '--'}</strong>
+              <span>{formatLineScore(line)}</span>
             </div>
-          ))
-        ) : (
-          <p className={styles.empty}>{positionLoading ? 'Analyzing candidate lines.' : 'No engine lines yet.'}</p>
-        )}
+            <p className={styles.enginePv}>{formatPvLine(currentFen, line.pv)}</p>
+          </div>
+        ))}
       </div>
     </section>
   );
+}
+
+function getDisplayEngineLines(positionAnalysis: AnalysisResult | null) {
+  if (!positionAnalysis || positionAnalysis.depth <= 0) {
+    return [];
+  }
+
+  return (positionAnalysis.lines ?? []).filter(line => Boolean(line.bestMove) || line.pv.length > 0).slice(0, 3);
 }
 
 function formatNullable(value: number | null) {
@@ -1005,6 +1035,63 @@ function formatNullable(value: number | null) {
 
 function formatExpectedLoss(value: number | null) {
   return value == null ? '--' : `${(value * 100).toFixed(1)}%`;
+}
+
+function formatExpectedSwing(before: number | null, after: number | null) {
+  if (before == null || after == null) {
+    return '--';
+  }
+
+  return `${(before * 100).toFixed(0)}% -> ${(after * 100).toFixed(0)}%`;
+}
+
+function formatEvalSwing(beforeCp: number | null, afterCp: number | null, lossCp: number | null) {
+  if (beforeCp == null || afterCp == null) {
+    return '--';
+  }
+
+  const loss = lossCp == null ? '' : `, -${lossCp}cp`;
+  return `${formatSignedCp(beforeCp)} -> ${formatSignedCp(afterCp)}${loss}`;
+}
+
+function formatSignedCp(cp: number) {
+  const pawns = cp / 100;
+  return `${pawns >= 0 ? '+' : ''}${pawns.toFixed(2)}`;
+}
+
+function formatMomentHeadline(moment: ReturnType<typeof filterReviewMoments>[number]) {
+  const label = moment.label?.toLowerCase() ?? 'move';
+  const best = moment.bestMoveSan ? ` Best was ${moment.bestMoveSan}.` : '';
+
+  switch (moment.category) {
+    case 'blunder':
+    case 'mistake':
+    case 'inaccuracy':
+    case 'miss':
+      return `${moment.san} was a ${label}.${best}`;
+    case 'book':
+      return `${moment.san} stayed in book.`;
+    case 'best':
+      return `${moment.san} matched the engine's top move.`;
+    default:
+      return `${moment.san} was ${label}.`;
+  }
+}
+
+function formatMomentImpact(moment: ReturnType<typeof filterReviewMoments>[number]) {
+  if (moment.expectedPointsLost != null && moment.cpLossCp != null) {
+    return `Dropped ${formatExpectedLoss(moment.expectedPointsLost)} expected score and ${moment.cpLossCp} centipawns.`;
+  }
+
+  if (moment.expectedPointsLost != null) {
+    return `Dropped ${formatExpectedLoss(moment.expectedPointsLost)} expected score.`;
+  }
+
+  if (moment.cpLossCp != null) {
+    return `Engine loss: ${moment.cpLossCp} centipawns.`;
+  }
+
+  return 'No major engine swing detected.';
 }
 
 function formatCpSwing(value: number) {
