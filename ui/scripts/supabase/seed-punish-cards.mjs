@@ -17,6 +17,7 @@ const OPENING_REPERTOIRE = [
 
 const DECK_ID = 'opening-punishments-v1';
 const DEFAULT_PUNISH_THRESHOLD_CP = 30;
+const DEFAULT_ACCEPTABLE_LOSS_CP = 35;
 const DEFAULT_PUNISH_DEPTH = 14;
 const DEFAULT_PUNISH_MOVETIME_MS = 250;
 const DEFAULT_PUNISH_MULTIPV = 3;
@@ -27,6 +28,7 @@ export async function main() {
   const serviceRoleKey = requireAdminKey(env);
   const analyzeUrl = env.ANALYZE_BASE_URL?.trim() || 'http://localhost:3000';
   const thresholdCp = Number(env.PUNISH_THRESHOLD_CP || DEFAULT_PUNISH_THRESHOLD_CP);
+  const acceptableLossCp = Number(env.PUNISH_ACCEPTABLE_LOSS_CP || DEFAULT_ACCEPTABLE_LOSS_CP);
   const depth = Number(env.PUNISH_DEPTH || DEFAULT_PUNISH_DEPTH);
   const movetimeMs = Number(env.PUNISH_MOVETIME_MS || DEFAULT_PUNISH_MOVETIME_MS);
   const multipv = Number(env.PUNISH_MULTIPV || DEFAULT_PUNISH_MULTIPV);
@@ -111,6 +113,10 @@ export async function main() {
         answer_san: answer.san,
         prompt: `Opponent played ${reply.san}; punish it`,
         context: candidate.context,
+        source_type: 'opening_seed',
+        validation_mode: 'within_eval_loss',
+        reference_eval_cp: Math.round(afterScore),
+        max_eval_loss_cp: acceptableLossCp,
         opponent_move_uci: line.bestMove,
         opponent_move_san: reply.san,
         score_swing_cp: Math.round(scoreSwingCp),
@@ -126,6 +132,7 @@ export async function main() {
           generated_cards: 0,
           upserted_cards: 0,
           threshold_cp: thresholdCp,
+          acceptable_loss_cp: acceptableLossCp,
           multipv,
           depth,
           movetime_ms: movetimeMs,
@@ -150,6 +157,7 @@ export async function main() {
         generated_cards: cards.length,
         upserted_cards: cards.length,
         threshold_cp: thresholdCp,
+        acceptable_loss_cp: acceptableLossCp,
         multipv,
         depth,
         movetime_ms: movetimeMs,

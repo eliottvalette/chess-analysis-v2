@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getPgConfig } from './migrate.mjs';
+import { buildCanonicalResetSql, getPgConfig } from './migrate.mjs';
 
 const baseEnv = {
   NEXT_PUBLIC_SUPABASE_URL: 'https://rdehwurjccisorhyqonc.supabase.co',
@@ -48,4 +48,12 @@ test('getPgConfig leaves non-pooler URIs untouched', () => {
     config.connectionString,
     'postgresql://postgres:test@db.rdehwurjccisorhyqonc.supabase.co:5432/postgres',
   );
+});
+
+test('buildCanonicalResetSql drops deck tables before applying the schema', () => {
+  const sql = buildCanonicalResetSql('create table public.decks ();');
+
+  assert.match(sql, /drop table if exists public\.user_card_attempts cascade;/);
+  assert.match(sql, /drop table if exists public\.decks cascade;/);
+  assert.match(sql, /create table public\.decks \(\);/);
 });

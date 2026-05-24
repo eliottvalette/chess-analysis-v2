@@ -6,9 +6,16 @@ import pg from 'pg';
 import { loadLocalEnv, requireEnv } from './env.mjs';
 
 const { Client } = pg;
+const RESET_DECK_SCHEMA_SQL = `
+drop table if exists public.user_card_attempts cascade;
+drop table if exists public.user_card_progress cascade;
+drop table if exists public.deck_cards cascade;
+drop table if exists public.opening_lines cascade;
+drop table if exists public.decks cascade;
+`;
 
 export async function main() {
-  const sql = readFileSync('supabase/migrations/0001_learning_decks.sql', 'utf8');
+  const sql = buildCanonicalResetSql(readFileSync('supabase/migrations/0001_learning_decks.sql', 'utf8'));
   const client = new Client(getPgConfig(loadLocalEnv()));
 
   await client.connect();
@@ -19,7 +26,11 @@ export async function main() {
     await client.end();
   }
 
-  console.log('migration applied: supabase/migrations/0001_learning_decks.sql');
+  console.log('canonical deck schema recreated from: supabase/migrations/0001_learning_decks.sql');
+}
+
+export function buildCanonicalResetSql(schemaSql) {
+  return `${RESET_DECK_SCHEMA_SQL}\n${schemaSql}`;
 }
 
 export function getPgConfig(env) {

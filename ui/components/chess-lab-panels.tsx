@@ -16,6 +16,7 @@ import {
   type ReviewSide,
   type StoredMove,
 } from '@/lib/chess-analysis-client';
+import type { ChessComRecentGameSummary } from '@/lib/chesscom';
 import type { DeckCard, DeckFeedback, OpeningSeedLine } from '@/lib/opening-training';
 import styles from './chess-analysis-lab.module.css';
 
@@ -95,14 +96,21 @@ export function AnalyzePanel({
 export function GameReviewPanel({
   activeReviewMoment,
   blackReviewName,
+  chesscomUsername,
   chartConfig,
   chartData,
   gameReview,
   goToReviewMoment,
   hasLoadedGame,
   historyIndex,
+  loadRecentGame,
   moveHistoryLength,
+  onChesscomUsernameChange,
+  onFetchRecentGames,
   openPgnDialog,
+  recentGames,
+  recentGamesError,
+  recentGamesLoading,
   reviewIndex,
   reviewMoments,
   reviewSide,
@@ -116,14 +124,21 @@ export function GameReviewPanel({
 }: {
   activeReviewMoment: ReturnType<typeof filterReviewMoments>[number] | null;
   blackReviewName: string;
+  chesscomUsername: string;
   chartConfig: ReturnType<typeof buildChartOptions>;
   chartData: ChartData<'line', number[], number>;
   gameReview: ReturnType<typeof buildGameReview>;
   goToReviewMoment: (index: number) => void;
   hasLoadedGame: boolean;
   historyIndex: number;
+  loadRecentGame: (game: ChessComRecentGameSummary) => void;
   moveHistoryLength: number;
+  onChesscomUsernameChange: (value: string) => void;
+  onFetchRecentGames: () => void;
   openPgnDialog: () => void;
+  recentGames: ChessComRecentGameSummary[];
+  recentGamesError: string;
+  recentGamesLoading: boolean;
   reviewIndex: number;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
   reviewSide: ReviewSide;
@@ -137,13 +152,49 @@ export function GameReviewPanel({
 }) {
   if (!hasLoadedGame) {
     return (
-      <section className={`${styles.card} ${styles.emptyStateCard}`}>
-        <h2 className={styles.sectionTitle}>Game Review</h2>
-        <p className={styles.copy}>Import a PGN only when you want full-game review. The workspace stays board-first otherwise.</p>
-        <button className={`${styles.action} ${styles.primary}`} onClick={openPgnDialog}>
-          Import PGN
-        </button>
-      </section>
+      <>
+        <section className={`${styles.card} ${styles.emptyStateCard}`}>
+          <div className={styles.panelHeader}>
+            <h2 className={styles.sectionTitle}>Game Review</h2>
+            <span className={styles.statusText}>{recentGamesLoading ? 'loading' : recentGames.length ? `${recentGames.length} games` : 'ready'}</span>
+          </div>
+          <p className={styles.copy}>Use your Chess.com username to pull recent public games, or import a PGN manually.</p>
+          <div className={styles.inlineForm}>
+            <input
+              className={styles.inlineInput}
+              value={chesscomUsername}
+              onChange={event => onChesscomUsernameChange(event.target.value)}
+              placeholder="losvalettos"
+              spellCheck={false}
+            />
+            <button className={`${styles.action} ${styles.primary}`} onClick={onFetchRecentGames} disabled={!chesscomUsername.trim() || recentGamesLoading}>
+              {recentGamesLoading ? 'Loading' : 'Fetch games'}
+            </button>
+          </div>
+          <div className={styles.reviewImportActions}>
+            <button className={styles.action} onClick={openPgnDialog}>
+              Import PGN
+            </button>
+          </div>
+          {recentGamesError ? <p className={styles.error}>{recentGamesError}</p> : null}
+        </section>
+        {recentGames.length ? (
+          <section className={`${styles.card} ${styles.openingListCard}`}>
+            <div className={styles.panelHeader}>
+              <h2 className={styles.sectionTitle}>Recent Blitz</h2>
+              <span className={styles.statusText}>click to review</span>
+            </div>
+            <div className={styles.openingList}>
+              {recentGames.map(game => (
+                <button className={styles.openingButton} key={game.link} onClick={() => loadRecentGame(game)}>
+                  <span>{formatRecentGameLabel(game)}</span>
+                  <strong>{game.playerColor}</strong>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
+      </>
     );
   }
 
@@ -271,6 +322,13 @@ export function GameReviewPanel({
   );
 }
 
+function formatRecentGameLabel(game: ChessComRecentGameSummary) {
+  const date = game.utcDate ?? 'recent';
+  const eco = game.eco ?? 'game';
+  const opponent = game.opponentUsername ?? 'opponent';
+  return `${date} · ${eco} · vs ${opponent}`;
+}
+
 export function LearnPanel({
   currentFen,
   deckCards,
@@ -290,6 +348,7 @@ export function LearnPanel({
   positionAnalysis: AnalysisResult | null;
   startCard: (card: DeckCard | null) => void;
 }) {
+  const hasDeckCards = deckCards.length > 0;
   const whiteCards = deckCards.filter(card => card.side === 'white').length;
   const blackCards = deckCards.length - whiteCards;
   const legitOptions = positionAnalysis?.lines?.slice(0, 3) ?? [];
@@ -298,26 +357,38 @@ export function LearnPanel({
     <>
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
         <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Learn punishments</h2>
-          <span className={styles.statusText}>{deckLoading ? 'loading' : `${deckCards.length} punish cards`}</span>
+          <h2 className={styles.sectionTitle}>Punish Deck</h2>
+          <span className={styles.statusText}>{deckLoading ? 'loading' : hasDeckCards ? `${deckCards.length} cards` : 'empty'}</span>
         </div>
-        <div className={styles.deckStats}>
-          <div>
-            <strong>{openingLines.length}</strong>
-            <span>lines</span>
-          </div>
-          <div>
-            <strong>{whiteCards}</strong>
-            <span>white</span>
-          </div>
-          <div>
-            <strong>{blackCards}</strong>
-            <span>black</span>
-          </div>
-        </div>
-        <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => startCard(nextDeckCard)} disabled={deckLoading || !nextDeckCard}>
-          {deckLoading ? 'Loading deck' : nextDeckCard ? 'Start punish deck' : 'No deck loaded'}
-        </button>
+        {hasDeckCards ? (
+          <>
+            <div className={styles.deckStats}>
+              <div>
+                <strong>{openingLines.length}</strong>
+                <span>lines</span>
+              </div>
+              <div>
+                <strong>{whiteCards}</strong>
+                <span>white</span>
+              </div>
+              <div>
+                <strong>{blackCards}</strong>
+                <span>black</span>
+              </div>
+            </div>
+            <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => startCard(nextDeckCard)} disabled={deckLoading || !nextDeckCard}>
+              {deckLoading ? 'Loading deck' : 'Start punish deck'}
+            </button>
+          </>
+        ) : (
+          <p className={styles.copy}>
+            {deckLoading
+              ? 'Loading deck.'
+              : deckLoadError
+                ? 'Deck setup is broken. Recreate the canonical Supabase schema and seed cards.'
+                : 'No punish cards have been seeded yet.'}
+          </p>
+        )}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
       </section>
       <section className={`${styles.card} ${styles.engineCard}`}>
@@ -342,27 +413,29 @@ export function LearnPanel({
           )}
         </div>
       </section>
-      <section className={`${styles.card} ${styles.openingListCard}`}>
-        <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Punishable replies</h2>
-          <span className={styles.statusText}>strict deck only</span>
-        </div>
-        <div className={styles.openingList}>
-          {openingLines.map(line => {
-            const lineCards = deckCards.filter(card => card.lineId === line.id);
-            const firstCard = lineCards[0] ?? null;
+      {hasDeckCards ? (
+        <section className={`${styles.card} ${styles.openingListCard}`}>
+          <div className={styles.panelHeader}>
+            <h2 className={styles.sectionTitle}>Punishable replies</h2>
+            <span className={styles.statusText}>eval-graded deck</span>
+          </div>
+          <div className={styles.openingList}>
+            {openingLines.map(line => {
+              const lineCards = deckCards.filter(card => card.lineId === line.id);
+              const firstCard = lineCards[0] ?? null;
 
-            return (
-              <button className={styles.openingButton} key={line.id} onClick={() => startCard(firstCard)} disabled={!firstCard}>
-                <span>
-                  {line.eco} · {line.name}
-                </span>
-                <strong>{lineCards.length}</strong>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+              return (
+                <button className={styles.openingButton} key={line.id} onClick={() => startCard(firstCard)} disabled={!firstCard}>
+                  <span>
+                    {line.eco} · {line.name}
+                  </span>
+                  <strong>{lineCards.length}</strong>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
     </>
   );
 }
@@ -416,17 +489,31 @@ export function DeckPanel({
               </div>
             </div>
             {deckFeedback ? (
-              <div className={`${styles.feedbackBox} ${deckFeedback.correct ? styles.feedbackGood : styles.feedbackBad}`}>
-                <strong>{deckFeedback.correct ? 'Correct' : 'Best or nothing'}</strong>
+              <div className={`${styles.feedbackBox} ${deckFeedback.pending || deckFeedback.correct ? styles.feedbackGood : styles.feedbackBad}`}>
+                <strong>
+                  {deckFeedback.pending
+                    ? 'Checking eval'
+                    : deckFeedback.correct
+                      ? deckFeedback.exact
+                        ? 'Best move'
+                        : 'Accepted'
+                      : 'Too inaccurate'}
+                </strong>
                 <span>
-                  played {deckFeedback.playedSan} · expected {deckFeedback.expectedSan}
+                  played {deckFeedback.playedSan} · best {deckFeedback.expectedSan}
+                  {deckFeedback.evalLossCp != null ? ` · loss ${formatCpSwing(deckFeedback.evalLossCp)}` : ''}
+                  {deckFeedback.maxEvalLossCp != null ? ` / ${formatCpSwing(deckFeedback.maxEvalLossCp)}` : ''}
                   {deckFeedback.scoreSwingCp != null ? ` · swing ${formatCpSwing(deckFeedback.scoreSwingCp)}` : ''}
                 </span>
-                {!deckFeedback.correct && deckCounterSan ? <span>counter {deckCounterSan}</span> : null}
+                {!deckFeedback.pending && !deckFeedback.correct && deckCounterSan ? <span>counter {deckCounterSan}</span> : null}
               </div>
             ) : (
               <p className={styles.copy}>
-                {cardLoaded ? 'Play the exact move on the board. The answer is strict.' : 'Load the card to put its position on the board.'}
+                {cardLoaded
+                  ? card.validationMode === 'within_eval_loss' && card.maxEvalLossCp != null
+                    ? `Play the move on the board. Any punishment within ${formatCpSwing(card.maxEvalLossCp)} of best is accepted.`
+                    : 'Play the exact move on the board. The answer is strict.'
+                  : 'Load the card to put its position on the board.'}
               </p>
             )}
             <div className={styles.deckActions}>

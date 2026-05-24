@@ -9,6 +9,7 @@ import { loadLocalEnv, requireAdminKey, requireEnv } from '../supabase/env.mjs';
 const DEFAULT_COUNT = 10;
 const DEFAULT_TIME_CLASS = 'blitz';
 const DEFAULT_THRESHOLD_CP = 90;
+const DEFAULT_ACCEPTABLE_LOSS_CP = 35;
 const DEFAULT_DEPTH = 12;
 const DEFAULT_MOVETIME_MS = 250;
 const DEFAULT_MULTIPV = 1;
@@ -33,6 +34,7 @@ async function main() {
   const depth = Number(env.CHESSCOM_DECK_DEPTH || DEFAULT_DEPTH);
   const movetimeMs = Number(env.CHESSCOM_DECK_MOVETIME_MS || DEFAULT_MOVETIME_MS);
   const thresholdCp = Number(env.CHESSCOM_DECK_THRESHOLD_CP || DEFAULT_THRESHOLD_CP);
+  const acceptableLossCp = Number(env.CHESSCOM_DECK_ACCEPTABLE_LOSS_CP || DEFAULT_ACCEPTABLE_LOSS_CP);
   const multipv = Number(env.CHESSCOM_DECK_MULTIPV || DEFAULT_MULTIPV);
 
   await assertAnalyzeApi(analyzeBaseUrl);
@@ -69,6 +71,7 @@ async function main() {
         movetimeMs,
         multipv,
         thresholdCp,
+        acceptableLossCp,
       })),
     );
   }
@@ -102,6 +105,7 @@ async function main() {
         username,
         analyzed_games: games.length,
         threshold_cp: thresholdCp,
+        acceptable_loss_cp: acceptableLossCp,
         depth,
         movetime_ms: movetimeMs,
         cards: cards.length,
@@ -167,6 +171,7 @@ function parseArgs(args) {
 
 function buildLineRecord(game, username) {
   const playerColor = inferPlayerColor(game, username);
+  const trainingSide = oppositeSide(playerColor);
   const opponent = playerColor === 'white' ? game.black?.username : game.white?.username;
   const eco = extractTag(game.pgn, 'ECO') ?? 'GAME';
   const date = extractTag(game.pgn, 'UTCDate') ?? 'recent';
@@ -179,7 +184,7 @@ function buildLineRecord(game, username) {
     deck_id: DECK_ID,
     name: lineName,
     eco,
-    side: playerColor,
+    side: trainingSide,
     moves,
   };
 }
@@ -193,9 +198,11 @@ async function buildCardsForGame({
   movetimeMs,
   multipv,
   thresholdCp,
+  acceptableLossCp,
 }) {
   const cards = [];
   const playerColor = inferPlayerColor(game, username);
+  const trainingSide = oppositeSide(playerColor);
   const gameDate = extractTag(game.pgn, 'UTCDate') ?? '';
   const opponent = playerColor === 'white' ? game.black?.username : game.white?.username;
   const eco = extractTag(game.pgn, 'ECO') ?? line.eco;
@@ -229,8 +236,9 @@ async function buildCardsForGame({
         multipv: 1,
       });
       const afterScore = scoreToCpForSide(afterAnalysis.whitePerspective, playerColor);
+      const punishmentScore = scoreToCpForSide(afterAnalysis.whitePerspective, trainingSide);
 
-      if (bestScore == null || afterScore == null || !afterAnalysis.bestMove) {
+      if (bestScore == null || afterScore == null || punishmentScore == null || !afterAnalysis.bestMove) {
         continue;
       }
 
@@ -247,13 +255,17 @@ async function buildCardsForGame({
         kind: 'punish_mistake',
         line_name: line.name,
         eco,
-        side: playerColor,
+        side: trainingSide,
         ply: index + 1,
         fen: fenAfter,
         answer_uci: afterAnalysis.bestMove,
         answer_san: moveFromFen(fenAfter, afterAnalysis.bestMove)?.san ?? afterAnalysis.bestMove,
         prompt: `In your game vs ${opponent ?? 'opponent'}, you played ${move.san}. Find the opponent's best punishment.`,
         context: `${gameDate} · ${eco} · result ${gameResult} · line ${moveHistory.join(' ')}`,
+        source_type: 'recent_game',
+        validation_mode: 'within_eval_loss',
+        reference_eval_cp: Math.round(punishmentScore),
+        max_eval_loss_cp: acceptableLossCp,
         opponent_move_uci: moveUci,
         opponent_move_san: move.san,
         score_swing_cp: scoreSwingCp,
@@ -280,6 +292,10 @@ function extractSanMoves(pgn) {
 
 function inferPlayerColor(game, username) {
   return game.white?.username?.toLowerCase() === username.toLowerCase() ? 'white' : 'black';
+}
+
+function oppositeSide(side) {
+  return side === 'white' ? 'black' : 'white';
 }
 
 async function assertAnalyzeApi(baseUrl) {

@@ -9,6 +9,9 @@ npm run supabase:seed:cards
 npm run supabase:smoke
 ```
 
+This repo now assumes a clean canonical schema only. There is no deprecated deck-card fallback path anymore.
+If your remote Supabase project still has the old schema, reset/drop it and recreate from `0001_learning_decks.sql`.
+
 `supabase:migrate` needs either:
 
 - `SUPABASE_DB_URL`, or
@@ -29,3 +32,12 @@ Optional deep-feed tuning:
 - `PUNISH_MOVETIME_MS=250`
 - `PUNISH_MULTIPV=3`
 - `PUNISH_THRESHOLD_CP=30`
+- `PUNISH_ACCEPTABLE_LOSS_CP=35`
+
+Deck cards keep an eval-based acceptance rule:
+
+- `validation_mode=within_eval_loss`
+- `reference_eval_cp`
+- `max_eval_loss_cp`
+
+That means a card no longer has to be graded as “play the one exact move”. A move is accepted if the resulting Stockfish eval stays within the allowed loss window from the best continuation for the trainee side.

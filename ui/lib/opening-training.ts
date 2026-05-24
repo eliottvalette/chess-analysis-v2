@@ -4,6 +4,8 @@ import type { AnalysisLine, AnalysisResult, PerspectiveScore } from '@/lib/analy
 
 export type TrainingSide = 'white' | 'black';
 export type DeckCardKind = 'punish_mistake' | 'repertoire_choice';
+export type DeckCardSourceType = 'opening_seed' | 'recent_game';
+export type DeckValidationMode = 'strict_best' | 'within_eval_loss';
 
 export type OpeningSeedLine = {
   id: string;
@@ -34,6 +36,10 @@ export type PunishableReply = TrainingCandidate & {
   answerUci: string;
   answerSan: string;
   scoreSwingCp: number;
+  sourceType: DeckCardSourceType;
+  validationMode: DeckValidationMode;
+  referenceEvalCp?: number;
+  maxEvalLossCp?: number;
 };
 
 export type GeneratedDeckCard = {
@@ -49,6 +55,10 @@ export type GeneratedDeckCard = {
   answerSan: string;
   prompt: string;
   context: string;
+  sourceType: DeckCardSourceType;
+  validationMode: DeckValidationMode;
+  referenceEvalCp?: number;
+  maxEvalLossCp?: number;
   opponentMoveUci?: string;
   opponentMoveSan?: string;
   scoreSwingCp?: number;
@@ -57,9 +67,15 @@ export type GeneratedDeckCard = {
 export type DeckCard = GeneratedDeckCard;
 
 export type DeckFeedback = {
+  pending: boolean;
   correct: boolean;
+  exact: boolean;
   expectedSan: string;
   playedSan: string;
+  playedUci: string;
+  validationMode: DeckValidationMode;
+  evalLossCp?: number;
+  maxEvalLossCp?: number;
   scoreSwingCp?: number;
 };
 
@@ -104,6 +120,10 @@ export function buildDeckCards(lines: OpeningSeedLine[]) {
           answerSan: move.san,
           prompt: `${line.side === 'white' ? 'White' : 'Black'} to move: find ${line.name}`,
           context: playedSan.length > 0 ? playedSan.join(' ') : 'Starting position',
+          sourceType: 'opening_seed',
+          validationMode: 'strict_best',
+          referenceEvalCp: undefined,
+          maxEvalLossCp: 0,
         });
       }
 
@@ -207,6 +227,10 @@ export function buildPunishCardsFromAnalysis(
       answerSan: answerMove.san,
       prompt: `Opponent played ${replyMove.san}; punish it`,
       context: position.context,
+      sourceType: 'opening_seed',
+      validationMode: 'within_eval_loss',
+      referenceEvalCp: Math.round(afterScore),
+      maxEvalLossCp: 35,
       opponentMoveUci: line.bestMove,
       opponentMoveSan: replyMove.san,
       scoreSwingCp,
@@ -252,6 +276,46 @@ export function scoreToCpForSide(score: PerspectiveScore | null | undefined, sid
 
   const whiteScore = score.type === 'mate' ? Math.sign(score.value) * 100000 : score.value;
   return side === 'white' ? whiteScore : -whiteScore;
+}
+
+export function buildPendingDeckFeedback(card: DeckCard, playedUci: string, playedSan: string): DeckFeedback {
+  return {
+    pending: card.validationMode === 'within_eval_loss',
+    correct: false,
+    exact: false,
+    expectedSan: card.answerSan,
+    playedSan,
+    playedUci,
+    validationMode: card.validationMode,
+    maxEvalLossCp: card.maxEvalLossCp,
+    scoreSwingCp: card.scoreSwingCp,
+  };
+}
+
+export function finalizeDeckFeedback(card: DeckCard, feedback: DeckFeedback, resultingEvalCp: number | null): DeckFeedback {
+  if (card.validationMode !== 'within_eval_loss' || card.referenceEvalCp == null || card.maxEvalLossCp == null || resultingEvalCp == null) {
+    const exact = feedback.playedUci === card.answerUci;
+
+    return {
+      ...feedback,
+      pending: false,
+      correct: exact,
+      exact,
+      evalLossCp: exact ? 0 : undefined,
+    };
+  }
+
+  const evalLossCp = Math.max(0, Math.round(card.referenceEvalCp - resultingEvalCp));
+  const exact = feedback.playedUci === card.answerUci;
+  const correct = evalLossCp <= card.maxEvalLossCp;
+
+  return {
+    ...feedback,
+    pending: false,
+    correct,
+    exact,
+    evalLossCp,
+  };
 }
 
 function analysisAfterReplyFen(fen: string, moveUci: string) {

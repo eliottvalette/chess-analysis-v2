@@ -46,10 +46,14 @@ import {
   type StoredMove,
 } from '@/lib/chess-analysis-client';
 import {
+  buildPendingDeckFeedback,
+  finalizeDeckFeedback,
   type DeckCard,
   type DeckFeedback,
   type OpeningSeedLine,
+  scoreToCpForSide,
 } from '@/lib/opening-training';
+import type { ChessComRecentGameSummary } from '@/lib/chesscom';
 import { createClient as createSupabaseClient } from '@/utils/supabase/client';
 import styles from './chess-analysis-lab.module.css';
 
@@ -65,6 +69,9 @@ const POSITION_MOVETIME_MS = 500;
 const TIMELINE_MOVETIME_MS = 80;
 const POSITION_MULTIPV = 3;
 const PRELOAD_AHEAD = 1;
+const DECK_CARD_SELECT =
+  'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp';
+const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
 
 export function ChessAnalysisLab() {
   const [game, setGame] = useState(() => new Chess());
@@ -98,6 +105,10 @@ export function ChessAnalysisLab() {
   const [deckCards, setDeckCards] = useState<DeckCard[]>([]);
   const [deckLoading, setDeckLoading] = useState(true);
   const [deckLoadError, setDeckLoadError] = useState('');
+  const [chesscomUsername, setChesscomUsername] = useState('');
+  const [recentChessGames, setRecentChessGames] = useState<ChessComRecentGameSummary[]>([]);
+  const [recentChessGamesLoading, setRecentChessGamesLoading] = useState(false);
+  const [recentChessGamesError, setRecentChessGamesError] = useState('');
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
   const evalRailRef = useRef<HTMLDivElement | null>(null);
@@ -114,11 +125,13 @@ export function ChessAnalysisLab() {
   const isViewingDeckFailurePosition =
     activeDeckCard != null &&
     deckFeedback != null &&
+    !deckFeedback.pending &&
     !deckFeedback.correct &&
     historyIndex === moveHistory.length &&
     isOpponentTurnFromFen(currentFen, activeDeckCard.side);
   const bestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(positionAnalysis?.bestMove ?? null) : [];
-  const deckAnswerArrow = deckFeedback && activeDeckCard ? getBestMoveArrow(activeDeckCard.answerUci) : [];
+  const deckAnswerArrow =
+    deckFeedback && activeDeckCard && !deckFeedback.pending && !deckFeedback.correct ? getBestMoveArrow(activeDeckCard.answerUci) : [];
   const deckOpponentArrow =
     isViewingDeckFailurePosition && !positionLoading && positionAnalysis?.bestMove
       ? getBestMoveArrow(positionAnalysis?.bestMove ?? null, '#ff456f')
@@ -253,6 +266,50 @@ export function ChessAnalysisLab() {
     return () => observer.disconnect();
   }, []);
 
+  const fetchRecentChessGames = useCallback(
+    async (usernameOverride?: string) => {
+      const username = (usernameOverride ?? chesscomUsername).trim().toLowerCase();
+
+      if (!username) {
+        setRecentChessGames([]);
+        setRecentChessGamesError('Enter a Chess.com username.');
+        return;
+      }
+
+      setRecentChessGamesLoading(true);
+      setRecentChessGamesError('');
+
+      try {
+        writeCookie(CHESSCOM_USERNAME_COOKIE, username);
+        const response = await fetch(`/api/chesscom/recent-games?username=${encodeURIComponent(username)}&timeClass=blitz&count=6`);
+        const payload = (await response.json()) as { error?: string; games?: ChessComRecentGameSummary[] };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? `Chess.com fetch failed: HTTP ${response.status}`);
+        }
+
+        setRecentChessGames(Array.isArray(payload.games) ? payload.games : []);
+      } catch (error) {
+        setRecentChessGames([]);
+        setRecentChessGamesError(error instanceof Error ? error.message : 'Unable to fetch Chess.com games.');
+      } finally {
+        setRecentChessGamesLoading(false);
+      }
+    },
+    [chesscomUsername],
+  );
+
+  useEffect(() => {
+    const savedUsername = readCookie(CHESSCOM_USERNAME_COOKIE);
+
+    if (!savedUsername) {
+      return;
+    }
+
+    setChesscomUsername(savedUsername);
+    void fetchRecentChessGames(savedUsername);
+  }, [fetchRecentChessGames]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -299,9 +356,7 @@ export function ChessAnalysisLab() {
           supabase.from('opening_lines').select('id,name,eco,side,moves').eq('deck_id', activeDeck.id).order('id'),
           supabase
             .from('deck_cards')
-            .select(
-              'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,opponent_move_uci,opponent_move_san,score_swing_cp',
-            )
+            .select(DECK_CARD_SELECT)
             .eq('deck_id', activeDeck.id)
             .eq('kind', 'punish_mistake')
             .order('score_swing_cp', { ascending: false, nullsFirst: false }),
@@ -320,7 +375,7 @@ export function ChessAnalysisLab() {
         }
 
         setOpeningLines(
-          (lines ?? []).map(line => ({
+          (lines ?? []).map((line: { id: string; name: string; eco: string; side: string; moves: string[] | null }) => ({
             id: String(line.id),
             name: String(line.name),
             eco: String(line.eco),
@@ -329,7 +384,29 @@ export function ChessAnalysisLab() {
           })),
         );
         setDeckCards(
-          (cards ?? []).map(card => ({
+          (
+            cards ?? []
+          ).map(
+            (card: {
+              id: string;
+              line_id: string | null;
+              line_name: string;
+              eco: string;
+              side: string;
+              ply: number;
+              fen: string;
+              answer_uci: string;
+              answer_san: string;
+              prompt: string;
+              context: string;
+              source_type?: string | null;
+              validation_mode?: string | null;
+              reference_eval_cp?: number | null;
+              max_eval_loss_cp?: number | null;
+              opponent_move_uci?: string | null;
+              opponent_move_san?: string | null;
+              score_swing_cp?: number | null;
+            }) => ({
             id: String(card.id),
             kind: 'punish_mistake',
             lineId: card.line_id ? String(card.line_id) : '',
@@ -342,17 +419,22 @@ export function ChessAnalysisLab() {
             answerSan: String(card.answer_san),
             prompt: String(card.prompt),
             context: String(card.context),
+            sourceType: card.source_type === 'recent_game' ? 'recent_game' : 'opening_seed',
+            validationMode: card.validation_mode === 'within_eval_loss' ? 'within_eval_loss' : 'strict_best',
+            referenceEvalCp: typeof card.reference_eval_cp === 'number' ? card.reference_eval_cp : undefined,
+            maxEvalLossCp: typeof card.max_eval_loss_cp === 'number' ? card.max_eval_loss_cp : undefined,
             opponentMoveUci: card.opponent_move_uci ? String(card.opponent_move_uci) : undefined,
             opponentMoveSan: card.opponent_move_san ? String(card.opponent_move_san) : undefined,
             scoreSwingCp: typeof card.score_swing_cp === 'number' ? card.score_swing_cp : undefined,
-          })),
+            }),
+          ),
         );
         setDeckIndex(0);
       } catch (error) {
         if (!cancelled) {
           setOpeningLines([]);
           setDeckCards([]);
-          setDeckLoadError(error instanceof Error ? error.message : 'Unable to load Supabase deck.');
+          setDeckLoadError(normalizeDeckLoadError(error instanceof Error ? error.message : 'Unable to load Supabase deck.'));
         }
       } finally {
         if (!cancelled) {
@@ -428,6 +510,26 @@ export function ChessAnalysisLab() {
   }, [fetchCachedPositionAnalysis, historyIndex, initialFen, moveHistory]);
 
   useEffect(() => {
+    if (!activeDeckCard || !deckFeedback?.pending || positionLoading || historyIndex !== moveHistory.length) {
+      return;
+    }
+
+    const resultingEvalCp = scoreToCpForSide(positionAnalysis?.whitePerspective, activeDeckCard.side);
+
+    if (resultingEvalCp == null) {
+      return;
+    }
+
+    const gradedFeedback = finalizeDeckFeedback(activeDeckCard, deckFeedback, resultingEvalCp);
+
+    setDeckFeedback(gradedFeedback);
+    setDeckStats(stats => ({
+      correct: stats.correct + (gradedFeedback.correct ? 1 : 0),
+      misses: stats.misses + (gradedFeedback.correct ? 0 : 1),
+    }));
+  }, [activeDeckCard, deckFeedback, historyIndex, moveHistory.length, positionAnalysis, positionLoading]);
+
+  useEffect(() => {
     setReviewIndex(value => Math.max(0, Math.min(value, Math.max(0, reviewMoments.length - 1))));
   }, [reviewMoments.length]);
 
@@ -477,18 +579,18 @@ export function ChessAnalysisLab() {
       setSquareStyles({});
 
       if (activeDeckCard) {
-        const correct = move.uci === activeDeckCard.answerUci;
+        const nextFeedback = buildPendingDeckFeedback(activeDeckCard, move.uci, move.san);
 
-        setDeckFeedback({
-          correct,
-          expectedSan: activeDeckCard.answerSan,
-          playedSan: move.san,
-          scoreSwingCp: activeDeckCard.scoreSwingCp,
-        });
-        setDeckStats(stats => ({
-          correct: stats.correct + (correct ? 1 : 0),
-          misses: stats.misses + (correct ? 0 : 1),
-        }));
+        if (nextFeedback.pending) {
+          setDeckFeedback(nextFeedback);
+        } else {
+          const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback, null);
+          setDeckFeedback(gradedFeedback);
+          setDeckStats(stats => ({
+            correct: stats.correct + (gradedFeedback.correct ? 1 : 0),
+            misses: stats.misses + (gradedFeedback.correct ? 0 : 1),
+          }));
+        }
       }
     },
     [activeDeckCard, historyIndex, moveHistory],
@@ -724,6 +826,10 @@ export function ChessAnalysisLab() {
     await loadPgnText('Pasted PGN', pgnDraft.trim());
   }
 
+  async function loadRecentChessGame(gameSummary: ChessComRecentGameSummary) {
+    await loadPgnText(gameSummary.link, gameSummary.pgn);
+  }
+
   function resetWorkspace() {
     positionRequestIdRef.current += 1;
     timelineRequestIdRef.current += 1;
@@ -853,24 +959,8 @@ export function ChessAnalysisLab() {
                   }}
                 />
               </div>
+              <div className={styles.boardStageSpacer} aria-hidden="true" />
             </div>
-          </div>
-
-          <div className={styles.boardFooter}>
-            <button className={styles.navButton} onClick={() => jumpToIndex(historyIndex - 1)} disabled={historyIndex === 0}>
-              Prev
-            </button>
-            <span className={styles.footerCopy}>
-              Ply {historyIndex}/{moveHistory.length}
-              {activeDeckCard
-                ? ` · ${activeDeckCard.prompt}`
-                : mode === 'analyze' && positionAnalysis?.bestMove
-                  ? ` · best ${formatBestMove(currentFen, positionAnalysis.bestMove)}`
-                  : ''}
-            </span>
-            <button className={styles.navButton} onClick={() => jumpToIndex(historyIndex + 1)} disabled={historyIndex === moveHistory.length}>
-              Next
-            </button>
           </div>
 
           {serverError ? <p className={styles.error}>{serverError}</p> : null}
@@ -910,14 +1000,21 @@ export function ChessAnalysisLab() {
               <GameReviewPanel
                 activeReviewMoment={activeReviewMoment}
                 blackReviewName={blackReviewName}
+                chesscomUsername={chesscomUsername}
                 chartConfig={chartConfig}
                 chartData={chartData}
                 gameReview={gameReview}
                 goToReviewMoment={goToReviewMoment}
                 hasLoadedGame={hasLoadedGame}
                 historyIndex={historyIndex}
+                loadRecentGame={loadRecentChessGame}
                 moveHistoryLength={moveHistory.length}
+                onChesscomUsernameChange={setChesscomUsername}
+                onFetchRecentGames={() => void fetchRecentChessGames()}
                 openPgnDialog={() => setPgnDialogOpen(true)}
+                recentGames={recentChessGames}
+                recentGamesError={recentChessGamesError}
+                recentGamesLoading={recentChessGamesLoading}
                 reviewIndex={reviewIndex}
                 reviewMoments={reviewMoments}
                 reviewSide={reviewSide}
@@ -1038,6 +1135,41 @@ function isOpponentTurnFromFen(fen: string, side: 'white' | 'black') {
   const turn = fen.trim().split(/\s+/)[1];
   const playerTurn = turn === 'b' ? 'black' : 'white';
   return playerTurn !== side;
+}
+
+function normalizeDeckLoadError(message: string) {
+  if (
+    message.includes('deck_cards.source_type') ||
+    message.includes('deck_cards.validation_mode') ||
+    message.includes('deck_cards.reference_eval_cp') ||
+    message.includes('deck_cards.max_eval_loss_cp')
+  ) {
+    return 'Supabase deck schema is outdated. Recreate the canonical deck tables and reseed.';
+  }
+
+  return message;
+}
+
+function readCookie(name: string) {
+  if (typeof document === 'undefined') {
+    return '';
+  }
+
+  const prefix = `${name}=`;
+  const entry = document.cookie
+    .split(';')
+    .map(part => part.trim())
+    .find(part => part.startsWith(prefix));
+
+  return entry ? decodeURIComponent(entry.slice(prefix.length)) : '';
+}
+
+function writeCookie(name: string, value: string) {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
 }
 
 function FlipIcon() {
