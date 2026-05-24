@@ -111,17 +111,23 @@ export function ChessAnalysisLab() {
   const currentMoveList = useMemo(() => buildMoveUciHistory(currentMoves), [currentMoves]);
   const currentLineKey = currentMoveList.join(' ');
   const whiteAdvantage = getAdvantageMeter(positionAnalysis);
+  const isViewingDeckFailurePosition =
+    activeDeckCard != null &&
+    deckFeedback != null &&
+    !deckFeedback.correct &&
+    historyIndex === moveHistory.length &&
+    isOpponentTurnFromFen(currentFen, activeDeckCard.side);
   const bestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(positionAnalysis?.bestMove ?? null) : [];
   const deckAnswerArrow = deckFeedback && activeDeckCard ? getBestMoveArrow(activeDeckCard.answerUci) : [];
   const deckOpponentArrow =
-    activeDeckCard && deckFeedback && !deckFeedback.correct
+    isViewingDeckFailurePosition && !positionLoading && positionAnalysis?.bestMove
       ? getBestMoveArrow(positionAnalysis?.bestMove ?? null, '#ff456f')
       : [];
   const deckOpponentBestSan =
-    activeDeckCard && deckFeedback && !deckFeedback.correct && positionAnalysis?.bestMove
+    isViewingDeckFailurePosition && !positionLoading && positionAnalysis?.bestMove
       ? formatBestMove(currentFen, positionAnalysis.bestMove)
       : null;
-  const boardArrows = activeDeckCard ? [...deckAnswerArrow, ...deckOpponentArrow] : bestMoveArrow;
+  const boardArrows = activeDeckCard ? dedupeBoardArrows([...deckAnswerArrow, ...deckOpponentArrow]) : bestMoveArrow;
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
   const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
@@ -463,7 +469,9 @@ export function ChessAnalysisLab() {
       setMoveHistory(nextHistory);
       setHistoryIndex(nextHistory.length);
       setGame(nextGame);
+      setPositionAnalysis(null);
       setTimelineAnalyses([]);
+      setServerError('');
       setTimelineError('');
       setSelectedSquare(null);
       setSquareStyles({});
@@ -1014,6 +1022,22 @@ function buildDeckCardState(card: DeckCard, openingLines: OpeningSeedLine[]) {
       game: new Chess(card.fen),
     };
   }
+}
+
+function dedupeBoardArrows(arrows: Array<{ startSquare: string; endSquare: string; color: string }>) {
+  const unique = new Map<string, { startSquare: string; endSquare: string; color: string }>();
+
+  for (const arrow of arrows) {
+    unique.set(`${arrow.startSquare}-${arrow.endSquare}`, arrow);
+  }
+
+  return [...unique.values()];
+}
+
+function isOpponentTurnFromFen(fen: string, side: 'white' | 'black') {
+  const turn = fen.trim().split(/\s+/)[1];
+  const playerTurn = turn === 'b' ? 'black' : 'white';
+  return playerTurn !== side;
 }
 
 function FlipIcon() {
