@@ -274,9 +274,8 @@ export function GameReviewPanel({
 export function LearnPanel({
   currentFen,
   deckCards,
-  deckGenerationError,
-  deckGenerating,
-  generateCards,
+  deckLoadError,
+  deckLoading,
   nextDeckCard,
   openingLines,
   positionAnalysis,
@@ -284,9 +283,8 @@ export function LearnPanel({
 }: {
   currentFen: string;
   deckCards: DeckCard[];
-  deckGenerationError: string;
-  deckGenerating: boolean;
-  generateCards: (startAfterGenerate?: boolean) => void;
+  deckLoadError: string;
+  deckLoading: boolean;
   nextDeckCard: DeckCard | null;
   openingLines: OpeningSeedLine[];
   positionAnalysis: AnalysisResult | null;
@@ -301,7 +299,7 @@ export function LearnPanel({
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Learn punishments</h2>
-          <span className={styles.statusText}>{deckGenerating ? 'generating' : `${deckCards.length} punish cards`}</span>
+          <span className={styles.statusText}>{deckLoading ? 'loading' : `${deckCards.length} punish cards`}</span>
         </div>
         <div className={styles.deckStats}>
           <div>
@@ -317,10 +315,10 @@ export function LearnPanel({
             <span>black</span>
           </div>
         </div>
-        <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => (nextDeckCard ? startCard(nextDeckCard) : generateCards(true))} disabled={deckGenerating}>
-          {deckGenerating ? 'Generating' : nextDeckCard ? 'Start punish deck' : 'Generate punish deck'}
+        <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => startCard(nextDeckCard)} disabled={deckLoading || !nextDeckCard}>
+          {deckLoading ? 'Loading deck' : nextDeckCard ? 'Start punish deck' : 'No deck loaded'}
         </button>
-        {deckGenerationError ? <p className={styles.error}>{deckGenerationError}</p> : null}
+        {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
       </section>
       <section className={`${styles.card} ${styles.engineCard}`}>
         <div className={styles.panelHeader}>
@@ -371,24 +369,24 @@ export function LearnPanel({
 
 export function DeckPanel({
   activeCard,
+  deckCounterSan,
   deckCards,
-  deckGenerationError,
-  deckGenerating,
+  deckLoadError,
+  deckLoading,
   deckFeedback,
   deckStats,
-  generateCards,
   nextCard,
   onNext,
   onRepeat,
   startCard,
 }: {
   activeCard: DeckCard | null;
+  deckCounterSan: string | null;
   deckCards: DeckCard[];
-  deckGenerationError: string;
-  deckGenerating: boolean;
+  deckLoadError: string;
+  deckLoading: boolean;
   deckFeedback: DeckFeedback | null;
   deckStats: { correct: number; misses: number };
-  generateCards: (startAfterGenerate?: boolean) => void;
   nextCard: DeckCard | null;
   onNext: () => void;
   onRepeat: () => void;
@@ -402,7 +400,7 @@ export function DeckPanel({
       <section className={`${styles.card} ${styles.deckCard}`}>
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Deck</h2>
-          <span className={styles.statusText}>{cardLoaded ? 'loaded' : deckGenerating ? 'generating' : `${deckCards.length} punish cards`}</span>
+          <span className={styles.statusText}>{cardLoaded ? 'loaded' : deckLoading ? 'loading' : `${deckCards.length} punish cards`}</span>
         </div>
         {card ? (
           <>
@@ -424,6 +422,7 @@ export function DeckPanel({
                   played {deckFeedback.playedSan} · expected {deckFeedback.expectedSan}
                   {deckFeedback.scoreSwingCp != null ? ` · swing ${formatCpSwing(deckFeedback.scoreSwingCp)}` : ''}
                 </span>
+                {!deckFeedback.correct && deckCounterSan ? <span>counter {deckCounterSan}</span> : null}
               </div>
             ) : (
               <p className={styles.copy}>
@@ -444,11 +443,8 @@ export function DeckPanel({
           </>
         ) : (
           <>
-            <p className={styles.empty}>{deckGenerating ? 'Generating punish cards from Stockfish.' : 'No punish cards generated yet.'}</p>
-            <button className={`${styles.action} ${styles.primary}`} onClick={() => generateCards(true)} disabled={deckGenerating}>
-              {deckGenerating ? 'Generating' : 'Generate deck'}
-            </button>
-            {deckGenerationError ? <p className={styles.error}>{deckGenerationError}</p> : null}
+            <p className={styles.empty}>{deckLoading ? 'Loading punish deck from Supabase.' : 'No punish deck loaded.'}</p>
+            {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
           </>
         )}
       </section>

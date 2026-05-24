@@ -340,7 +340,7 @@ export function formatPrincipalVariation(fen: string, pv: string[]) {
   return sanMoves.length > 0 ? sanMoves.join(' ') : pv.join(' ');
 }
 
-export function getBestMoveArrow(bestMove: string | null) {
+export function getBestMoveArrow(bestMove: string | null, color = '#7c6dff') {
   if (!bestMove || bestMove.length < 4) {
     return [];
   }
@@ -349,7 +349,7 @@ export function getBestMoveArrow(bestMove: string | null) {
     {
       startSquare: bestMove.slice(0, 2),
       endSquare: bestMove.slice(2, 4),
-      color: '#7c6dff',
+      color,
     },
   ];
 }

@@ -46,14 +46,11 @@ import {
   type StoredMove,
 } from '@/lib/chess-analysis-client';
 import {
-  OPENING_REPERTOIRE,
-  buildPunishCardsFromAnalysis,
-  buildTrainingCandidates,
-  scoreToCpForSide,
   type DeckCard,
   type DeckFeedback,
-  type GeneratedDeckCard,
+  type OpeningSeedLine,
 } from '@/lib/opening-training';
+import { createClient as createSupabaseClient } from '@/utils/supabase/client';
 import styles from './chess-analysis-lab.module.css';
 
 const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
@@ -97,9 +94,10 @@ export function ChessAnalysisLab() {
   const [activeDeckCard, setActiveDeckCard] = useState<DeckCard | null>(null);
   const [deckFeedback, setDeckFeedback] = useState<DeckFeedback | null>(null);
   const [deckStats, setDeckStats] = useState({ correct: 0, misses: 0 });
-  const [generatedDeckCards, setGeneratedDeckCards] = useState<GeneratedDeckCard[]>([]);
-  const [deckGenerating, setDeckGenerating] = useState(false);
-  const [deckGenerationError, setDeckGenerationError] = useState('');
+  const [openingLines, setOpeningLines] = useState<OpeningSeedLine[]>([]);
+  const [deckCards, setDeckCards] = useState<DeckCard[]>([]);
+  const [deckLoading, setDeckLoading] = useState(true);
+  const [deckLoadError, setDeckLoadError] = useState('');
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
   const evalRailRef = useRef<HTMLDivElement | null>(null);
@@ -107,7 +105,6 @@ export function ChessAnalysisLab() {
   const timelineRequestIdRef = useRef(0);
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
-  const punishCardCacheRef = useRef(new Map<string, GeneratedDeckCard[]>());
 
   const currentFen = useMemo(() => game.fen(), [game]);
   const currentMoves = useMemo(() => moveHistory.slice(0, historyIndex), [historyIndex, moveHistory]);
@@ -116,12 +113,18 @@ export function ChessAnalysisLab() {
   const whiteAdvantage = getAdvantageMeter(positionAnalysis);
   const bestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(positionAnalysis?.bestMove ?? null) : [];
   const deckAnswerArrow = deckFeedback && activeDeckCard ? getBestMoveArrow(activeDeckCard.answerUci) : [];
-  const boardArrows = activeDeckCard ? deckAnswerArrow : bestMoveArrow;
+  const deckOpponentArrow =
+    activeDeckCard && deckFeedback && !deckFeedback.correct
+      ? getBestMoveArrow(positionAnalysis?.bestMove ?? null, '#ff456f')
+      : [];
+  const deckOpponentBestSan =
+    activeDeckCard && deckFeedback && !deckFeedback.correct && positionAnalysis?.bestMove
+      ? formatBestMove(currentFen, positionAnalysis.bestMove)
+      : null;
+  const boardArrows = activeDeckCard ? [...deckAnswerArrow, ...deckOpponentArrow] : bestMoveArrow;
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
   const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
-  const trainingCandidates = useMemo(() => buildTrainingCandidates(OPENING_REPERTOIRE), []);
-  const deckCards = generatedDeckCards.filter(card => card.kind === 'punish_mistake');
   const nextDeckCard = deckCards[deckIndex % Math.max(1, deckCards.length)] ?? null;
 
   const timelineReviews = useMemo(
@@ -242,6 +245,121 @@ export function ChessAnalysisLab() {
 
     observer.observe(stage);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDeck() {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+      if (!supabaseUrl || !publishableKey) {
+        if (!cancelled) {
+          setOpeningLines([]);
+          setDeckCards([]);
+          setDeckLoadError('Supabase deck is not configured in this deployment.');
+          setDeckLoading(false);
+        }
+        return;
+      }
+
+      setDeckLoading(true);
+      setDeckLoadError('');
+
+      try {
+        const supabase = createSupabaseClient();
+        const { data: activeDeck, error: deckError } = await supabase
+          .from('decks')
+          .select('id')
+          .eq('is_active', true)
+          .order('version', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (deckError) {
+          throw new Error(deckError.message);
+        }
+
+        if (!activeDeck) {
+          if (!cancelled) {
+            setOpeningLines([]);
+            setDeckCards([]);
+          }
+          return;
+        }
+
+        const [{ data: lines, error: linesError }, { data: cards, error: cardsError }] = await Promise.all([
+          supabase.from('opening_lines').select('id,name,eco,side,moves').eq('deck_id', activeDeck.id).order('id'),
+          supabase
+            .from('deck_cards')
+            .select(
+              'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,opponent_move_uci,opponent_move_san,score_swing_cp',
+            )
+            .eq('deck_id', activeDeck.id)
+            .eq('kind', 'punish_mistake')
+            .order('score_swing_cp', { ascending: false, nullsFirst: false }),
+        ]);
+
+        if (linesError) {
+          throw new Error(linesError.message);
+        }
+
+        if (cardsError) {
+          throw new Error(cardsError.message);
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setOpeningLines(
+          (lines ?? []).map(line => ({
+            id: String(line.id),
+            name: String(line.name),
+            eco: String(line.eco),
+            side: line.side === 'black' ? 'black' : 'white',
+            moves: Array.isArray(line.moves) ? line.moves.map(move => String(move)) : [],
+          })),
+        );
+        setDeckCards(
+          (cards ?? []).map(card => ({
+            id: String(card.id),
+            kind: 'punish_mistake',
+            lineId: card.line_id ? String(card.line_id) : '',
+            lineName: String(card.line_name),
+            eco: String(card.eco),
+            side: card.side === 'black' ? 'black' : 'white',
+            ply: Number(card.ply),
+            fen: String(card.fen),
+            answerUci: String(card.answer_uci),
+            answerSan: String(card.answer_san),
+            prompt: String(card.prompt),
+            context: String(card.context),
+            opponentMoveUci: card.opponent_move_uci ? String(card.opponent_move_uci) : undefined,
+            opponentMoveSan: card.opponent_move_san ? String(card.opponent_move_san) : undefined,
+            scoreSwingCp: typeof card.score_swing_cp === 'number' ? card.score_swing_cp : undefined,
+          })),
+        );
+        setDeckIndex(0);
+      } catch (error) {
+        if (!cancelled) {
+          setOpeningLines([]);
+          setDeckCards([]);
+          setDeckLoadError(error instanceof Error ? error.message : 'Unable to load Supabase deck.');
+        }
+      } finally {
+        if (!cancelled) {
+          setDeckLoading(false);
+        }
+      }
+    }
+
+    void loadDeck();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -451,10 +569,12 @@ export function ChessAnalysisLab() {
       return;
     }
 
-    setInitialFen(card.fen);
-    setMoveHistory([]);
-    setHistoryIndex(0);
-    setGame(new Chess(card.fen));
+    const deckState = buildDeckCardState(card, openingLines);
+
+    setInitialFen(deckState.initialFen);
+    setMoveHistory(deckState.moveHistory);
+    setHistoryIndex(deckState.historyIndex);
+    setGame(deckState.game);
     setMode('deck');
     setActiveDeckCard(card);
     setDeckFeedback(null);
@@ -535,78 +655,6 @@ export function ChessAnalysisLab() {
     }
   }
 
-  async function generatePunishDeck(startAfterGenerate = false) {
-    if (deckGenerating) {
-      return;
-    }
-
-    const thresholdCp = 60;
-    const generatedCards: GeneratedDeckCard[] = [];
-
-    setDeckGenerating(true);
-    setDeckGenerationError('');
-
-    try {
-      for (const candidate of trainingCandidates) {
-        const punishCacheKey = `${candidate.fen}|${candidate.side}|${thresholdCp}`;
-        const cachedCards = punishCardCacheRef.current.get(punishCacheKey);
-
-        if (cachedCards) {
-          generatedCards.push(...cachedCards);
-          continue;
-        }
-
-        const baseAnalysis = await fetchCachedPositionAnalysis(`punish-base|${candidate.fen}`, candidate.fen, []);
-        const baseScoreCp = scoreToCpForSide(baseAnalysis.whitePerspective, candidate.side);
-
-        if (baseScoreCp == null) {
-          punishCardCacheRef.current.set(punishCacheKey, []);
-          continue;
-        }
-
-        const opponentReplies = [];
-
-        for (const line of baseAnalysis.lines.slice(0, POSITION_MULTIPV)) {
-          if (!line.bestMove) {
-            continue;
-          }
-
-          const replyFen = getFenAfterMove(candidate.fen, line.bestMove);
-
-          if (!replyFen) {
-            continue;
-          }
-
-          const analysisAfterReply = await fetchCachedPositionAnalysis(`punish-after|${replyFen}`, replyFen, []);
-          opponentReplies.push({ line, analysisAfterReply });
-        }
-
-        const cards = buildPunishCardsFromAnalysis(
-          {
-            ...candidate,
-            scoreCp: baseScoreCp,
-          },
-          opponentReplies,
-          thresholdCp,
-        );
-
-        punishCardCacheRef.current.set(punishCacheKey, cards);
-        generatedCards.push(...cards);
-      }
-
-      setGeneratedDeckCards(generatedCards);
-      setDeckIndex(0);
-
-      if (startAfterGenerate && generatedCards[0]) {
-        loadDeckCard(generatedCards[0]);
-      }
-    } catch (error) {
-      setDeckGenerationError(error instanceof Error ? error.message : 'Unable to generate punish cards.');
-    } finally {
-      setDeckGenerating(false);
-    }
-  }
-
   async function loadPgnText(name: string, content: string) {
     try {
       const loadedGame = new Chess();
@@ -634,7 +682,6 @@ export function ChessAnalysisLab() {
       setPgnDialogOpen(false);
       positionCacheRef.current.clear();
       positionInFlightRef.current.clear();
-      punishCardCacheRef.current.clear();
       clearSelection();
 
       await runTimelineAnalysis(nextHistory, nextInitialFen);
@@ -689,11 +736,8 @@ export function ChessAnalysisLab() {
     setTimelineError('');
     setActiveDeckCard(null);
     setDeckFeedback(null);
-    setGeneratedDeckCards([]);
-    setDeckGenerationError('');
     positionCacheRef.current.clear();
     positionInFlightRef.current.clear();
-    punishCardCacheRef.current.clear();
     clearSelection();
   }
 
@@ -881,23 +925,22 @@ export function ChessAnalysisLab() {
               <LearnPanel
                 currentFen={currentFen}
                 deckCards={deckCards}
-                deckGenerationError={deckGenerationError}
-                deckGenerating={deckGenerating}
-                generateCards={generatePunishDeck}
+                deckLoadError={deckLoadError}
+                deckLoading={deckLoading}
                 nextDeckCard={nextDeckCard}
-                openingLines={OPENING_REPERTOIRE}
+                openingLines={openingLines}
                 positionAnalysis={positionAnalysis}
                 startCard={loadDeckCard}
               />
             ) : (
               <DeckPanel
                 activeCard={activeDeckCard}
+                deckCounterSan={deckOpponentBestSan}
                 deckCards={deckCards}
-                deckGenerationError={deckGenerationError}
-                deckGenerating={deckGenerating}
+                deckLoadError={deckLoadError}
+                deckLoading={deckLoading}
                 deckFeedback={deckFeedback}
                 deckStats={deckStats}
-                generateCards={generatePunishDeck}
                 nextCard={nextDeckCard}
                 onNext={advanceDeckCard}
                 onRepeat={repeatDeckCard}
@@ -926,18 +969,50 @@ function getPositionCacheKey(initialFen: string | null, moves: string[]) {
   return `${initialFen ?? 'startpos'}|${moves.join(' ')}`;
 }
 
-function getFenAfterMove(fen: string, moveUci: string) {
-  const chess = new Chess(fen);
+function buildDeckCardState(card: DeckCard, openingLines: OpeningSeedLine[]) {
+  const line = openingLines.find(candidate => candidate.id === card.lineId);
+
+  if (!line || !card.opponentMoveUci) {
+    return {
+      initialFen: card.fen,
+      moveHistory: [] as StoredMove[],
+      historyIndex: 0,
+      game: new Chess(card.fen),
+    };
+  }
 
   try {
-    chess.move({
-      from: moveUci.slice(0, 2),
-      to: moveUci.slice(2, 4),
-      ...(moveUci[4] ? { promotion: moveUci[4] } : {}),
+    const baseGame = new Chess();
+
+    for (const san of line.moves.slice(0, Math.max(0, card.ply - 1))) {
+      baseGame.move(san);
+    }
+
+    const initialFen = baseGame.fen();
+    const replayGame = new Chess(initialFen);
+    const move = replayGame.move({
+      from: card.opponentMoveUci.slice(0, 2),
+      to: card.opponentMoveUci.slice(2, 4),
+      ...(card.opponentMoveUci[4] ? { promotion: card.opponentMoveUci[4] } : {}),
     });
-    return chess.fen();
+
+    if (!move) {
+      throw new Error('Invalid opponent move');
+    }
+
+    return {
+      initialFen,
+      moveHistory: [toStoredMove(move)],
+      historyIndex: 1,
+      game: replayGame,
+    };
   } catch {
-    return null;
+    return {
+      initialFen: card.fen,
+      moveHistory: [] as StoredMove[],
+      historyIndex: 0,
+      game: new Chess(card.fen),
+    };
   }
 }
 
