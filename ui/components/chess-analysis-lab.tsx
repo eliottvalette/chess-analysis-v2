@@ -16,11 +16,9 @@ import {
 
 import type { AnalysisResult } from '@/lib/analysis-types';
 import {
-  AnalyzePanel,
-  DeckPanel,
-  GameReviewPanel,
-  LearnPanel,
   PgnImportDialog,
+  ReviewPanel,
+  TrainPanel,
   getModeLabel,
   type WorkspaceMode,
 } from '@/components/chess-lab-panels';
@@ -45,6 +43,7 @@ import {
   type ReviewSide,
   type StoredMove,
 } from '@/lib/chess-analysis-client';
+import { CHESS_SOUND_URLS, getMoveSoundSequence, type ChessSoundKey } from '@/lib/chess-sounds';
 import {
   buildPendingDeckFeedback,
   finalizeDeckFeedback,
@@ -91,7 +90,7 @@ export function ChessAnalysisLab() {
   const [squareStyles, setSquareStyles] = useState<Record<string, CSSProperties>>({});
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [showArrow, setShowArrow] = useState(true);
-  const [mode, setMode] = useState<WorkspaceMode>('analyze');
+  const [mode, setMode] = useState<WorkspaceMode>('review');
   const [reviewSide, setReviewSide] = useState<ReviewSide>('both');
   const [reviewIndex, setReviewIndex] = useState(0);
   const [metadata, setMetadata] = useState<GameMetadata | null>(null);
@@ -125,6 +124,7 @@ export function ChessAnalysisLab() {
   const positionRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
   const suppressSpaceKeyUpRef = useRef(false);
+  const soundPlayersRef = useRef<Partial<Record<ChessSoundKey, HTMLAudioElement>>>({});
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
 
@@ -166,6 +166,27 @@ export function ChessAnalysisLab() {
     () => (viewedDeckCard ? getDeckProgressEntry(deckProgress, viewedDeckCard.id) : null),
     [deckProgress, viewedDeckCard],
   );
+  const reviewPlayerSide = useMemo(() => {
+    if (!metadata) {
+      return null;
+    }
+
+    const username = chesscomUsername.trim().toLowerCase();
+
+    if (!username) {
+      return null;
+    }
+
+    if (metadata.whitePlayer.trim().toLowerCase() === username) {
+      return 'white' as const;
+    }
+
+    if (metadata.blackPlayer.trim().toLowerCase() === username) {
+      return 'black' as const;
+    }
+
+    return null;
+  }, [chesscomUsername, metadata]);
 
   const timelineReviews = useMemo(
     () => classifyTimelineMoves(moveHistory, preMoveAnalyses, timelineAnalyses, initialFen, metadata),
@@ -364,6 +385,22 @@ export function ChessAnalysisLab() {
     setChesscomUsername(savedUsername);
     void fetchRecentChessGames(savedUsername, savedTimeClass === 'bullet' || savedTimeClass === 'blitz' || savedTimeClass === 'rapid' ? savedTimeClass : 'blitz');
   }, [fetchRecentChessGames]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const players = Object.fromEntries(
+      Object.entries(CHESS_SOUND_URLS).map(([key, url]) => {
+        const audio = new Audio(url);
+        audio.preload = 'auto';
+        return [key, audio];
+      }),
+    ) as Partial<Record<ChessSoundKey, HTMLAudioElement>>;
+
+    soundPlayersRef.current = players;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -629,6 +666,15 @@ export function ChessAnalysisLab() {
       setTimelineError('');
       setSelectedSquare(null);
       setSquareStyles({});
+      playSoundSequence(
+        getMoveSoundSequence({
+          move,
+          isSelfMove: true,
+          isCheck: nextGame.isCheck(),
+          isCheckmate: nextGame.isCheckmate(),
+          isGameOver: nextGame.isGameOver(),
+        }),
+      );
 
       if (activeDeckCard && deckFeedback == null) {
         const nextFeedback = buildPendingDeckFeedback(activeDeckCard, move.uci, move.san);
@@ -657,6 +703,7 @@ export function ChessAnalysisLab() {
       })();
 
       if (!move) {
+        playSound('illegal');
         return false;
       }
 
@@ -686,7 +733,10 @@ export function ChessAnalysisLab() {
     setMoveHistory(deckState.moveHistory);
     setHistoryIndex(deckState.historyIndex);
     setGame(deckState.game);
-    setMode('deck');
+    setMetadata(null);
+    setFileName('');
+    setPreMoveAnalyses([]);
+    setMode('train');
     setActiveDeckCard(card);
     setDeckFeedback(null);
     setOrientation(card.side);
@@ -695,6 +745,7 @@ export function ChessAnalysisLab() {
     setTimelineAnalyses([]);
     setTimelineError('');
     clearSelection();
+    playSound('game-start');
   }, [openingLines]);
 
   const advanceDeckCard = useCallback(() => {
@@ -742,7 +793,7 @@ export function ChessAnalysisLab() {
         event.stopPropagation();
         suppressSpaceKeyUpRef.current = true;
 
-        if (mode === 'deck') {
+        if (mode === 'train' && activeDeckCard) {
           if (activeDeckCard && deckFeedback && !deckFeedback.pending) {
             advanceDeckCard();
           }
@@ -772,6 +823,28 @@ export function ChessAnalysisLab() {
         const boundedIndex = Math.max(0, Math.min(historyIndex + 1, moveHistory.length));
         const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
+        if (boundedIndex === historyIndex + 1) {
+          const replayedMove = moveHistory[historyIndex];
+
+          if (replayedMove) {
+            const playerSide = activeDeckCard?.side ?? reviewPlayerSide;
+            const isSelfMove =
+              playerSide == null
+                ? orientation === 'white'
+                : (playerSide === 'white' && replayedMove.color === 'w') || (playerSide === 'black' && replayedMove.color === 'b');
+
+            playSoundSequence(
+              getMoveSoundSequence({
+                move: replayedMove,
+                isSelfMove,
+                isCheck: nextGame.isCheck(),
+                isCheckmate: nextGame.isCheckmate(),
+                isGameOver: nextGame.isGameOver(),
+              }),
+            );
+          }
+        }
+
         setHistoryIndex(boundedIndex);
         setGame(nextGame);
         clearSelection();
@@ -794,13 +867,13 @@ export function ChessAnalysisLab() {
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('keyup', onKeyUp, true);
     };
-  }, [activeDeckCard, advanceDeckCard, deckFeedback, historyIndex, initialFen, mode, moveHistory, pgnDialogOpen, positionAnalysis?.bestMove, tryMove]);
+  }, [activeDeckCard, advanceDeckCard, deckFeedback, historyIndex, initialFen, mode, moveHistory, orientation, pgnDialogOpen, positionAnalysis?.bestMove, reviewPlayerSide, tryMove]);
 
   function goToReviewMoment(index: number) {
     const boundedIndex = Math.max(0, Math.min(index, Math.max(0, reviewMoments.length - 1)));
     const moment = reviewMoments[boundedIndex] ?? null;
 
-    setMode('gameReview');
+    setMode('review');
     setReviewIndex(boundedIndex);
 
     if (moment) {
@@ -866,7 +939,7 @@ export function ChessAnalysisLab() {
       setGame(nextGame);
       setMetadata(extractMetadataFromGame(loadedGame));
       setFileName(name);
-      setMode('gameReview');
+      setMode('review');
       setReviewIndex(0);
       setActiveDeckCard(null);
       setDeckFeedback(null);
@@ -882,6 +955,7 @@ export function ChessAnalysisLab() {
       positionCacheRef.current.clear();
       positionInFlightRef.current.clear();
       clearSelection();
+      playSound('game-start');
 
       await runTimelineAnalysis(nextHistory, nextInitialFen);
     } catch (error) {
@@ -928,7 +1002,7 @@ export function ChessAnalysisLab() {
     setHistoryIndex(0);
     setMetadata(null);
     setFileName('');
-    setMode('analyze');
+    setMode('review');
     setReviewIndex(0);
     setPositionAnalysis(null);
     setPreMoveAnalyses([]);
@@ -942,6 +1016,25 @@ export function ChessAnalysisLab() {
     positionCacheRef.current.clear();
     positionInFlightRef.current.clear();
     clearSelection();
+    playSound('game-start');
+  }
+
+  function playSound(soundKey: ChessSoundKey) {
+    const base = soundPlayersRef.current[soundKey];
+
+    if (!base) {
+      return;
+    }
+
+    const player = base.cloneNode(true) as HTMLAudioElement;
+    player.currentTime = 0;
+    void player.play().catch(() => undefined);
+  }
+
+  function playSoundSequence(soundKeys: ChessSoundKey[]) {
+    soundKeys.forEach((soundKey, index) => {
+      window.setTimeout(() => playSound(soundKey), index * 110);
+    });
   }
 
   return (
@@ -1057,18 +1150,11 @@ export function ChessAnalysisLab() {
 
         <aside className={`${styles.panel} ${styles.contextPanel}`}>
           <section className={styles.modeTabs}>
-            {(['analyze', 'gameReview', 'learn', 'deck'] satisfies WorkspaceMode[]).map(nextMode => (
+            {(['review', 'train'] satisfies WorkspaceMode[]).map(nextMode => (
               <button
                 className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
                 key={nextMode}
-                onClick={() => {
-                  if (nextMode === 'gameReview' && reviewMoments.length > 0) {
-                    goToReviewMoment(reviewIndex);
-                    return;
-                  }
-
-                  setMode(nextMode);
-                }}
+                onClick={() => setMode(nextMode)}
               >
                 {getModeLabel(nextMode)}
               </button>
@@ -1076,28 +1162,44 @@ export function ChessAnalysisLab() {
           </section>
 
           <div className={styles.panelScroll}>
-            {mode === 'analyze' ? (
-              <AnalyzePanel
-                currentFen={currentFen}
-                movePairs={movePairs}
-                historyIndex={historyIndex}
-                jumpToIndex={jumpToIndex}
-                positionAnalysis={positionAnalysis}
-                positionLoading={positionLoading}
-              />
-            ) : mode === 'gameReview' ? (
-              <GameReviewPanel
+            {mode === 'review' ? (
+              <ReviewPanel
                 activeReviewMoment={activeReviewMoment}
                 blackReviewName={blackReviewName}
                 chesscomUsername={chesscomUsername}
                 chartConfig={chartConfig}
                 chartData={chartData}
+                currentFen={currentFen}
                 gameReview={gameReview}
                 goToReviewMoment={goToReviewMoment}
                 hasLoadedGame={hasLoadedGame}
                 historyIndex={historyIndex}
+                jumpToIndex={jumpToIndex}
                 loadRecentGame={loadRecentChessGame}
+                metadata={metadata}
                 moveHistoryLength={moveHistory.length}
+                movePairs={movePairs}
+                onBack={() => {
+                  positionRequestIdRef.current += 1;
+                  timelineRequestIdRef.current += 1;
+                  setGame(new Chess());
+                  setInitialFen(null);
+                  setMoveHistory([]);
+                  setHistoryIndex(0);
+                  setMetadata(null);
+                  setFileName('');
+                  setReviewIndex(0);
+                  setPositionAnalysis(null);
+                  setPreMoveAnalyses([]);
+                  setTimelineAnalyses([]);
+                  setPositionLoading(false);
+                  setTimelineLoading(false);
+                  setServerError('');
+                  setTimelineError('');
+                  positionCacheRef.current.clear();
+                  positionInFlightRef.current.clear();
+                  clearSelection();
+                }}
                 onChesscomUsernameChange={setChesscomUsername}
                 onRecentGameTimeClassChange={timeClass => {
                   setRecentGameTimeClass(timeClass);
@@ -1109,6 +1211,8 @@ export function ChessAnalysisLab() {
                 }}
                 onFetchRecentGames={() => void fetchRecentChessGames()}
                 openPgnDialog={() => setPgnDialogOpen(true)}
+                positionAnalysis={positionAnalysis}
+                positionLoading={positionLoading}
                 recentGames={recentChessGames}
                 recentGamesError={recentChessGamesError}
                 recentGamesLoading={recentChessGamesLoading}
@@ -1124,31 +1228,45 @@ export function ChessAnalysisLab() {
                 timelineLoading={timelineLoading}
                 whiteReviewName={whiteReviewName}
               />
-            ) : mode === 'learn' ? (
-              <LearnPanel
-                currentFen={currentFen}
-                deckCards={deckCards}
-                deckLoadError={deckLoadError}
-                deckLoading={deckLoading}
-                nextDeckCard={nextDeckCard}
-                openingLines={openingLines}
-                positionAnalysis={positionAnalysis}
-                startCard={loadDeckCard}
-              />
             ) : (
-              <DeckPanel
+              <TrainPanel
                 activeCard={activeDeckCard}
                 activeCardProgress={activeDeckProgress}
-                deckCounterSan={deckOpponentBestSan}
+                currentFen={currentFen}
                 deckCards={deckCards}
+                deckCounterSan={deckOpponentBestSan}
                 deckLoadError={deckLoadError}
                 deckLoading={deckLoading}
                 deckFeedback={deckFeedback}
                 deckStats={deckStats}
                 nextCard={nextDeckCard}
+                onBack={() => {
+                  positionRequestIdRef.current += 1;
+                  timelineRequestIdRef.current += 1;
+                  setGame(new Chess());
+                  setInitialFen(null);
+                  setMoveHistory([]);
+                  setHistoryIndex(0);
+                  setMetadata(null);
+                  setFileName('');
+                  setPositionAnalysis(null);
+                  setPreMoveAnalyses([]);
+                  setTimelineAnalyses([]);
+                  setPositionLoading(false);
+                  setTimelineLoading(false);
+                  setServerError('');
+                  setTimelineError('');
+                  setActiveDeckCard(null);
+                  setDeckFeedback(null);
+                  positionCacheRef.current.clear();
+                  positionInFlightRef.current.clear();
+                  clearSelection();
+                }}
                 onNext={advanceDeckCard}
                 onRepeat={repeatDeckCard}
                 onToggleIgnore={toggleActiveDeckCardIgnored}
+                openingLines={openingLines}
+                positionAnalysis={positionAnalysis}
                 startCard={loadDeckCard}
               />
             )}

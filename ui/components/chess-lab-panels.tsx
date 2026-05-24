@@ -13,6 +13,7 @@ import {
   formatPrincipalVariation,
   reviewCategoryMeta,
   reviewCategoryOrder,
+  type GameMetadata,
   type ReviewSide,
   type StoredMove,
 } from '@/lib/chess-analysis-client';
@@ -21,19 +22,287 @@ import type { DeckProgressEntry, DeckProgressSummary } from '@/lib/deck-progress
 import type { DeckCard, DeckFeedback, OpeningSeedLine } from '@/lib/opening-training';
 import styles from './chess-analysis-lab.module.css';
 
-export type WorkspaceMode = 'analyze' | 'gameReview' | 'learn' | 'deck';
+export type WorkspaceMode = 'review' | 'train';
 
 export function getModeLabel(mode: WorkspaceMode) {
   switch (mode) {
-    case 'analyze':
-      return 'Analyze';
-    case 'gameReview':
-      return 'Game';
-    case 'learn':
-      return 'Learn';
-    case 'deck':
-      return 'Deck';
+    case 'review':
+      return 'Review';
+    case 'train':
+      return 'Train';
   }
+}
+
+export function ReviewPanel({
+  activeReviewMoment,
+  blackReviewName,
+  chesscomUsername,
+  chartConfig,
+  chartData,
+  currentFen,
+  gameReview,
+  goToReviewMoment,
+  hasLoadedGame,
+  historyIndex,
+  jumpToIndex,
+  loadRecentGame,
+  metadata,
+  moveHistoryLength,
+  movePairs,
+  onBack,
+  onChesscomUsernameChange,
+  onRecentGameTimeClassChange,
+  onFetchRecentGames,
+  openPgnDialog,
+  positionAnalysis,
+  positionLoading,
+  recentGames,
+  recentGamesError,
+  recentGamesLoading,
+  recentGameTimeClass,
+  reviewIndex,
+  reviewMoments,
+  reviewSide,
+  setReviewIndex,
+  setReviewSide,
+  setShowArrow,
+  timelineAnalysesLength,
+  timelineError,
+  timelineLoading,
+  whiteReviewName,
+}: {
+  activeReviewMoment: ReturnType<typeof filterReviewMoments>[number] | null;
+  blackReviewName: string;
+  chesscomUsername: string;
+  chartConfig: ReturnType<typeof buildChartOptions>;
+  chartData: ChartData<'line', number[], number>;
+  currentFen: string;
+  gameReview: ReturnType<typeof buildGameReview>;
+  goToReviewMoment: (index: number) => void;
+  hasLoadedGame: boolean;
+  historyIndex: number;
+  jumpToIndex: (index: number) => void;
+  loadRecentGame: (game: ChessComRecentGameSummary) => void;
+  metadata: GameMetadata | null;
+  moveHistoryLength: number;
+  movePairs: Array<{
+    moveNumber: number;
+    white: StoredMove | null;
+    whitePly: number;
+    black: StoredMove | null;
+    blackPly: number;
+  }>;
+  onBack: () => void;
+  onChesscomUsernameChange: (value: string) => void;
+  onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
+  onFetchRecentGames: () => void;
+  openPgnDialog: () => void;
+  positionAnalysis: AnalysisResult | null;
+  positionLoading: boolean;
+  recentGames: ChessComRecentGameSummary[];
+  recentGamesError: string;
+  recentGamesLoading: boolean;
+  recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
+  reviewIndex: number;
+  reviewMoments: ReturnType<typeof filterReviewMoments>;
+  reviewSide: ReviewSide;
+  setReviewIndex: (index: number) => void;
+  setReviewSide: (side: ReviewSide) => void;
+  setShowArrow: (value: boolean) => void;
+  timelineAnalysesLength: number;
+  timelineError: string;
+  timelineLoading: boolean;
+  whiteReviewName: string;
+}) {
+  if (!hasLoadedGame) {
+    return (
+      <GameReviewPanel
+        activeReviewMoment={activeReviewMoment}
+        blackReviewName={blackReviewName}
+        chesscomUsername={chesscomUsername}
+        chartConfig={chartConfig}
+        chartData={chartData}
+        gameReview={gameReview}
+        goToReviewMoment={goToReviewMoment}
+        hasLoadedGame={false}
+        historyIndex={historyIndex}
+        loadRecentGame={loadRecentGame}
+        moveHistoryLength={moveHistoryLength}
+        onChesscomUsernameChange={onChesscomUsernameChange}
+        onRecentGameTimeClassChange={onRecentGameTimeClassChange}
+        onFetchRecentGames={onFetchRecentGames}
+        openPgnDialog={openPgnDialog}
+        recentGames={recentGames}
+        recentGamesError={recentGamesError}
+        recentGamesLoading={recentGamesLoading}
+        recentGameTimeClass={recentGameTimeClass}
+        reviewIndex={reviewIndex}
+        reviewMoments={reviewMoments}
+        reviewSide={reviewSide}
+        setReviewIndex={setReviewIndex}
+        setReviewSide={setReviewSide}
+        setShowArrow={setShowArrow}
+        timelineAnalysesLength={timelineAnalysesLength}
+        timelineError={timelineError}
+        timelineLoading={timelineLoading}
+        whiteReviewName={whiteReviewName}
+      />
+    );
+  }
+
+  return (
+    <>
+      <section className={`${styles.card} ${styles.stateHeaderCard}`}>
+        <button className={styles.action} onClick={onBack}>
+          Back
+        </button>
+        <div className={styles.stateHeaderMain}>
+          <strong>
+            {whiteReviewName} vs {blackReviewName}
+          </strong>
+          <span className={styles.support}>
+            {metadata?.date ?? 'Loaded game'}
+            {metadata?.eco ? ` · ${metadata.eco}` : ''}
+            {metadata?.result ? ` · ${metadata.result}` : ''}
+          </span>
+        </div>
+        <div className={styles.stateHeaderMeta}>
+          <strong>{Math.ceil(moveHistoryLength / 2)}</strong>
+          <span>moves</span>
+        </div>
+      </section>
+      <AnalyzePanel
+        currentFen={currentFen}
+        historyIndex={historyIndex}
+        jumpToIndex={jumpToIndex}
+        movePairs={movePairs}
+        positionAnalysis={positionAnalysis}
+        positionLoading={positionLoading}
+      />
+      <GameReviewPanel
+        activeReviewMoment={activeReviewMoment}
+        blackReviewName={blackReviewName}
+        chesscomUsername={chesscomUsername}
+        chartConfig={chartConfig}
+        chartData={chartData}
+        gameReview={gameReview}
+        goToReviewMoment={goToReviewMoment}
+        hasLoadedGame={true}
+        historyIndex={historyIndex}
+        loadRecentGame={loadRecentGame}
+        moveHistoryLength={moveHistoryLength}
+        onChesscomUsernameChange={onChesscomUsernameChange}
+        onRecentGameTimeClassChange={onRecentGameTimeClassChange}
+        onFetchRecentGames={onFetchRecentGames}
+        openPgnDialog={openPgnDialog}
+        recentGames={recentGames}
+        recentGamesError={recentGamesError}
+        recentGamesLoading={recentGamesLoading}
+        recentGameTimeClass={recentGameTimeClass}
+        reviewIndex={reviewIndex}
+        reviewMoments={reviewMoments}
+        reviewSide={reviewSide}
+        setReviewIndex={setReviewIndex}
+        setReviewSide={setReviewSide}
+        setShowArrow={setShowArrow}
+        timelineAnalysesLength={timelineAnalysesLength}
+        timelineError={timelineError}
+        timelineLoading={timelineLoading}
+        whiteReviewName={whiteReviewName}
+      />
+    </>
+  );
+}
+
+export function TrainPanel({
+  activeCard,
+  activeCardProgress,
+  currentFen,
+  deckCards,
+  deckCounterSan,
+  deckLoadError,
+  deckLoading,
+  deckFeedback,
+  deckStats,
+  nextCard,
+  onBack,
+  onNext,
+  onRepeat,
+  onToggleIgnore,
+  openingLines,
+  positionAnalysis,
+  startCard,
+}: {
+  activeCard: DeckCard | null;
+  activeCardProgress: DeckProgressEntry | null;
+  currentFen: string;
+  deckCards: DeckCard[];
+  deckCounterSan: string | null;
+  deckLoadError: string;
+  deckLoading: boolean;
+  deckFeedback: DeckFeedback | null;
+  deckStats: DeckProgressSummary;
+  nextCard: DeckCard | null;
+  onBack: () => void;
+  onNext: () => void;
+  onRepeat: () => void;
+  onToggleIgnore: () => void;
+  openingLines: OpeningSeedLine[];
+  positionAnalysis: AnalysisResult | null;
+  startCard: (card: DeckCard | null) => void;
+}) {
+  if (!activeCard) {
+    return (
+      <LearnPanel
+        currentFen={currentFen}
+        deckCards={deckCards}
+        deckLoadError={deckLoadError}
+        deckLoading={deckLoading}
+        nextDeckCard={nextCard}
+        openingLines={openingLines}
+        positionAnalysis={positionAnalysis}
+        startCard={startCard}
+      />
+    );
+  }
+
+  return (
+    <>
+      <section className={`${styles.card} ${styles.stateHeaderCard}`}>
+        <button className={styles.action} onClick={onBack}>
+          Back
+        </button>
+        <div className={styles.stateHeaderMain}>
+          <strong>
+            {activeCard.eco} · {activeCard.lineName}
+          </strong>
+          <span className={styles.support}>
+            {activeCard.side} repertoire
+            {activeCardProgress?.ignored ? ' · ignored' : ''}
+          </span>
+        </div>
+        <div className={styles.stateHeaderMeta}>
+          <strong>{deckStats.seen}</strong>
+          <span>seen</span>
+        </div>
+      </section>
+      <DeckPanel
+        activeCard={activeCard}
+        activeCardProgress={activeCardProgress}
+        deckCounterSan={deckCounterSan}
+        deckCards={deckCards}
+        deckLoadError={deckLoadError}
+        deckLoading={deckLoading}
+        deckFeedback={deckFeedback}
+        deckStats={deckStats}
+        nextCard={nextCard}
+        onNext={onNext}
+        onRepeat={onRepeat}
+        onToggleIgnore={onToggleIgnore}
+        startCard={startCard}
+      />
+    </>
+  );
 }
 
 export function AnalyzePanel({

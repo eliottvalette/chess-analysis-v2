@@ -75,6 +75,27 @@
   padding-right: 3px;
 }
 
+.panelScroll,
+.engineLines,
+.moveList,
+.momentList,
+.categoryGrid,
+.openingList,
+.pgnInput {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.panelScroll::-webkit-scrollbar,
+.engineLines::-webkit-scrollbar,
+.moveList::-webkit-scrollbar,
+.momentList::-webkit-scrollbar,
+.categoryGrid::-webkit-scrollbar,
+.openingList::-webkit-scrollbar,
+.pgnInput::-webkit-scrollbar {
+  display: none;
+}
+
 .topBar,
 .panelHeader,
 .engineLineHead,
@@ -543,7 +564,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 34svh;
+  flex: 1 1 auto;
   padding-right: 4px;
 }
 
@@ -601,6 +622,52 @@
 .openingBox strong {
   font-size: 15px;
   color: var(--text);
+}
+
+.stateHeaderCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.stateHeaderMain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.stateHeaderMain strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stateHeaderMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  text-align: right;
+}
+
+.stateHeaderMeta strong {
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.stateHeaderMeta span {
+  color: var(--text-soft);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .metaLabel {
@@ -759,7 +826,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 260px;
+  flex: 1 1 auto;
   padding-right: 3px;
 }
 
@@ -776,25 +843,28 @@
 }
 
 .emptyStateCard {
+  flex: 0 0 auto;
   gap: 18px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .dataCard {
+  flex: 0 0 auto;
   gap: 10px;
 }
 
 .openingListCard,
 .deckCard {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 13px;
 }
 
 .openingList {
   min-height: 0;
-  max-height: 330px;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 8px;
   overflow: auto;
@@ -1219,6 +1289,16 @@
   .pgnControls,
   .reviewNav {
     grid-template-columns: 1fr;
+  }
+
+  .stateHeaderCard {
+    grid-template-columns: 1fr;
+  }
+
+  .stateHeaderMain,
+  .stateHeaderMeta {
+    align-items: flex-start;
+    text-align: left;
   }
 
   .deckStats {
