@@ -10,6 +10,7 @@
     "lint": "eslint",
     "test": "node --test",
     "chesscom:recent": "node scripts/chesscom/fetch-recent-games.mjs",
+    "chesscom:build:deck": "node scripts/chesscom/build-recent-blitz-deck.mjs",
     "supabase:migrate": "node scripts/supabase/migrate.mjs",
     "supabase:seed": "node scripts/supabase/seed-decks.mjs",
     "supabase:seed:cards": "node scripts/supabase/seed-punish-cards.mjs",
