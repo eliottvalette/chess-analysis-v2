@@ -70,15 +70,43 @@ create table if not exists public.user_card_attempts (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.training_profiles (
+  id uuid primary key default gen_random_uuid(),
+  username text not null unique,
+  password_hash text not null,
+  session_token_hash text,
+  session_created_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.training_card_progress (
+  profile_id uuid not null references public.training_profiles(id) on delete cascade,
+  card_id text not null references public.deck_cards(id) on delete cascade,
+  seen_count integer not null default 0,
+  correct_count integer not null default 0,
+  miss_count integer not null default 0,
+  streak integer not null default 0,
+  ignored boolean not null default false,
+  last_outcome text check (last_outcome in ('correct', 'miss')),
+  last_seen_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (profile_id, card_id)
+);
+
 create index if not exists deck_cards_deck_id_idx on public.deck_cards(deck_id);
 create index if not exists deck_cards_line_id_idx on public.deck_cards(line_id);
 create index if not exists user_card_attempts_user_id_created_at_idx on public.user_card_attempts(user_id, created_at desc);
+create index if not exists training_card_progress_profile_id_idx on public.training_card_progress(profile_id);
 
 alter table public.decks enable row level security;
 alter table public.opening_lines enable row level security;
 alter table public.deck_cards enable row level security;
 alter table public.user_card_progress enable row level security;
 alter table public.user_card_attempts enable row level security;
+alter table public.training_profiles enable row level security;
+alter table public.training_card_progress enable row level security;
 
 drop policy if exists "Decks are readable" on public.decks;
 create policy "Decks are readable"

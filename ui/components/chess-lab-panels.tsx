@@ -301,6 +301,54 @@ export function TrainPanel({
   );
 }
 
+export function TrainingProfilePanel({
+  error,
+  loading,
+  password,
+  setPassword,
+  setUsername,
+  username,
+  onSubmit,
+}: {
+  error: string;
+  loading: boolean;
+  password: string;
+  setPassword: (value: string) => void;
+  setUsername: (value: string) => void;
+  username: string;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className={`${styles.card} ${styles.emptyStateCard}`}>
+      <div className={styles.panelHeader}>
+        <h2 className={styles.sectionTitle}>Training Profile</h2>
+        <span className={styles.statusText}>{loading ? 'syncing' : 'required'}</span>
+      </div>
+      <p className={styles.copy}>Create or reopen a lightweight training profile. Progress syncs through a persistent browser cookie.</p>
+      <div className={styles.profileForm}>
+        <input
+          className={styles.inlineInput}
+          value={username}
+          onChange={event => setUsername(event.target.value)}
+          placeholder="username"
+          spellCheck={false}
+        />
+        <input
+          className={styles.inlineInput}
+          value={password}
+          onChange={event => setPassword(event.target.value)}
+          placeholder="password"
+          type="password"
+        />
+        <button className={`${styles.action} ${styles.primary}`} onClick={onSubmit} disabled={loading || username.trim().length < 3 || password.length < 4}>
+          {loading ? 'Opening' : 'Open profile'}
+        </button>
+      </div>
+      {error ? <p className={styles.error}>{error}</p> : null}
+    </section>
+  );
+}
+
 export function AnalyzePanel({
   currentFen,
   historyIndex,
@@ -443,7 +491,7 @@ export function GameReviewPanel({
               className={styles.inlineInput}
               value={chesscomUsername}
               onChange={event => onChesscomUsernameChange(event.target.value)}
-              placeholder="losvalettos"
+              placeholder=""
               spellCheck={false}
             />
             <button className={`${styles.action} ${styles.primary}`} onClick={onFetchRecentGames} disabled={!chesscomUsername.trim() || recentGamesLoading}>

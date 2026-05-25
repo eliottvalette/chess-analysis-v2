@@ -19,6 +19,7 @@ import {
   PgnImportDialog,
   ReviewPanel,
   TrainPanel,
+  TrainingProfilePanel,
   getModeLabel,
   type WorkspaceMode,
 } from '@/components/chess-lab-panels';
@@ -81,6 +82,11 @@ const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
 const CHESSCOM_TIME_CLASS_COOKIE = 'chesscom_time_class';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
 
+type TrainingProfile = {
+  id: string;
+  username: string;
+};
+
 export function ChessAnalysisLab() {
   const [game, setGame] = useState(() => new Chess());
   const [initialFen, setInitialFen] = useState<string | null>(null);
@@ -120,6 +126,11 @@ export function ChessAnalysisLab() {
   const [recentChessGames, setRecentChessGames] = useState<ChessComRecentGameSummary[]>([]);
   const [recentChessGamesLoading, setRecentChessGamesLoading] = useState(false);
   const [recentChessGamesError, setRecentChessGamesError] = useState('');
+  const [trainingProfile, setTrainingProfile] = useState<TrainingProfile | null>(null);
+  const [trainingProfileLoading, setTrainingProfileLoading] = useState(false);
+  const [trainingProfileError, setTrainingProfileError] = useState('');
+  const [trainingUsername, setTrainingUsername] = useState('');
+  const [trainingPassword, setTrainingPassword] = useState('');
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
   const evalRailRef = useRef<HTMLDivElement | null>(null);
@@ -129,6 +140,8 @@ export function ChessAnalysisLab() {
   const soundPlayersRef = useRef<Partial<Record<ChessSoundKey, HTMLAudioElement>>>({});
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
+  const progressHydratedRef = useRef(false);
+  const progressSyncTimerRef = useRef<number | null>(null);
 
   const currentFen = useMemo(() => game.fen(), [game]);
   const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
@@ -372,6 +385,43 @@ export function ChessAnalysisLab() {
     [chesscomUsername, recentGameTimeClass],
   );
 
+  const saveTrainingProgress = useCallback(async (progress: DeckProgressMap) => {
+    try {
+      await fetch('/api/training-progress', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ progress }),
+      });
+    } catch {
+      // Local storage remains the fallback when server sync is unavailable.
+    }
+  }, []);
+
+  const hydrateTrainingProgress = useCallback(
+    async (options: { saveMerged: boolean }) => {
+      try {
+        const response = await fetch('/api/training-progress');
+        const payload = (await response.json()) as { progress?: DeckProgressMap };
+        const serverProgress = response.ok && payload.progress ? payload.progress : {};
+        let mergedProgress: DeckProgressMap | null = null;
+
+        setDeckProgress(current => {
+          mergedProgress = mergeDeckProgress(serverProgress, current);
+          return mergedProgress;
+        });
+
+        progressHydratedRef.current = true;
+
+        if (options.saveMerged && mergedProgress) {
+          await saveTrainingProgress(mergedProgress);
+        }
+      } catch {
+        progressHydratedRef.current = true;
+      }
+    },
+    [saveTrainingProgress],
+  );
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -400,6 +450,54 @@ export function ChessAnalysisLab() {
   }, [deckProgress]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadTrainingProfile() {
+      try {
+        const response = await fetch('/api/training-profile');
+        const payload = (await response.json()) as { profile?: TrainingProfile | null };
+
+        if (cancelled || !payload.profile) {
+          progressHydratedRef.current = true;
+          return;
+        }
+
+        setTrainingProfile(payload.profile);
+        setTrainingUsername(payload.profile.username);
+        await hydrateTrainingProgress({ saveMerged: false });
+      } catch {
+        progressHydratedRef.current = true;
+      }
+    }
+
+    void loadTrainingProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateTrainingProgress]);
+
+  useEffect(() => {
+    if (!trainingProfile || !progressHydratedRef.current) {
+      return undefined;
+    }
+
+    if (progressSyncTimerRef.current != null) {
+      window.clearTimeout(progressSyncTimerRef.current);
+    }
+
+    progressSyncTimerRef.current = window.setTimeout(() => {
+      void saveTrainingProgress(deckProgress);
+    }, 450);
+
+    return () => {
+      if (progressSyncTimerRef.current != null) {
+        window.clearTimeout(progressSyncTimerRef.current);
+      }
+    };
+  }, [deckProgress, saveTrainingProgress, trainingProfile]);
+
+  useEffect(() => {
     const savedUsername = readCookie(CHESSCOM_USERNAME_COOKIE);
     const savedTimeClass = readCookie(CHESSCOM_TIME_CLASS_COOKIE);
 
@@ -412,6 +510,7 @@ export function ChessAnalysisLab() {
     }
 
     setChesscomUsername(savedUsername);
+    setTrainingUsername(value => value || savedUsername);
     void fetchRecentChessGames(savedUsername, savedTimeClass === 'bullet' || savedTimeClass === 'blitz' || savedTimeClass === 'rapid' ? savedTimeClass : 'blitz');
   }, [fetchRecentChessGames]);
 
@@ -1102,6 +1201,33 @@ export function ChessAnalysisLab() {
     await loadPgnText(gameSummary.link, gameSummary.pgn, gameSummary.playerColor === 'black' ? 'black' : 'white');
   }
 
+  async function openTrainingProfile() {
+    setTrainingProfileLoading(true);
+    setTrainingProfileError('');
+
+    try {
+      const response = await fetch('/api/training-profile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: trainingUsername, password: trainingPassword }),
+      });
+      const payload = (await response.json()) as { profile?: TrainingProfile; error?: string };
+
+      if (!response.ok || !payload.profile) {
+        throw new Error(payload.error ?? 'Unable to open training profile.');
+      }
+
+      setTrainingProfile(payload.profile);
+      setTrainingUsername(payload.profile.username);
+      setTrainingPassword('');
+      await hydrateTrainingProgress({ saveMerged: true });
+    } catch (error) {
+      setTrainingProfileError(error instanceof Error ? error.message : 'Unable to open training profile.');
+    } finally {
+      setTrainingProfileLoading(false);
+    }
+  }
+
   function resetWorkspace() {
     positionRequestIdRef.current += 1;
     timelineRequestIdRef.current += 1;
@@ -1323,6 +1449,16 @@ export function ChessAnalysisLab() {
                 timelineLoading={timelineLoading}
                 whiteReviewName={whiteReviewName}
               />
+            ) : !trainingProfile ? (
+              <TrainingProfilePanel
+                error={trainingProfileError}
+                loading={trainingProfileLoading}
+                password={trainingPassword}
+                setPassword={setTrainingPassword}
+                setUsername={setTrainingUsername}
+                username={trainingUsername}
+                onSubmit={() => void openTrainingProfile()}
+              />
             ) : (
               <TrainPanel
                 activeCard={activeDeckCard}
@@ -1386,6 +1522,35 @@ export function ChessAnalysisLab() {
 
 function getPositionCacheKey(initialFen: string | null, moves: string[]) {
   return `${initialFen ?? 'startpos'}|${moves.join(' ')}`;
+}
+
+function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckProgressMap) {
+  const merged: DeckProgressMap = { ...serverProgress };
+
+  for (const [cardId, localEntry] of Object.entries(localProgress)) {
+    const serverEntry = serverProgress[cardId];
+
+    if (!serverEntry) {
+      merged[cardId] = localEntry;
+      continue;
+    }
+
+    const localSeen = Date.parse(localEntry.lastSeenAt ?? '');
+    const serverSeen = Date.parse(serverEntry.lastSeenAt ?? '');
+    const localIsLater = Number.isFinite(localSeen) && (!Number.isFinite(serverSeen) || localSeen >= serverSeen);
+
+    merged[cardId] = {
+      seenCount: Math.max(serverEntry.seenCount, localEntry.seenCount),
+      correctCount: Math.max(serverEntry.correctCount, localEntry.correctCount),
+      missCount: Math.max(serverEntry.missCount, localEntry.missCount),
+      streak: localIsLater ? localEntry.streak : serverEntry.streak,
+      ignored: serverEntry.ignored || localEntry.ignored,
+      lastOutcome: localIsLater ? localEntry.lastOutcome : serverEntry.lastOutcome,
+      lastSeenAt: localIsLater ? localEntry.lastSeenAt : serverEntry.lastSeenAt,
+    };
+  }
+
+  return merged;
 }
 
 function buildDeckCardState(card: DeckCard, openingLines: OpeningSeedLine[]) {

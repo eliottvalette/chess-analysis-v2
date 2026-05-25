@@ -889,6 +889,12 @@
   gap: 8px;
 }
 
+.profileForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 .reviewImportActions {
   display: flex;
   justify-content: flex-start;
@@ -1486,6 +1492,7 @@
 
   .accuracyGrid,
   .pgnControls,
+  .profileForm,
   .reviewNav {
     grid-template-columns: 1fr;
   }
