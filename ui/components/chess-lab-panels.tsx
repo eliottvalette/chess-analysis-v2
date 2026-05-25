@@ -270,10 +270,10 @@ export function TrainPanel({
         </button>
         <div className={styles.stateHeaderMain}>
           <strong>
-            {activeCard.eco} · {activeCard.lineName}
+            Learning card
           </strong>
           <span className={styles.support}>
-            {activeCard.side} repertoire
+            {formatCardLineTitle(activeCard)} · {activeCard.side}
             {activeCardProgress?.ignored ? ' · ignored' : ''}
           </span>
         </div>
@@ -709,6 +709,18 @@ function capitalizeRecentGameTimeClass(value: 'bullet' | 'blitz' | 'rapid') {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function formatCardLineTitle(card: DeckCard) {
+  return card.lineName.includes(card.eco) ? card.lineName : `${card.eco} · ${card.lineName}`;
+}
+
+function formatLearningPrompt(card: DeckCard) {
+  if (card.opponentMoveSan) {
+    return `Opponent just played ${card.opponentMoveSan}. Find the best reply.`;
+  }
+
+  return 'Find the best move in this position.';
+}
+
 export function LearnPanel({
   currentFen,
   deckCards,
@@ -737,7 +749,7 @@ export function LearnPanel({
     <>
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
         <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Punish Deck</h2>
+          <h2 className={styles.sectionTitle}>Learning</h2>
           <span className={styles.statusText}>{deckLoading ? 'loading' : hasDeckCards ? `${deckCards.length} cards` : 'empty'}</span>
         </div>
         {hasDeckCards ? (
@@ -757,7 +769,7 @@ export function LearnPanel({
               </div>
             </div>
             <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => startCard(nextDeckCard)} disabled={deckLoading || !nextDeckCard}>
-              {deckLoading ? 'Loading deck' : 'Start punish deck'}
+              {deckLoading ? 'Loading' : 'Start learning'}
             </button>
           </>
         ) : (
@@ -765,8 +777,8 @@ export function LearnPanel({
             {deckLoading
               ? 'Loading deck.'
               : deckLoadError
-                ? 'Deck setup is broken. Recreate the canonical Supabase schema and seed cards.'
-                : 'No punish cards have been seeded yet.'}
+                ? 'Learning setup is broken. Recreate the canonical Supabase schema and seed cards.'
+                : 'No learning cards have been seeded yet.'}
           </p>
         )}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
@@ -796,7 +808,7 @@ export function LearnPanel({
       {hasDeckCards ? (
         <section className={`${styles.card} ${styles.openingListCard}`}>
           <div className={styles.panelHeader}>
-            <h2 className={styles.sectionTitle}>Punishable replies</h2>
+            <h2 className={styles.sectionTitle}>Lines</h2>
             <span className={styles.statusText}>eval-graded deck</span>
           </div>
           <div className={styles.openingList}>
@@ -857,31 +869,17 @@ export function DeckPanel({
     <>
       <section className={`${styles.card} ${styles.deckCard}`}>
         <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Deck</h2>
-          <span className={styles.statusText}>{cardLoaded ? 'loaded' : deckLoading ? 'loading' : `${deckCards.length} punish cards`}</span>
+          <h2 className={styles.sectionTitle}>Learning</h2>
+          <span className={styles.statusText}>{cardLoaded ? 'active' : deckLoading ? 'loading' : `${deckCards.length} cards`}</span>
         </div>
         {card ? (
           <>
             <div className={styles.deckPrompt}>
-              <span className={styles.metaLabel}>
-                {card.eco} · {card.lineName}
-              </span>
-              <strong>{card.prompt}</strong>
-              <p>{card.context}</p>
-              <div className={styles.deckLoadState}>
-                <span>{cardLoaded ? 'Card loaded on board' : 'Ready to load'}</span>
-                <strong>{card.side} repertoire</strong>
-              </div>
-              {activeCardProgress ? (
-                <p className={styles.support}>
-                  seen {activeCardProgress.seenCount} · hit {activeCardProgress.correctCount} · miss {activeCardProgress.missCount} · streak{' '}
-                  {activeCardProgress.streak}
-                  {activeCardProgress.ignored ? ' · ignored' : ''}
-                </p>
-              ) : null}
+              <span className={styles.metaLabel}>Find the punishment</span>
+              <strong>{formatLearningPrompt(card)}</strong>
             </div>
             {deckFeedback ? (
-              <div className={`${styles.feedbackBox} ${deckFeedback.pending || deckFeedback.correct ? styles.feedbackGood : styles.feedbackBad}`}>
+              <div className={`${styles.feedbackBox} ${deckFeedback.pending ? styles.feedbackPending : deckFeedback.correct ? styles.feedbackGood : styles.feedbackBad}`}>
                 <strong>
                   {deckFeedback.pending
                     ? 'Checking eval'
@@ -910,7 +908,7 @@ export function DeckPanel({
             )}
             <div className={styles.deckActions}>
               <button className={`${styles.action} ${styles.primary}`} onClick={() => startCard(card)} disabled={cardLoaded && !deckFeedback}>
-                {cardLoaded ? 'Loaded' : 'Load card'}
+                {cardLoaded ? 'Loaded' : 'Load'}
               </button>
               <button className={styles.action} onClick={onRepeat} disabled={!activeCard}>
                 Repeat
@@ -925,7 +923,7 @@ export function DeckPanel({
           </>
         ) : (
           <>
-            <p className={styles.empty}>{deckLoading ? 'Loading punish deck from Supabase.' : 'No punish deck loaded.'}</p>
+            <p className={styles.empty}>{deckLoading ? 'Loading learning cards from Supabase.' : 'No learning cards loaded.'}</p>
             {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
           </>
         )}

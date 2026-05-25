@@ -13,6 +13,7 @@ const DEFAULT_ACCEPTABLE_LOSS_CP = 35;
 const DEFAULT_DEPTH = 12;
 const DEFAULT_MOVETIME_MS = 250;
 const DEFAULT_MULTIPV = 1;
+const DEFAULT_MAX_PLY = 16;
 const DECK_ID = 'recent-blitz-punishments-v1';
 const execFileAsync = promisify(execFile);
 
@@ -36,6 +37,7 @@ async function main() {
   const thresholdCp = Number(env.CHESSCOM_DECK_THRESHOLD_CP || DEFAULT_THRESHOLD_CP);
   const acceptableLossCp = Number(env.CHESSCOM_DECK_ACCEPTABLE_LOSS_CP || DEFAULT_ACCEPTABLE_LOSS_CP);
   const multipv = Number(env.CHESSCOM_DECK_MULTIPV || DEFAULT_MULTIPV);
+  const maxPly = Number(env.CHESSCOM_DECK_MAX_PLY || options.maxPly || DEFAULT_MAX_PLY);
 
   await assertAnalyzeApi(analyzeBaseUrl);
 
@@ -72,6 +74,7 @@ async function main() {
         multipv,
         thresholdCp,
         acceptableLossCp,
+        maxPly,
       })),
     );
   }
@@ -95,6 +98,7 @@ async function main() {
     }
 
     await upsert(supabase, 'decks', deck, 'id');
+    await deleteExistingDeckRows(supabase, DECK_ID);
     await upsert(supabase, 'opening_lines', openingLines, 'id');
     await upsert(supabase, 'deck_cards', cards, 'id');
   }
@@ -106,6 +110,7 @@ async function main() {
         analyzed_games: games.length,
         threshold_cp: thresholdCp,
         acceptable_loss_cp: acceptableLossCp,
+        max_ply: maxPly,
         depth,
         movetime_ms: movetimeMs,
         cards: cards.length,
@@ -132,6 +137,7 @@ function parseArgs(args) {
     timeClass: DEFAULT_TIME_CLASS,
     writeSupabase: false,
     setActive: false,
+    maxPly: DEFAULT_MAX_PLY,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -163,6 +169,12 @@ function parseArgs(args) {
 
     if (arg === '--set-active') {
       options.setActive = true;
+      continue;
+    }
+
+    if (arg === '--max-ply' && value) {
+      options.maxPly = Math.max(1, Number.parseInt(value, 10) || DEFAULT_MAX_PLY);
+      index += 1;
     }
   }
 
@@ -199,6 +211,7 @@ async function buildCardsForGame({
   multipv,
   thresholdCp,
   acceptableLossCp,
+  maxPly,
 }) {
   const cards = [];
   const playerColor = inferPlayerColor(game, username);
@@ -212,6 +225,10 @@ async function buildCardsForGame({
   const moveHistory = [];
 
   for (const [index, move] of verboseMoves.entries()) {
+    if (index + 1 > maxPly) {
+      break;
+    }
+
     const sideToMove = chess.turn() === 'w' ? 'white' : 'black';
     const fenBefore = chess.fen();
     const moveUci = `${move.from}${move.to}${move.promotion ?? ''}`;
@@ -369,5 +386,19 @@ async function upsert(supabase, table, rows, onConflict) {
 
   if (error) {
     throw new Error(`${table}: ${error.message}`);
+  }
+}
+
+async function deleteExistingDeckRows(supabase, deckId) {
+  const { error: cardsError } = await supabase.from('deck_cards').delete().eq('deck_id', deckId);
+
+  if (cardsError) {
+    throw new Error(`delete deck_cards: ${cardsError.message}`);
+  }
+
+  const { error: linesError } = await supabase.from('opening_lines').delete().eq('deck_id', deckId);
+
+  if (linesError) {
+    throw new Error(`delete opening_lines: ${linesError.message}`);
   }
 }

@@ -579,6 +579,7 @@ export function ChessAnalysisLab() {
             .select(DECK_CARD_SELECT)
             .eq('deck_id', activeDeck.id)
             .eq('kind', 'punish_mistake')
+            .lte('ply', 24)
             .order('score_swing_cp', { ascending: false, nullsFirst: false }),
         ]);
 

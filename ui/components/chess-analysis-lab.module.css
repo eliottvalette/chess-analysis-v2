@@ -740,26 +740,33 @@
 
 .stateHeaderCard {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) minmax(42px, auto);
   align-items: center;
-  gap: 12px;
-  min-height: 88px;
-  padding: 18px;
+  gap: 10px;
+  min-height: 72px;
+  padding: 12px;
 }
 
 .stateHeaderMain {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  text-align: center;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
 }
 
 .stateHeaderMain strong {
   min-width: 0;
   color: var(--text);
   font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stateHeaderMain .support {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -775,7 +782,7 @@
 
 .stateHeaderMeta strong {
   color: var(--text);
-  font-size: 22px;
+  font-size: 19px;
   line-height: 1;
 }
 
@@ -1055,7 +1062,8 @@
 
 .dataCard {
   flex: 0 0 auto;
-  gap: 10px;
+  gap: 8px;
+  padding: 10px;
 }
 
 .openingListCard,
@@ -1063,7 +1071,9 @@
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 13px;
+  gap: 10px;
+  min-height: 0;
+  max-height: calc(100svh - 250px);
 }
 
 .openingList {
@@ -1177,55 +1187,60 @@
 .deckStats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
 }
 
 .deckStats div {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 5px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(9, 14, 23, 0.42);
-  padding: 10px;
+  padding: 7px 8px;
 }
 
 .deckStats strong {
   color: var(--text);
-  font-size: 22px;
+  font-size: 15px;
   line-height: 1;
 }
 
 .deckStats span {
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 
 .deckPrompt {
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(9, 14, 23, 0.42);
-  padding: 12px;
+  padding: 10px;
 }
 
 .deckPrompt strong {
   color: var(--text);
-  font-size: 17px;
-  line-height: 1.25;
+  font-size: 15px;
+  line-height: 1.22;
 }
 
 .deckPrompt p {
+  max-height: min(18svh, 132px);
   margin: 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden auto;
   overflow-wrap: anywhere;
 }
 
@@ -1235,7 +1250,7 @@
   justify-content: space-between;
   gap: 10px;
   border-top: 1px solid var(--border-soft);
-  padding-top: 9px;
+  padding-top: 7px;
   color: var(--text-muted);
   font-size: 12px;
 }
@@ -1252,9 +1267,9 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  border-radius: 10px;
-  padding: 12px;
-  font-size: 13px;
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 12px;
 }
 
 .feedbackBox strong {
@@ -1270,6 +1285,11 @@
   background: rgba(56, 148, 115, 0.14);
 }
 
+.feedbackPending {
+  border: 1px solid rgba(152, 184, 255, 0.3);
+  background: rgba(9, 14, 23, 0.42);
+}
+
 .feedbackBad {
   border: 1px solid rgba(255, 141, 145, 0.42);
   background: rgba(180, 58, 66, 0.16);
@@ -1277,8 +1297,14 @@
 
 .deckActions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.deckActions .action {
+  min-height: 38px;
+  padding: 0 8px;
+  font-size: 11px;
 }
 
 .monoLine {
@@ -1368,11 +1394,11 @@
   }
 
   .deckStats div {
-    padding: 9px;
+    padding: 7px 8px;
   }
 
   .deckStats strong {
-    font-size: 20px;
+    font-size: 15px;
   }
 }
 
@@ -1521,7 +1547,7 @@
   }
 
   .deckStats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .fullWidthAction {
