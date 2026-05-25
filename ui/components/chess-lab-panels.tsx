@@ -505,13 +505,17 @@ export function GameReviewPanel({
         <div className={styles.accuracyGrid}>
           <div className={styles.accuracyCard}>
             <span className={styles.metaLabel}>{whiteReviewName}</span>
-            <strong>{formatNullable(gameReview.accuracy.white)}%</strong>
-            <span className={styles.statusText}>rating {formatNullable(gameReview.gameRating.white)}</span>
+            <strong>
+              {formatNullable(gameReview.accuracy.white)}%
+              <span>r{formatNullable(gameReview.gameRating.white)}</span>
+            </strong>
           </div>
           <div className={styles.accuracyCard}>
             <span className={styles.metaLabel}>{blackReviewName}</span>
-            <strong>{formatNullable(gameReview.accuracy.black)}%</strong>
-            <span className={styles.statusText}>rating {formatNullable(gameReview.gameRating.black)}</span>
+            <strong>
+              {formatNullable(gameReview.accuracy.black)}%
+              <span>r{formatNullable(gameReview.gameRating.black)}</span>
+            </strong>
           </div>
         </div>
         <div className={styles.openingBox}>
@@ -527,7 +531,7 @@ export function GameReviewPanel({
             <span className={styles.metaLabel}>Move quality</span>
             <span className={styles.statusText}>both players</span>
           </div>
-          <div className={styles.categoryGrid}>
+          <div className={styles.qualityTable}>
             {reviewCategoryOrder.map(category => {
               const meta = reviewCategoryMeta[category];
               const whiteCount = gameReview.counts.white[category];
@@ -538,7 +542,7 @@ export function GameReviewPanel({
               }
 
               return (
-                <div className={styles.categoryTile} key={category} style={{ ['--review-color' as string]: meta.color }}>
+                <div className={styles.qualityRow} key={category} style={{ ['--review-color' as string]: meta.color }}>
                   <span>{meta.label}</span>
                   <strong>{whiteCount + blackCount}</strong>
                 </div>

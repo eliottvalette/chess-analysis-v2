@@ -871,6 +871,9 @@ export function ChessAnalysisLab() {
       }
 
       if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        event.stopPropagation();
+
         const boundedIndex = Math.max(0, Math.min(historyIndex - 1, moveHistory.length));
         const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
@@ -895,6 +898,9 @@ export function ChessAnalysisLab() {
       }
 
       if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        event.stopPropagation();
+
         const boundedIndex = Math.max(0, Math.min(historyIndex + 1, moveHistory.length));
         const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
@@ -919,6 +925,32 @@ export function ChessAnalysisLab() {
             );
           }
         }
+
+        setHistoryIndex(boundedIndex);
+        clearVariation();
+        setGame(nextGame);
+        clearSelection();
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const boundedIndex = moveHistory.length;
+        const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
+
+        setHistoryIndex(boundedIndex);
+        clearVariation();
+        setGame(nextGame);
+        clearSelection();
+      }
+
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const boundedIndex = moveHistory.length > 0 ? 1 : 0;
+        const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
         setHistoryIndex(boundedIndex);
         clearVariation();
@@ -1147,13 +1179,16 @@ export function ChessAnalysisLab() {
 
             <div className={styles.boardStage} ref={boardStageRef}>
               <div className={styles.evalRail} ref={evalRailRef}>
-                <div className={styles.evalShell} style={{ ['--white-share' as string]: `${whiteAdvantage}%` }}>
+                <div
+                  className={`${styles.evalShell} ${orientation === 'black' ? styles.evalShellFlipped : ''}`}
+                  style={{ ['--white-share' as string]: `${whiteAdvantage}%` }}
+                >
                   <div className={styles.evalBlack} />
                   <div className={styles.evalWhite} />
                   <div className={styles.evalDivider} />
                 </div>
                 <div className={styles.evalCopy}>
-                  <span className={styles.score}>{formatScoreLabel(positionAnalysis)}</span>
+                  <span className={styles.score}>{formatScoreLabel(positionAnalysis, orientation)}</span>
                 </div>
               </div>
 

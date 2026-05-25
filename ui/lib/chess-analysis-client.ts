@@ -295,22 +295,25 @@ export function extractMetadataFromGame(game: Chess) {
   } satisfies GameMetadata;
 }
 
-export function formatScoreLabel(analysis: AnalysisResult | null) {
+export function formatScoreLabel(analysis: AnalysisResult | null, perspective: 'white' | 'black' = 'white') {
   const score = analysis?.whitePerspective;
 
   if (!score) {
     return '...';
   }
 
+  const perspectiveMultiplier = perspective === 'white' ? 1 : -1;
+  const perspectiveValue = score.value * perspectiveMultiplier;
+
   if (score.type === 'mate') {
     if (analysis?.score?.type === 'mate' && analysis.score.value === 0) {
-      return score.value >= 0 ? '#0' : '-#0';
+      return perspectiveValue >= 0 ? '#0' : '-#0';
     }
 
-    return score.value > 0 ? `#${score.value}` : `-#${Math.abs(score.value)}`;
+    return perspectiveValue > 0 ? `#${perspectiveValue}` : `-#${Math.abs(perspectiveValue)}`;
   }
 
-  const pawns = score.value / 100;
+  const pawns = perspectiveValue / 100;
   return `${pawns > 0 ? '+' : ''}${pawns.toFixed(2)}`;
 }
 
