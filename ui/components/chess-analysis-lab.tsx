@@ -41,6 +41,7 @@ import {
   toChartScore,
   toStoredMove,
   type GameMetadata,
+  type ReviewCategory,
   type ReviewSide,
   type StoredMove,
 } from '@/lib/chess-analysis-client';
@@ -75,7 +76,29 @@ const POSITION_DEPTH = 24;
 const POSITION_MOVETIME_MS = 500;
 const TIMELINE_MOVETIME_MS = 80;
 const POSITION_MULTIPV = 3;
-const PRELOAD_AHEAD = 1;
+const PRELOAD_AHEAD = 15;
+const LAST_MOVE_STYLE = {
+  backgroundColor: 'rgba(84, 173, 255, 0.26)',
+  boxShadow: 'inset 0 0 0 2px rgba(181, 222, 255, 0.42)',
+} satisfies CSSProperties;
+const REVIEW_MOVE_STYLES: Partial<Record<ReviewCategory, CSSProperties>> = {
+  best: {
+    backgroundColor: 'rgba(184, 247, 161, 0.46)',
+    boxShadow: 'inset 0 0 0 2px rgba(216, 255, 201, 0.58)',
+  },
+  book: {
+    backgroundColor: 'rgba(176, 129, 76, 0.42)',
+    boxShadow: 'inset 0 0 0 2px rgba(231, 199, 143, 0.52)',
+  },
+  mistake: {
+    backgroundColor: 'rgba(255, 149, 74, 0.44)',
+    boxShadow: 'inset 0 0 0 2px rgba(255, 198, 139, 0.54)',
+  },
+  blunder: {
+    backgroundColor: 'rgba(255, 68, 68, 0.48)',
+    boxShadow: 'inset 0 0 0 2px rgba(255, 162, 162, 0.58)',
+  },
+};
 const DECK_CARD_SELECT =
   'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp';
 const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
@@ -245,6 +268,23 @@ export function ChessAnalysisLab() {
     }),
     [timelineAnalyses, timelineReviews],
   );
+  const boardSquareStyles = useMemo(() => {
+    const nextStyles: Record<string, CSSProperties> = {};
+    const lastMove = currentMoves[currentMoves.length - 1];
+    const reviewCategory =
+      hasLoadedGame && variationBaseIndex == null && historyIndex > 0 ? timelineReviews[historyIndex - 1]?.category : null;
+    const lastMoveStyle = reviewCategory ? (REVIEW_MOVE_STYLES[reviewCategory] ?? LAST_MOVE_STYLE) : LAST_MOVE_STYLE;
+
+    if (lastMove) {
+      nextStyles[lastMove.from] = lastMoveStyle;
+      nextStyles[lastMove.to] = lastMoveStyle;
+    }
+
+    return {
+      ...nextStyles,
+      ...squareStyles,
+    };
+  }, [currentMoves, hasLoadedGame, historyIndex, squareStyles, timelineReviews, variationBaseIndex]);
 
   const movePairs = useMemo(() => {
     const pairs: Array<{
@@ -1354,7 +1394,7 @@ export function ChessAnalysisLab() {
                       highlightMoves(square);
                     },
                     onSquareRightClick: () => clearSelection(),
-                    squareStyles,
+                    squareStyles: boardSquareStyles,
                     arrows: boardArrows,
                     lightSquareStyle: { backgroundColor: '#728092' },
                     darkSquareStyle: { backgroundColor: '#253140' },

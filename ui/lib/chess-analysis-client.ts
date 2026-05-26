@@ -348,7 +348,7 @@ export function formatPrincipalVariation(fen: string, pv: string[]) {
   return sanMoves.length > 0 ? sanMoves.join(' ') : pv.join(' ');
 }
 
-export function getBestMoveArrow(bestMove: string | null, color = '#7c6dff') {
+export function getBestMoveArrow(bestMove: string | null, color = '#b8f7a1') {
   if (!bestMove || bestMove.length < 4) {
     return [];
   }
