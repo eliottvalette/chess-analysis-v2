@@ -52,14 +52,17 @@ export async function fetchRecentGames({
   username,
   archives,
   count,
+  offset = 0,
   timeClass,
 }: {
   username: string;
   archives: string[];
   count: number;
+  offset?: number;
   timeClass: string;
 }) {
   const selected: RawChessComGame[] = [];
+  const needed = count + offset;
 
   for (const archiveUrl of [...archives].reverse()) {
     const response = await fetchJson(archiveUrl);
@@ -72,14 +75,14 @@ export async function fetchRecentGames({
 
     selected.push(...matchingGames);
 
-    if (selected.length >= count) {
+    if (selected.length >= needed) {
       break;
     }
   }
 
   return selected
     .sort((left, right) => Number(right.end_time ?? 0) - Number(left.end_time ?? 0))
-    .slice(0, count);
+    .slice(offset, offset + count);
 }
 
 export function toGameSummary(game: RawChessComGame, username: string): ChessComRecentGameSummary {

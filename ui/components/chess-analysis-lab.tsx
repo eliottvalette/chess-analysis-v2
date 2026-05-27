@@ -102,6 +102,7 @@ const REVIEW_MOVE_STYLES: Partial<Record<ReviewCategory, CSSProperties>> = {
 const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
 const CHESSCOM_TIME_CLASS_COOKIE = 'chesscom_time_class';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
+const RECENT_GAMES_PAGE_SIZE = 10;
 
 type TrainingProfile = {
   id: string;
@@ -146,6 +147,8 @@ export function ChessAnalysisLab() {
   const [recentGameTimeClass, setRecentGameTimeClass] = useState<'bullet' | 'blitz' | 'rapid'>('blitz');
   const [recentChessGames, setRecentChessGames] = useState<ChessComRecentGameSummary[]>([]);
   const [recentChessGamesLoading, setRecentChessGamesLoading] = useState(false);
+  const [recentChessGamesHasMore, setRecentChessGamesHasMore] = useState(false);
+  const [recentChessGamesNextOffset, setRecentChessGamesNextOffset] = useState(0);
   const [recentChessGamesError, setRecentChessGamesError] = useState('');
   const [trainingProfile, setTrainingProfile] = useState<TrainingProfile | null>(null);
   const [trainingProfileLoading, setTrainingProfileLoading] = useState(false);
@@ -387,15 +390,18 @@ export function ChessAnalysisLab() {
 
     observer.observe(stage);
     return () => observer.disconnect();
-  }, [trainingProfile?.id]);
+  }, []);
 
   const fetchRecentChessGames = useCallback(
-    async (usernameOverride?: string, timeClassOverride?: 'bullet' | 'blitz' | 'rapid') => {
+    async (usernameOverride?: string, timeClassOverride?: 'bullet' | 'blitz' | 'rapid', append = false) => {
       const username = (usernameOverride ?? chesscomUsername).trim().toLowerCase();
       const timeClass = timeClassOverride ?? recentGameTimeClass;
+      const offset = append ? recentChessGamesNextOffset : 0;
 
       if (!username) {
         setRecentChessGames([]);
+        setRecentChessGamesHasMore(false);
+        setRecentChessGamesNextOffset(0);
         setRecentChessGamesError('Enter a Chess.com username.');
         return;
       }
@@ -406,22 +412,34 @@ export function ChessAnalysisLab() {
       try {
         writeCookie(CHESSCOM_USERNAME_COOKIE, username);
         writeCookie(CHESSCOM_TIME_CLASS_COOKIE, timeClass);
-        const response = await fetch(`/api/chesscom/recent-games?username=${encodeURIComponent(username)}&timeClass=${encodeURIComponent(timeClass)}&count=6`);
-        const payload = (await response.json()) as { error?: string; games?: ChessComRecentGameSummary[] };
+        const response = await fetch(
+          `/api/chesscom/recent-games?username=${encodeURIComponent(username)}&timeClass=${encodeURIComponent(timeClass)}&count=${RECENT_GAMES_PAGE_SIZE}&offset=${offset}`,
+        );
+        const payload = (await response.json()) as { error?: string; games?: ChessComRecentGameSummary[]; hasMore?: boolean; nextOffset?: number };
 
         if (!response.ok) {
           throw new Error(payload.error ?? `Chess.com fetch failed: HTTP ${response.status}`);
         }
 
-        setRecentChessGames(Array.isArray(payload.games) ? payload.games : []);
+        const nextGames = Array.isArray(payload.games) ? payload.games : [];
+        setRecentChessGames(current => {
+          const merged = append ? [...current, ...nextGames] : nextGames;
+          return [...new Map(merged.map(game => [game.link, game])).values()];
+        });
+        setRecentChessGamesHasMore(Boolean(payload.hasMore));
+        setRecentChessGamesNextOffset(typeof payload.nextOffset === 'number' ? payload.nextOffset : offset + nextGames.length);
       } catch (error) {
-        setRecentChessGames([]);
+        if (!append) {
+          setRecentChessGames([]);
+          setRecentChessGamesHasMore(false);
+          setRecentChessGamesNextOffset(0);
+        }
         setRecentChessGamesError(error instanceof Error ? error.message : 'Unable to fetch Chess.com games.');
       } finally {
         setRecentChessGamesLoading(false);
       }
     },
-    [chesscomUsername, recentGameTimeClass],
+    [chesscomUsername, recentChessGamesNextOffset, recentGameTimeClass],
   );
 
   const saveTrainingProgress = useCallback(async (progress: DeckProgressMap) => {
@@ -563,18 +581,14 @@ export function ChessAnalysisLab() {
     const savedUsername = readCookie(CHESSCOM_USERNAME_COOKIE);
     const savedTimeClass = readCookie(CHESSCOM_TIME_CLASS_COOKIE);
 
+    if (savedUsername) {
+      setChesscomUsername(savedUsername);
+    }
+
     if (savedTimeClass === 'bullet' || savedTimeClass === 'blitz' || savedTimeClass === 'rapid') {
       setRecentGameTimeClass(savedTimeClass);
     }
-
-    if (!savedUsername) {
-      return;
-    }
-
-    setChesscomUsername(savedUsername);
-    setTrainingUsername(value => value || savedUsername);
-    void fetchRecentChessGames(savedUsername, savedTimeClass === 'bullet' || savedTimeClass === 'blitz' || savedTimeClass === 'rapid' ? savedTimeClass : 'blitz');
-  }, [fetchRecentChessGames]);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1495,22 +1509,33 @@ export function ChessAnalysisLab() {
                   positionInFlightRef.current.clear();
                   clearSelection();
                 }}
-                onChesscomUsernameChange={setChesscomUsername}
+                onChesscomUsernameChange={value => {
+                  setChesscomUsername(value);
+
+                  if (!value.trim()) {
+                    deleteCookie(CHESSCOM_USERNAME_COOKIE);
+                    setRecentChessGames([]);
+                    setRecentChessGamesHasMore(false);
+                    setRecentChessGamesNextOffset(0);
+                    setRecentChessGamesError('');
+                  }
+                }}
                 onRecentGameTimeClassChange={timeClass => {
                   setRecentGameTimeClass(timeClass);
                   writeCookie(CHESSCOM_TIME_CLASS_COOKIE, timeClass);
-
-                  if (chesscomUsername.trim()) {
-                    void fetchRecentChessGames(undefined, timeClass);
-                  }
+                  setRecentChessGames([]);
+                  setRecentChessGamesHasMore(false);
+                  setRecentChessGamesNextOffset(0);
                 }}
                 onFetchRecentGames={() => void fetchRecentChessGames()}
                 positionAnalysis={positionAnalysis}
                 positionLoading={positionLoading}
                 recentGames={recentChessGames}
                 recentGamesError={recentChessGamesError}
+                recentGamesHasMore={recentChessGamesHasMore}
                 recentGamesLoading={recentChessGamesLoading}
                 recentGameTimeClass={recentGameTimeClass}
+                onLoadMoreRecentGames={() => void fetchRecentChessGames(undefined, undefined, true)}
                 reviewIndex={reviewIndex}
                 reviewMoments={reviewMoments}
                 reviewSide={reviewSide}
@@ -1727,6 +1752,14 @@ function writeCookie(name: string, value: string) {
   }
 
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
+}
+
+function deleteCookie(name: string) {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  document.cookie = `${name}=; path=/; max-age=0; samesite=lax`;
 }
 
 function FlipIcon() {

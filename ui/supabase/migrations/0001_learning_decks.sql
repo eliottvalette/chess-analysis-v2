@@ -44,32 +44,6 @@ create table if not exists public.deck_cards (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.user_card_progress (
-  user_id uuid not null references auth.users(id) on delete cascade,
-  card_id text not null references public.deck_cards(id) on delete cascade,
-  seen_count integer not null default 0,
-  correct_count integer not null default 0,
-  miss_count integer not null default 0,
-  streak integer not null default 0,
-  due_at timestamptz,
-  last_seen_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  primary key (user_id, card_id)
-);
-
-create table if not exists public.user_card_attempts (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  card_id text not null references public.deck_cards(id) on delete cascade,
-  played_uci text not null,
-  played_san text not null,
-  expected_uci text not null,
-  expected_san text not null,
-  correct boolean not null,
-  created_at timestamptz not null default now()
-);
-
 create table if not exists public.training_profiles (
   id uuid primary key default gen_random_uuid(),
   username text not null unique,
@@ -120,7 +94,6 @@ create table if not exists public.training_card_attempts (
 create index if not exists deck_cards_deck_id_idx on public.deck_cards(deck_id);
 create index if not exists deck_cards_line_id_idx on public.deck_cards(line_id);
 create index if not exists decks_owner_profile_id_idx on public.decks(owner_profile_id);
-create index if not exists user_card_attempts_user_id_created_at_idx on public.user_card_attempts(user_id, created_at desc);
 create index if not exists training_card_progress_profile_id_idx on public.training_card_progress(profile_id);
 create index if not exists training_card_progress_due_idx on public.training_card_progress(profile_id, due_at);
 create index if not exists training_card_attempts_profile_id_created_at_idx on public.training_card_attempts(profile_id, created_at desc);
@@ -128,8 +101,6 @@ create index if not exists training_card_attempts_profile_id_created_at_idx on p
 alter table public.decks enable row level security;
 alter table public.opening_lines enable row level security;
 alter table public.deck_cards enable row level security;
-alter table public.user_card_progress enable row level security;
-alter table public.user_card_attempts enable row level security;
 alter table public.training_profiles enable row level security;
 alter table public.training_card_progress enable row level security;
 alter table public.training_card_attempts enable row level security;
@@ -148,29 +119,3 @@ drop policy if exists "Deck cards are readable" on public.deck_cards;
 create policy "Deck cards are readable"
 on public.deck_cards for select
 using (true);
-
-drop policy if exists "Users can read own progress" on public.user_card_progress;
-create policy "Users can read own progress"
-on public.user_card_progress for select
-using (auth.uid() = user_id);
-
-drop policy if exists "Users can insert own progress" on public.user_card_progress;
-create policy "Users can insert own progress"
-on public.user_card_progress for insert
-with check (auth.uid() = user_id);
-
-drop policy if exists "Users can update own progress" on public.user_card_progress;
-create policy "Users can update own progress"
-on public.user_card_progress for update
-using (auth.uid() = user_id)
-with check (auth.uid() = user_id);
-
-drop policy if exists "Users can read own attempts" on public.user_card_attempts;
-create policy "Users can read own attempts"
-on public.user_card_attempts for select
-using (auth.uid() = user_id);
-
-drop policy if exists "Users can insert own attempts" on public.user_card_attempts;
-create policy "Users can insert own attempts"
-on public.user_card_attempts for insert
-with check (auth.uid() = user_id);

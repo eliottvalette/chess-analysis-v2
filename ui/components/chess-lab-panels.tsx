@@ -51,10 +51,12 @@ export function ReviewPanel({
   onChesscomUsernameChange,
   onRecentGameTimeClassChange,
   onFetchRecentGames,
+  onLoadMoreRecentGames,
   positionAnalysis,
   positionLoading,
   recentGames,
   recentGamesError,
+  recentGamesHasMore,
   recentGamesLoading,
   recentGameTimeClass,
   reviewIndex,
@@ -93,10 +95,12 @@ export function ReviewPanel({
   onChesscomUsernameChange: (value: string) => void;
   onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
   onFetchRecentGames: () => void;
+  onLoadMoreRecentGames: () => void;
   positionAnalysis: AnalysisResult | null;
   positionLoading: boolean;
   recentGames: ChessComRecentGameSummary[];
   recentGamesError: string;
+  recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
   reviewIndex: number;
@@ -127,8 +131,10 @@ export function ReviewPanel({
         onChesscomUsernameChange={onChesscomUsernameChange}
         onRecentGameTimeClassChange={onRecentGameTimeClassChange}
         onFetchRecentGames={onFetchRecentGames}
+        onLoadMoreRecentGames={onLoadMoreRecentGames}
         recentGames={recentGames}
         recentGamesError={recentGamesError}
+        recentGamesHasMore={recentGamesHasMore}
         recentGamesLoading={recentGamesLoading}
         recentGameTimeClass={recentGameTimeClass}
         reviewIndex={reviewIndex}
@@ -181,8 +187,10 @@ export function ReviewPanel({
         onChesscomUsernameChange={onChesscomUsernameChange}
         onRecentGameTimeClassChange={onRecentGameTimeClassChange}
         onFetchRecentGames={onFetchRecentGames}
+        onLoadMoreRecentGames={onLoadMoreRecentGames}
         recentGames={recentGames}
         recentGamesError={recentGamesError}
+        recentGamesHasMore={recentGamesHasMore}
         recentGamesLoading={recentGamesLoading}
         recentGameTimeClass={recentGameTimeClass}
         reviewIndex={reviewIndex}
@@ -328,9 +336,15 @@ export function TrainingProfilePanel({
           className={styles.inlineInput}
           value={username}
           onChange={event => setUsername(event.target.value)}
+          autoComplete="off"
+          autoCorrect="off"
+          name="training_profile_handle"
           placeholder="username"
           spellCheck={false}
         />
+        <button className={styles.action} onClick={() => setUsername('')} disabled={!username}>
+          Clear
+        </button>
         <input
           className={styles.inlineInput}
           value={password}
@@ -431,8 +445,10 @@ export function GameReviewPanel({
   onChesscomUsernameChange,
   onRecentGameTimeClassChange,
   onFetchRecentGames,
+  onLoadMoreRecentGames,
   recentGames,
   recentGamesError,
+  recentGamesHasMore,
   recentGamesLoading,
   recentGameTimeClass,
   reviewIndex,
@@ -460,8 +476,10 @@ export function GameReviewPanel({
   onChesscomUsernameChange: (value: string) => void;
   onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
   onFetchRecentGames: () => void;
+  onLoadMoreRecentGames: () => void;
   recentGames: ChessComRecentGameSummary[];
   recentGamesError: string;
+  recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
   reviewIndex: number;
@@ -489,9 +507,15 @@ export function GameReviewPanel({
               className={styles.inlineInput}
               value={chesscomUsername}
               onChange={event => onChesscomUsernameChange(event.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              name="chesscom_lookup_handle"
               placeholder=""
               spellCheck={false}
             />
+            <button className={styles.action} onClick={() => onChesscomUsernameChange('')} disabled={!chesscomUsername}>
+              Clear
+            </button>
             <button className={`${styles.action} ${styles.primary}`} onClick={onFetchRecentGames} disabled={!chesscomUsername.trim() || recentGamesLoading}>
               {recentGamesLoading ? 'Loading' : 'Fetch games'}
             </button>
@@ -535,6 +559,11 @@ export function GameReviewPanel({
                 </button>
               ))}
             </div>
+            {recentGamesHasMore ? (
+              <button className={`${styles.action} ${styles.fullWidthAction}`} onClick={onLoadMoreRecentGames} disabled={recentGamesLoading}>
+                {recentGamesLoading ? 'Loading' : 'Load 10 more'}
+              </button>
+            ) : null}
           </section>
         ) : null}
       </>
