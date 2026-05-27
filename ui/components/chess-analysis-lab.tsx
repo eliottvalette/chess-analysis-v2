@@ -26,6 +26,7 @@ import {
   formatScoreLabel,
   getAdvantageMeter,
   getBestMoveArrow,
+  reviewCategoryMeta,
   restoreGameFromHistory,
   toStoredMove,
   type GameMetadata,
@@ -67,28 +68,27 @@ const LAST_MOVE_STYLE = {
   backgroundColor: 'rgba(84, 173, 255, 0.26)',
   boxShadow: 'inset 0 0 0 2px rgba(181, 222, 255, 0.42)',
 } satisfies CSSProperties;
-const REVIEW_MOVE_STYLES: Partial<Record<ReviewCategory, CSSProperties>> = {
-  best: {
-    backgroundColor: 'rgba(184, 247, 161, 0.46)',
-    boxShadow: 'inset 0 0 0 2px rgba(216, 255, 201, 0.58)',
-  },
-  book: {
-    backgroundColor: 'rgba(176, 129, 76, 0.42)',
-    boxShadow: 'inset 0 0 0 2px rgba(231, 199, 143, 0.52)',
-  },
-  mistake: {
-    backgroundColor: 'rgba(255, 149, 74, 0.44)',
-    boxShadow: 'inset 0 0 0 2px rgba(255, 198, 139, 0.54)',
-  },
-  blunder: {
-    backgroundColor: 'rgba(255, 68, 68, 0.48)',
-    boxShadow: 'inset 0 0 0 2px rgba(255, 162, 162, 0.58)',
-  },
-};
 const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
 const CHESSCOM_TIME_CLASS_COOKIE = 'chesscom_time_class';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
 const RECENT_GAMES_PAGE_SIZE = 10;
+
+function getReviewMoveStyle(category: ReviewCategory | null | undefined): CSSProperties {
+  if (!category) {
+    return LAST_MOVE_STYLE;
+  }
+
+  const color = reviewCategoryMeta[category]?.color;
+
+  if (!color) {
+    return LAST_MOVE_STYLE;
+  }
+
+  return {
+    backgroundColor: `color-mix(in srgb, ${color} 38%, transparent)`,
+    boxShadow: `inset 0 0 0 2px color-mix(in srgb, ${color} 62%, transparent)`,
+  };
+}
 
 type TrainingProfile = {
   id: string;
@@ -236,7 +236,7 @@ export function ChessAnalysisLab() {
     const lastMove = currentMoves[currentMoves.length - 1];
     const reviewCategory =
       hasLoadedGame && variationBaseIndex == null && historyIndex > 0 ? timelineReviews[historyIndex - 1]?.category : null;
-    const lastMoveStyle = reviewCategory ? (REVIEW_MOVE_STYLES[reviewCategory] ?? LAST_MOVE_STYLE) : LAST_MOVE_STYLE;
+    const lastMoveStyle = getReviewMoveStyle(reviewCategory);
 
     if (lastMove) {
       nextStyles[lastMove.from] = lastMoveStyle;
@@ -1086,6 +1086,13 @@ export function ChessAnalysisLab() {
   }, [activeDeckCard, advanceDeckCard, deckFeedback, historyIndex, initialFen, mode, moveHistory, orientation, pgnDialogOpen, playSoundSequence, positionAnalysis?.bestMove, reviewPlayerSide, tryMove]);
 
   function goToReviewMoment(index: number) {
+    if (index >= reviewMoments.length) {
+      setMode('review');
+      setReviewIndex(Math.max(0, reviewMoments.length - 1));
+      void playToHistoryIndex(moveHistory.length);
+      return;
+    }
+
     const boundedIndex = Math.max(0, Math.min(index, Math.max(0, reviewMoments.length - 1)));
     const moment = reviewMoments[boundedIndex] ?? null;
 
@@ -1538,7 +1545,6 @@ export function ChessAnalysisLab() {
                 recentGamesLoading={recentChessGamesLoading}
                 recentGameTimeClass={recentGameTimeClass}
                 onLoadMoreRecentGames={() => void fetchRecentChessGames(undefined, undefined, true)}
-                reviewIndex={reviewIndex}
                 reviewMoments={reviewMoments}
                 setShowArrow={setShowArrow}
                 timelineAnalyses={timelineAnalyses}

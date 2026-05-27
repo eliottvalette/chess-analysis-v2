@@ -49,7 +49,6 @@ export function ReviewPanel({
   recentGamesHasMore,
   recentGamesLoading,
   recentGameTimeClass,
-  reviewIndex,
   reviewMoments,
   setShowArrow,
   timelineAnalyses,
@@ -85,7 +84,6 @@ export function ReviewPanel({
   recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
-  reviewIndex: number;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
   setShowArrow: (value: boolean) => void;
   timelineAnalyses: AnalysisResult[];
@@ -117,7 +115,6 @@ export function ReviewPanel({
         recentGamesHasMore={recentGamesHasMore}
         recentGamesLoading={recentGamesLoading}
         recentGameTimeClass={recentGameTimeClass}
-        reviewIndex={reviewIndex}
         reviewMoments={reviewMoments}
         setShowArrow={setShowArrow}
         timelineAnalyses={timelineAnalyses}
@@ -157,7 +154,6 @@ export function ReviewPanel({
         recentGamesHasMore={recentGamesHasMore}
         recentGamesLoading={recentGamesLoading}
         recentGameTimeClass={recentGameTimeClass}
-        reviewIndex={reviewIndex}
         reviewMoments={reviewMoments}
         setShowArrow={setShowArrow}
         timelineAnalyses={timelineAnalyses}
@@ -401,7 +397,6 @@ export function GameReviewPanel({
   recentGamesHasMore,
   recentGamesLoading,
   recentGameTimeClass,
-  reviewIndex,
   reviewMoments,
   setShowArrow,
   timelineAnalyses,
@@ -436,7 +431,6 @@ export function GameReviewPanel({
   recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
-  reviewIndex: number;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
   setShowArrow: (value: boolean) => void;
   timelineAnalyses: AnalysisResult[];
@@ -456,6 +450,7 @@ export function GameReviewPanel({
     () => reviewMoments.findIndex(moment => moment.ply > historyIndex),
     [historyIndex, reviewMoments],
   );
+  const hasNextReviewStep = nextMomentIndex >= 0 || historyIndex < moveHistoryLength;
 
   useEffect(() => {
     if (!hasLoadedGame) {
@@ -570,8 +565,8 @@ export function GameReviewPanel({
           </button>
           <button
             className={`${styles.action} ${styles.primary}`}
-            onClick={() => goToReviewMoment(nextMomentIndex >= 0 ? nextMomentIndex : reviewIndex)}
-            disabled={nextMomentIndex < 0}
+            onClick={() => goToReviewMoment(nextMomentIndex >= 0 ? nextMomentIndex : reviewMoments.length)}
+            disabled={!hasNextReviewStep}
           >
             Next
           </button>
