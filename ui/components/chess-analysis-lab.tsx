@@ -3,16 +3,6 @@
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { Chess, type Square } from 'chess.js';
-import {
-  CategoryScale,
-  Chart as ChartJS,
-  Filler,
-  LineElement,
-  LinearScale,
-  PointElement,
-  Tooltip,
-  type ChartData,
-} from 'chart.js';
 
 import type { AnalysisResult } from '@/lib/analysis-types';
 import {
@@ -26,7 +16,6 @@ import {
 import {
   analyzeGamePositions,
   analyzeSinglePosition,
-  buildChartOptions,
   buildGameReview,
   buildMoveUciHistory,
   buildTimelineSequencePositions,
@@ -38,7 +27,6 @@ import {
   getAdvantageMeter,
   getBestMoveArrow,
   restoreGameFromHistory,
-  toChartScore,
   toStoredMove,
   type GameMetadata,
   type ReviewCategory,
@@ -69,8 +57,6 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
   ssr: false,
   loading: () => <div className={styles.boardFallback}>Loading board...</div>,
 });
-
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
 const POSITION_DEPTH = 20;
 const POSITION_MOVETIME_MS = 400;
@@ -121,7 +107,7 @@ export function ChessAnalysisLab() {
   const [orientation, setOrientation] = useState<'white' | 'black'>('white');
   const [showArrow, setShowArrow] = useState(true);
   const [mode, setMode] = useState<WorkspaceMode>('review');
-  const [reviewSide, setReviewSide] = useState<ReviewSide>('both');
+  const [reviewSide] = useState<ReviewSide>('both');
   const [reviewIndex, setReviewIndex] = useState(0);
   const [metadata, setMetadata] = useState<GameMetadata | null>(null);
   const [fileName, setFileName] = useState('');
@@ -244,32 +230,6 @@ export function ChessAnalysisLab() {
     [gameReview.keyMoments, reviewSide],
   );
   const activeReviewMoment = reviewMoments[reviewIndex] ?? null;
-  const chartConfig = buildChartOptions(moveHistory, timelineReviews, ply => {
-    jumpToIndex(ply);
-  });
-
-  const chartData = useMemo<ChartData<'line', number[], number>>(
-    () => ({
-      labels: timelineAnalyses.map((_, index) => index + 1),
-      datasets: [
-        {
-          data: timelineAnalyses.map(analysis => toChartScore(analysis)),
-          borderColor: '#98b8ff',
-          backgroundColor: 'rgba(152, 184, 255, 0.14)',
-          fill: true,
-          borderWidth: 2,
-          pointRadius: timelineReviews.map(review => (review.isKeyMoment ? 4.4 : 0)),
-          pointHoverRadius: timelineReviews.map(review => (review.isKeyMoment ? 6 : 3)),
-          pointBorderWidth: timelineReviews.map(review => (review.isKeyMoment ? 1.5 : 0)),
-          pointBackgroundColor: timelineReviews.map(review => (review.isKeyMoment ? (review.colorHex ?? '#98b8ff') : '#98b8ff')),
-          pointBorderColor: timelineReviews.map(review => (review.isKeyMoment ? (review.colorHex ?? '#98b8ff') : '#98b8ff')),
-          pointStyle: timelineReviews.map(review => (review.isKeyMoment ? review.pointStyle : 'circle')),
-          tension: 0.28,
-        },
-      ],
-    }),
-    [timelineAnalyses, timelineReviews],
-  );
   const boardSquareStyles = useMemo(() => {
     const nextStyles: Record<string, CSSProperties> = {};
     const lastMove = currentMoves[currentMoves.length - 1];
@@ -1457,34 +1417,31 @@ export function ChessAnalysisLab() {
         </section>
 
         <aside className={`${styles.panel} ${styles.contextPanel}`}>
-          <section className={styles.modeTabs}>
-            {(['review', 'train'] satisfies WorkspaceMode[]).map(nextMode => (
-              <button
-                className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
-                key={nextMode}
-                onClick={() => setMode(nextMode)}
-              >
-                {getModeLabel(nextMode)}
-              </button>
-            ))}
-          </section>
+          {mode === 'review' && hasLoadedGame ? null : (
+            <section className={styles.modeTabs}>
+              {(['review', 'train'] satisfies WorkspaceMode[]).map(nextMode => (
+                <button
+                  className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
+                  key={nextMode}
+                  onClick={() => setMode(nextMode)}
+                >
+                  {getModeLabel(nextMode)}
+                </button>
+              ))}
+            </section>
+          )}
 
-          <div className={styles.panelScroll}>
+          <div className={`${styles.panelScroll} ${mode === 'review' && hasLoadedGame ? styles.reviewPanelScroll : ''}`}>
             {mode === 'review' ? (
               <ReviewPanel
                 activeReviewMoment={activeReviewMoment}
                 blackReviewName={blackReviewName}
                 chesscomUsername={chesscomUsername}
-                chartConfig={chartConfig}
-                chartData={chartData}
-                currentFen={currentFen}
-                gameReview={gameReview}
                 goToReviewMoment={goToReviewMoment}
                 hasLoadedGame={hasLoadedGame}
                 historyIndex={historyIndex}
                 jumpToIndex={jumpToIndex}
                 loadRecentGame={loadRecentChessGame}
-                metadata={metadata}
                 moveHistoryLength={moveHistory.length}
                 movePairs={movePairs}
                 onBack={() => {
@@ -1528,8 +1485,6 @@ export function ChessAnalysisLab() {
                   setRecentChessGamesNextOffset(0);
                 }}
                 onFetchRecentGames={() => void fetchRecentChessGames()}
-                positionAnalysis={positionAnalysis}
-                positionLoading={positionLoading}
                 recentGames={recentChessGames}
                 recentGamesError={recentChessGamesError}
                 recentGamesHasMore={recentChessGamesHasMore}
@@ -1538,13 +1493,12 @@ export function ChessAnalysisLab() {
                 onLoadMoreRecentGames={() => void fetchRecentChessGames(undefined, undefined, true)}
                 reviewIndex={reviewIndex}
                 reviewMoments={reviewMoments}
-                reviewSide={reviewSide}
-                setReviewIndex={setReviewIndex}
-                setReviewSide={setReviewSide}
                 setShowArrow={setShowArrow}
+                timelineAnalyses={timelineAnalyses}
                 timelineAnalysesLength={timelineAnalyses.length}
                 timelineError={timelineError}
                 timelineLoading={timelineLoading}
+                timelineReviews={timelineReviews}
                 whiteReviewName={whiteReviewName}
               />
             ) : !trainingProfile ? (

@@ -1,19 +1,15 @@
 'use client';
 
-import { Fragment, type ChangeEvent, type ReactNode } from 'react';
-import type { ChartData } from 'chart.js';
-import { Line } from 'react-chartjs-2';
+import { Fragment, useEffect, useMemo, useRef, type ChangeEvent, type ReactNode, type RefObject } from 'react';
 
 import type { AnalysisLine, AnalysisResult } from '@/lib/analysis-types';
 import {
-  buildChartOptions,
-  buildGameReview,
   filterReviewMoments,
   formatBestMove,
   formatPrincipalVariation,
-  type GameMetadata,
-  type ReviewSide,
+  toChartScore,
   type StoredMove,
+  type TimelineReview,
 } from '@/lib/chess-analysis-client';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
 import type { DeckProgressEntry, DeckProgressSummary } from '@/lib/deck-progress';
@@ -35,16 +31,11 @@ export function ReviewPanel({
   activeReviewMoment,
   blackReviewName,
   chesscomUsername,
-  chartConfig,
-  chartData,
-  currentFen,
-  gameReview,
   goToReviewMoment,
   hasLoadedGame,
   historyIndex,
   jumpToIndex,
   loadRecentGame,
-  metadata,
   moveHistoryLength,
   movePairs,
   onBack,
@@ -52,8 +43,6 @@ export function ReviewPanel({
   onRecentGameTimeClassChange,
   onFetchRecentGames,
   onLoadMoreRecentGames,
-  positionAnalysis,
-  positionLoading,
   recentGames,
   recentGamesError,
   recentGamesHasMore,
@@ -61,28 +50,22 @@ export function ReviewPanel({
   recentGameTimeClass,
   reviewIndex,
   reviewMoments,
-  reviewSide,
-  setReviewIndex,
-  setReviewSide,
   setShowArrow,
+  timelineAnalyses,
   timelineAnalysesLength,
   timelineError,
   timelineLoading,
+  timelineReviews,
   whiteReviewName,
 }: {
   activeReviewMoment: ReturnType<typeof filterReviewMoments>[number] | null;
   blackReviewName: string;
   chesscomUsername: string;
-  chartConfig: ReturnType<typeof buildChartOptions>;
-  chartData: ChartData<'line', number[], number>;
-  currentFen: string;
-  gameReview: ReturnType<typeof buildGameReview>;
   goToReviewMoment: (index: number) => void;
   hasLoadedGame: boolean;
   historyIndex: number;
   jumpToIndex: (index: number) => void;
   loadRecentGame: (game: ChessComRecentGameSummary) => void;
-  metadata: GameMetadata | null;
   moveHistoryLength: number;
   movePairs: Array<{
     moveNumber: number;
@@ -96,8 +79,6 @@ export function ReviewPanel({
   onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
   onFetchRecentGames: () => void;
   onLoadMoreRecentGames: () => void;
-  positionAnalysis: AnalysisResult | null;
-  positionLoading: boolean;
   recentGames: ChessComRecentGameSummary[];
   recentGamesError: string;
   recentGamesHasMore: boolean;
@@ -105,13 +86,12 @@ export function ReviewPanel({
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
   reviewIndex: number;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
-  reviewSide: ReviewSide;
-  setReviewIndex: (index: number) => void;
-  setReviewSide: (side: ReviewSide) => void;
   setShowArrow: (value: boolean) => void;
+  timelineAnalyses: AnalysisResult[];
   timelineAnalysesLength: number;
   timelineError: string;
   timelineLoading: boolean;
+  timelineReviews: TimelineReview[];
   whiteReviewName: string;
 }) {
   if (!hasLoadedGame) {
@@ -120,13 +100,12 @@ export function ReviewPanel({
         activeReviewMoment={activeReviewMoment}
         blackReviewName={blackReviewName}
         chesscomUsername={chesscomUsername}
-        chartConfig={chartConfig}
-        chartData={chartData}
-        gameReview={gameReview}
         goToReviewMoment={goToReviewMoment}
         hasLoadedGame={false}
         historyIndex={historyIndex}
+        jumpToIndex={jumpToIndex}
         loadRecentGame={loadRecentGame}
+        movePairs={movePairs}
         moveHistoryLength={moveHistoryLength}
         onChesscomUsernameChange={onChesscomUsernameChange}
         onRecentGameTimeClassChange={onRecentGameTimeClassChange}
@@ -139,50 +118,34 @@ export function ReviewPanel({
         recentGameTimeClass={recentGameTimeClass}
         reviewIndex={reviewIndex}
         reviewMoments={reviewMoments}
-        reviewSide={reviewSide}
-        setReviewIndex={setReviewIndex}
-        setReviewSide={setReviewSide}
         setShowArrow={setShowArrow}
+        timelineAnalyses={timelineAnalyses}
         timelineAnalysesLength={timelineAnalysesLength}
         timelineError={timelineError}
         timelineLoading={timelineLoading}
+        timelineReviews={timelineReviews}
         whiteReviewName={whiteReviewName}
       />
     );
   }
 
   return (
-    <>
-      <section className={`${styles.card} ${styles.stateHeaderCard}`}>
-        <button className={styles.action} onClick={onBack}>
+    <div className={styles.reviewLoadedPanel}>
+      <section className={styles.reviewLoadedTop}>
+        <button className={`${styles.action} ${styles.fullWidthAction}`} onClick={onBack}>
           Back
         </button>
-        <div className={styles.stateHeaderMain}>
-          <strong>
-            {whiteReviewName} vs {blackReviewName}
-          </strong>
-          <span className={styles.support}>
-            {metadata?.date ?? 'Loaded game'}
-            {metadata?.eco ? ` · ${metadata.eco}` : ''}
-            {metadata?.result ? ` · ${metadata.result}` : ''}
-          </span>
-        </div>
-        <div className={styles.stateHeaderMeta}>
-          <strong>{Math.ceil(moveHistoryLength / 2)}</strong>
-          <span>moves</span>
-        </div>
       </section>
       <GameReviewPanel
         activeReviewMoment={activeReviewMoment}
         blackReviewName={blackReviewName}
         chesscomUsername={chesscomUsername}
-        chartConfig={chartConfig}
-        chartData={chartData}
-        gameReview={gameReview}
         goToReviewMoment={goToReviewMoment}
         hasLoadedGame={true}
         historyIndex={historyIndex}
+        jumpToIndex={jumpToIndex}
         loadRecentGame={loadRecentGame}
+        movePairs={movePairs}
         moveHistoryLength={moveHistoryLength}
         onChesscomUsernameChange={onChesscomUsernameChange}
         onRecentGameTimeClassChange={onRecentGameTimeClassChange}
@@ -195,24 +158,15 @@ export function ReviewPanel({
         recentGameTimeClass={recentGameTimeClass}
         reviewIndex={reviewIndex}
         reviewMoments={reviewMoments}
-        reviewSide={reviewSide}
-        setReviewIndex={setReviewIndex}
-        setReviewSide={setReviewSide}
         setShowArrow={setShowArrow}
+        timelineAnalyses={timelineAnalyses}
         timelineAnalysesLength={timelineAnalysesLength}
         timelineError={timelineError}
         timelineLoading={timelineLoading}
+        timelineReviews={timelineReviews}
         whiteReviewName={whiteReviewName}
       />
-      <AnalyzePanel
-        currentFen={currentFen}
-        historyIndex={historyIndex}
-        jumpToIndex={jumpToIndex}
-        movePairs={movePairs}
-        positionAnalysis={positionAnalysis}
-        positionLoading={positionLoading}
-      />
-    </>
+    </div>
   );
 }
 
@@ -330,10 +284,9 @@ export function TrainingProfilePanel({
         <h2 className={styles.sectionTitle}>Training Profile</h2>
         <span className={styles.statusText}>{loading ? 'syncing' : 'required'}</span>
       </div>
-      <p className={styles.copy}>Create or reopen a lightweight training profile. Progress syncs through a persistent browser cookie.</p>
       <div className={styles.profileForm}>
         <input
-          className={styles.inlineInput}
+          className={`${styles.inlineInput} ${styles.profileFormWide}`}
           value={username}
           onChange={event => setUsername(event.target.value)}
           autoComplete="off"
@@ -342,17 +295,14 @@ export function TrainingProfilePanel({
           placeholder="username"
           spellCheck={false}
         />
-        <button className={styles.action} onClick={() => setUsername('')} disabled={!username}>
-          Clear
-        </button>
         <input
-          className={styles.inlineInput}
+          className={`${styles.inlineInput} ${styles.profileFormWide}`}
           value={password}
           onChange={event => setPassword(event.target.value)}
           placeholder="password"
           type="password"
         />
-        <button className={`${styles.action} ${styles.primary}`} onClick={onSubmit} disabled={loading || username.trim().length < 3 || password.length < 4}>
+        <button className={`${styles.action} ${styles.primary} ${styles.profileFormWide}`} onClick={onSubmit} disabled={loading || username.trim().length < 3 || password.length < 4}>
           {loading ? 'Opening' : 'Open profile'}
         </button>
       </div>
@@ -434,13 +384,12 @@ export function GameReviewPanel({
   activeReviewMoment,
   blackReviewName,
   chesscomUsername,
-  chartConfig,
-  chartData,
-  gameReview,
   goToReviewMoment,
   hasLoadedGame,
   historyIndex,
+  jumpToIndex,
   loadRecentGame,
+  movePairs,
   moveHistoryLength,
   onChesscomUsernameChange,
   onRecentGameTimeClassChange,
@@ -453,25 +402,29 @@ export function GameReviewPanel({
   recentGameTimeClass,
   reviewIndex,
   reviewMoments,
-  reviewSide,
-  setReviewIndex,
-  setReviewSide,
   setShowArrow,
+  timelineAnalyses,
   timelineAnalysesLength,
   timelineError,
   timelineLoading,
+  timelineReviews,
   whiteReviewName,
 }: {
   activeReviewMoment: ReturnType<typeof filterReviewMoments>[number] | null;
   blackReviewName: string;
   chesscomUsername: string;
-  chartConfig: ReturnType<typeof buildChartOptions>;
-  chartData: ChartData<'line', number[], number>;
-  gameReview: ReturnType<typeof buildGameReview>;
   goToReviewMoment: (index: number) => void;
   hasLoadedGame: boolean;
   historyIndex: number;
+  jumpToIndex: (index: number) => void;
   loadRecentGame: (game: ChessComRecentGameSummary) => void;
+  movePairs: Array<{
+    moveNumber: number;
+    white: StoredMove | null;
+    whitePly: number;
+    black: StoredMove | null;
+    blackPly: number;
+  }>;
   moveHistoryLength: number;
   onChesscomUsernameChange: (value: string) => void;
   onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
@@ -484,15 +437,33 @@ export function GameReviewPanel({
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
   reviewIndex: number;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
-  reviewSide: ReviewSide;
-  setReviewIndex: (index: number) => void;
-  setReviewSide: (side: ReviewSide) => void;
   setShowArrow: (value: boolean) => void;
+  timelineAnalyses: AnalysisResult[];
   timelineAnalysesLength: number;
   timelineError: string;
   timelineLoading: boolean;
+  timelineReviews: TimelineReview[];
   whiteReviewName: string;
 }) {
+  const activeMoveButtonRef = useRef<HTMLButtonElement | null>(null);
+  const currentReview = historyIndex > 0 ? (timelineReviews[historyIndex - 1] ?? null) : null;
+  const activeMomentIsQueued =
+    activeReviewMoment != null && (historyIndex === Math.max(0, activeReviewMoment.ply - 1) || historyIndex === activeReviewMoment.ply);
+  const coachReview = activeMomentIsQueued ? activeReviewMoment : (currentReview ?? activeReviewMoment);
+  const displayActivePly = activeMomentIsQueued && activeReviewMoment ? activeReviewMoment.ply : historyIndex;
+  const nextMomentIndex = useMemo(
+    () => reviewMoments.findIndex(moment => moment.ply > historyIndex),
+    [historyIndex, reviewMoments],
+  );
+
+  useEffect(() => {
+    if (!hasLoadedGame) {
+      return;
+    }
+
+    activeMoveButtonRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [hasLoadedGame, historyIndex]);
+
   if (!hasLoadedGame) {
     return (
       <>
@@ -516,7 +487,7 @@ export function GameReviewPanel({
             <button className={styles.action} onClick={() => onChesscomUsernameChange('')} disabled={!chesscomUsername}>
               Clear
             </button>
-            <button className={`${styles.action} ${styles.primary}`} onClick={onFetchRecentGames} disabled={!chesscomUsername.trim() || recentGamesLoading}>
+            <button className={`${styles.action} ${styles.primary} ${styles.inlineFormWide}`} onClick={onFetchRecentGames} disabled={!chesscomUsername.trim() || recentGamesLoading}>
               {recentGamesLoading ? 'Loading' : 'Fetch games'}
             </button>
           </div>
@@ -571,129 +542,201 @@ export function GameReviewPanel({
   }
 
   return (
-    <>
-      <section className={`${styles.card} ${styles.overviewCard}`}>
-        <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Game</h2>
-          <span className={styles.statusText}>{timelineLoading ? 'building' : `${gameReview.keyMoments.length} moments`}</span>
-        </div>
-        <div className={styles.accuracyGrid}>
-          <div className={styles.accuracyCard}>
-            <span className={styles.metaLabel}>{whiteReviewName}</span>
-            <strong>
-              {formatNullable(gameReview.accuracy.white)}%
-              <span>r{formatNullable(gameReview.gameRating.white)}</span>
-            </strong>
+    <section className={styles.reviewGamePanel}>
+      <div className={styles.reviewCoach}>
+        <div className={styles.coachHeader}>
+          <div className={styles.coachTitle}>
+            <span className={styles.reviewBadge} style={{ ['--review-color' as string]: coachReview?.colorHex ?? '#98b8ff' }}>
+              {coachReview?.label ?? (timelineLoading ? 'Analyzing' : 'Review')}
+            </span>
+            <strong>{coachReview ? `${coachReview.moveLabel} ${coachReview.san}` : `${whiteReviewName} vs ${blackReviewName}`}</strong>
           </div>
-          <div className={styles.accuracyCard}>
-            <span className={styles.metaLabel}>{blackReviewName}</span>
-            <strong>
-              {formatNullable(gameReview.accuracy.black)}%
-              <span>r{formatNullable(gameReview.gameRating.black)}</span>
-            </strong>
-          </div>
+          <span className={styles.statusText}>{timelineLoading ? 'building' : `${reviewMoments.length} moments`}</span>
         </div>
-        <div className={styles.openingBox}>
-          <span className={styles.metaLabel}>Opening</span>
-          <strong>{gameReview.opening.name}</strong>
-          <span className={styles.statusText}>
-            {gameReview.opening.eco !== '-' ? `${gameReview.opening.eco} · ` : ''}
-            {gameReview.opening.lastBookPly ? `book through ply ${gameReview.opening.lastBookPly}` : 'book not detected'}
-          </span>
+        <p className={styles.coachText}>{coachReview ? compactCoachText(coachReview) : 'Load moments by analyzing the game.'}</p>
+        <div className={styles.reviewCoachActions}>
+          <button
+            className={styles.action}
+            onClick={() => {
+              setShowArrow(true);
+              if (coachReview) {
+                jumpToIndex(Math.max(0, coachReview.ply - 1));
+              }
+            }}
+            disabled={!coachReview?.bestMoveSan}
+          >
+            Best
+          </button>
+          <button
+            className={`${styles.action} ${styles.primary}`}
+            onClick={() => goToReviewMoment(nextMomentIndex >= 0 ? nextMomentIndex : reviewIndex)}
+            disabled={nextMomentIndex < 0}
+          >
+            Next
+          </button>
         </div>
-      </section>
+      </div>
 
-      <ChartSection
-        chartConfig={chartConfig}
-        chartData={chartData}
+      <div className={styles.reviewMoveTable} role="list" aria-label="Reviewed moves">
+        {movePairs.map(pair => (
+          <div className={styles.reviewMoveRow} key={pair.moveNumber} role="listitem">
+            <span className={styles.reviewMoveNumber}>{pair.moveNumber}.</span>
+            <ReviewMoveButton
+              activeMoveButtonRef={activeMoveButtonRef}
+              activePly={displayActivePly}
+              jumpToIndex={jumpToIndex}
+              move={pair.white}
+              ply={pair.whitePly}
+              review={timelineReviews[pair.whitePly - 1] ?? null}
+            />
+            <ReviewMoveButton
+              activeMoveButtonRef={activeMoveButtonRef}
+              activePly={displayActivePly}
+              jumpToIndex={jumpToIndex}
+              move={pair.black}
+              ply={pair.blackPly}
+              review={timelineReviews[pair.blackPly - 1] ?? null}
+            />
+          </div>
+        ))}
+      </div>
+
+      <ReviewTimelineStrip
         historyIndex={historyIndex}
+        jumpToIndex={jumpToIndex}
         moveHistoryLength={moveHistoryLength}
+        timelineAnalyses={timelineAnalyses}
         timelineAnalysesLength={timelineAnalysesLength}
         timelineError={timelineError}
         timelineLoading={timelineLoading}
+        timelineReviews={timelineReviews}
       />
-
-      <section className={`${styles.card} ${styles.reviewCard}`}>
-        <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Moment</h2>
-          <span className={styles.statusText}>{reviewMoments.length ? `${reviewIndex + 1}/${reviewMoments.length}` : 'no moments'}</span>
-        </div>
-        <div className={styles.reviewSideTabs}>
-          {[
-            ['both', 'Both'],
-            ['white', whiteReviewName],
-            ['black', blackReviewName],
-          ].map(([side, label]) => (
-            <button
-              className={`${styles.sideTab} ${reviewSide === side ? styles.activeSideTab : ''}`}
-              key={side}
-              onClick={() => {
-                setReviewSide(side as ReviewSide);
-                setReviewIndex(0);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {activeReviewMoment ? (
-          <div className={styles.coachBox}>
-            <div className={styles.coachHeader}>
-              <span className={styles.reviewBadge} style={{ ['--review-color' as string]: activeReviewMoment.colorHex ?? '#8f75ff' }}>
-                {activeReviewMoment.label}
-              </span>
-              <strong>{activeReviewMoment.moveLabel}</strong>
-            </div>
-            <div className={styles.reviewNav}>
-              <button className={styles.action} onClick={() => goToReviewMoment(reviewIndex - 1)} disabled={reviewIndex === 0}>
-                Prev
-              </button>
-              <button
-                className={styles.action}
-                onClick={() => {
-                  setShowArrow(true);
-                  goToReviewMoment(reviewIndex);
-                }}
-              >
-                Show best
-              </button>
-              <button
-                className={styles.action}
-                onClick={() => goToReviewMoment(reviewIndex + 1)}
-                disabled={reviewIndex >= reviewMoments.length - 1}
-              >
-                Next
-              </button>
-            </div>
-            <div className={styles.momentSummary}>
-              <strong>{formatMomentHeadline(activeReviewMoment)}</strong>
-              <span>{formatMomentImpact(activeReviewMoment)}</span>
-            </div>
-            <div className={styles.reviewFacts}>
-              <div>
-                <span>Played</span>
-                <strong>{activeReviewMoment.san}</strong>
-              </div>
-              <div>
-                <span>Best</span>
-                <strong>{activeReviewMoment.bestMoveSan ?? '-'}</strong>
-              </div>
-              <div>
-                <span>Expected score</span>
-                <strong>{formatExpectedSwing(activeReviewMoment.beforeExpected, activeReviewMoment.afterExpected)}</strong>
-              </div>
-              <div>
-                <span>Eval</span>
-                <strong>{formatEvalSwing(activeReviewMoment.beforeCp, activeReviewMoment.afterCp, activeReviewMoment.cpLossCp)}</strong>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className={styles.empty}>No key moments yet.</p>
-        )}
-      </section>
-    </>
+    </section>
   );
+}
+
+function ReviewMoveButton({
+  activeMoveButtonRef,
+  activePly,
+  jumpToIndex,
+  move,
+  ply,
+  review,
+}: {
+  activeMoveButtonRef: RefObject<HTMLButtonElement | null>;
+  activePly: number;
+  jumpToIndex: (index: number) => void;
+  move: StoredMove | null;
+  ply: number;
+  review: TimelineReview | null;
+}) {
+  if (!move) {
+    return <span className={styles.reviewMoveEmpty} />;
+  }
+
+  const isActive = activePly === ply;
+  const dotColor = review?.colorHex ?? null;
+
+  return (
+    <button
+      className={`${styles.reviewMoveCell} ${isActive ? styles.activeReviewMoveCell : ''}`}
+      onClick={() => jumpToIndex(ply)}
+      ref={isActive ? activeMoveButtonRef : undefined}
+      style={dotColor ? { ['--move-dot-color' as string]: dotColor } : undefined}
+      type="button"
+    >
+      {dotColor ? <span className={styles.reviewMoveDot} aria-hidden="true" /> : null}
+      <span>{move.san}</span>
+    </button>
+  );
+}
+
+function ReviewTimelineStrip({
+  historyIndex,
+  jumpToIndex,
+  moveHistoryLength,
+  timelineAnalyses,
+  timelineAnalysesLength,
+  timelineError,
+  timelineLoading,
+  timelineReviews,
+}: {
+  historyIndex: number;
+  jumpToIndex: (index: number) => void;
+  moveHistoryLength: number;
+  timelineAnalyses: AnalysisResult[];
+  timelineAnalysesLength: number;
+  timelineError: string;
+  timelineLoading: boolean;
+  timelineReviews: TimelineReview[];
+}) {
+  const scores = timelineAnalyses.map(analysis => Math.max(-10, Math.min(10, toChartScore(analysis))));
+  const pointCount = Math.max(1, scores.length);
+  const cursorX = moveHistoryLength <= 1 ? 0 : ((Math.max(1, historyIndex) - 1) / Math.max(1, moveHistoryLength - 1)) * 100;
+  const timelinePoints = scores.map((score, index) => {
+    const x = pointCount <= 1 ? 0 : (index / (pointCount - 1)) * 100;
+    const y = 14 - Math.tanh(score / 4) * 10.5;
+    return { x, y };
+  });
+  const boundaryPath = timelinePoints
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(' ');
+  const whiteAreaPath = timelinePoints.length
+    ? `M 0 28 L ${timelinePoints.map(point => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')} L 100 28 Z`
+    : '';
+
+  return (
+    <div className={styles.reviewTimeline}>
+      <div className={styles.reviewTimelineHeader}>
+        <span className={styles.statusText}>{timelineLoading ? 'refreshing' : `ply ${historyIndex}/${moveHistoryLength}`}</span>
+        {timelineError ? <span className={styles.error}>{timelineError}</span> : null}
+      </div>
+      <svg className={styles.reviewTimelineSvg} viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="Evaluation timeline">
+        <rect className={styles.reviewTimelineBlack} x="0" y="0" width="100" height="28" />
+        {timelineAnalysesLength > 0 ? <path className={styles.reviewTimelineWhite} d={whiteAreaPath} /> : null}
+        <line className={styles.reviewTimelineMidline} x1="0" x2="100" y1="14" y2="14" />
+        {timelineAnalysesLength > 0 ? <path className={styles.reviewTimelinePath} d={boundaryPath} /> : null}
+        {timelineReviews.map(review => {
+          if (!review.colorHex || !review.category) {
+            return null;
+          }
+
+          const point = timelinePoints[review.ply - 1] ?? { x: 0, y: 14 };
+
+          return (
+            <circle
+              className={styles.reviewTimelinePoint}
+              cx={point.x}
+              cy={point.y}
+              fill={review.colorHex}
+              key={review.ply}
+              onClick={() => jumpToIndex(review.ply)}
+              r={review.isKeyMoment ? 1.15 : 0.75}
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
+        <line className={styles.reviewTimelineCursor} x1={cursorX} x2={cursorX} y1="0" y2="28" vectorEffect="non-scaling-stroke" />
+      </svg>
+      {timelineAnalysesLength === 0 ? <div className={styles.reviewTimelineFallback}>{timelineLoading ? 'Analyzing...' : 'No review yet.'}</div> : null}
+    </div>
+  );
+}
+
+function compactCoachText(review: TimelineReview) {
+  if (review.category === 'book') {
+    return `${review.san} stays in book.`;
+  }
+
+  if (review.category === 'best') {
+    return `${review.san} matches the engine's top move.`;
+  }
+
+  if ((review.category === 'mistake' || review.category === 'blunder' || review.category === 'inaccuracy') && review.bestMoveSan) {
+    return `${review.san} is ${review.label?.toLowerCase() ?? 'imprecise'}. Best was ${review.bestMoveSan}.`;
+  }
+
+  return review.coachText;
 }
 
 function formatRecentGamePlayers(game: ChessComRecentGameSummary) {
@@ -1034,41 +1077,6 @@ export function PgnImportDialog({
   );
 }
 
-function ChartSection({
-  chartConfig,
-  chartData,
-  historyIndex,
-  moveHistoryLength,
-  timelineAnalysesLength,
-  timelineError,
-  timelineLoading,
-}: {
-  chartConfig: ReturnType<typeof buildChartOptions>;
-  chartData: ChartData<'line', number[], number>;
-  historyIndex: number;
-  moveHistoryLength: number;
-  timelineAnalysesLength: number;
-  timelineError: string;
-  timelineLoading: boolean;
-}) {
-  return (
-    <section className={`${styles.card} ${styles.chartCard}`}>
-      <div className={styles.panelHeader}>
-        <h2 className={styles.sectionTitle}>Curve</h2>
-        <span className={styles.statusText}>{timelineLoading ? 'refreshing' : `ply ${historyIndex}/${moveHistoryLength}`}</span>
-      </div>
-      <div className={styles.chartWrap}>
-        {timelineAnalysesLength > 0 ? (
-          <Line data={chartData} options={chartConfig} />
-        ) : (
-          <div className={styles.boardFallback}>{timelineLoading ? 'Analyzing the whole line...' : 'Import a PGN to build review.'}</div>
-        )}
-      </div>
-      {timelineError ? <p className={styles.error}>{timelineError}</p> : null}
-    </section>
-  );
-}
-
 function EngineLinesSection({
   currentFen,
   lines,
@@ -1108,71 +1116,6 @@ function getDisplayEngineLines(positionAnalysis: AnalysisResult | null) {
   }
 
   return (positionAnalysis.lines ?? []).filter(line => Boolean(line.bestMove) || line.pv.length > 0).slice(0, 3);
-}
-
-function formatNullable(value: number | null) {
-  return value == null ? '--' : `${value}`;
-}
-
-function formatExpectedLoss(value: number | null) {
-  return value == null ? '--' : `${(value * 100).toFixed(1)}%`;
-}
-
-function formatExpectedSwing(before: number | null, after: number | null) {
-  if (before == null || after == null) {
-    return '--';
-  }
-
-  return `${(before * 100).toFixed(0)}% -> ${(after * 100).toFixed(0)}%`;
-}
-
-function formatEvalSwing(beforeCp: number | null, afterCp: number | null, lossCp: number | null) {
-  if (beforeCp == null || afterCp == null) {
-    return '--';
-  }
-
-  const loss = lossCp == null ? '' : `, -${lossCp}cp`;
-  return `${formatSignedCp(beforeCp)} -> ${formatSignedCp(afterCp)}${loss}`;
-}
-
-function formatSignedCp(cp: number) {
-  const pawns = cp / 100;
-  return `${pawns >= 0 ? '+' : ''}${pawns.toFixed(2)}`;
-}
-
-function formatMomentHeadline(moment: ReturnType<typeof filterReviewMoments>[number]) {
-  const label = moment.label?.toLowerCase() ?? 'move';
-  const best = moment.bestMoveSan ? ` Best was ${moment.bestMoveSan}.` : '';
-
-  switch (moment.category) {
-    case 'blunder':
-    case 'mistake':
-    case 'inaccuracy':
-    case 'miss':
-      return `${moment.san} was a ${label}.${best}`;
-    case 'book':
-      return `${moment.san} stayed in book.`;
-    case 'best':
-      return `${moment.san} matched the engine's top move.`;
-    default:
-      return `${moment.san} was ${label}.`;
-  }
-}
-
-function formatMomentImpact(moment: ReturnType<typeof filterReviewMoments>[number]) {
-  if (moment.expectedPointsLost != null && moment.cpLossCp != null) {
-    return `Dropped ${formatExpectedLoss(moment.expectedPointsLost)} expected score and ${moment.cpLossCp} centipawns.`;
-  }
-
-  if (moment.expectedPointsLost != null) {
-    return `Dropped ${formatExpectedLoss(moment.expectedPointsLost)} expected score.`;
-  }
-
-  if (moment.cpLossCp != null) {
-    return `Engine loss: ${moment.cpLossCp} centipawns.`;
-  }
-
-  return 'No major engine swing detected.';
 }
 
 function formatCpSwing(value: number) {
