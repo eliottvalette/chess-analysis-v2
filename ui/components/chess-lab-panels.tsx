@@ -8,6 +8,7 @@ import {
   formatBestMove,
   formatPrincipalVariation,
   toChartScore,
+  type ReviewCategory,
   type StoredMove,
   type TimelineReview,
 } from '@/lib/chess-analysis-client';
@@ -461,7 +462,7 @@ export function GameReviewPanel({
       return;
     }
 
-    activeMoveButtonRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    activeMoveButtonRef.current?.scrollIntoView({ block: 'start', inline: 'nearest' });
   }, [hasLoadedGame, historyIndex]);
 
   if (!hasLoadedGame) {
@@ -635,7 +636,7 @@ function ReviewMoveButton({
   }
 
   const isActive = activePly === ply;
-  const dotColor = review?.colorHex ?? null;
+  const dotColor = getReviewDotColor(review);
 
   return (
     <button
@@ -687,38 +688,41 @@ function ReviewTimelineStrip({
 
   return (
     <div className={styles.reviewTimeline}>
-      <div className={styles.reviewTimelineHeader}>
-        <span className={styles.statusText}>{timelineLoading ? 'refreshing' : `ply ${historyIndex}/${moveHistoryLength}`}</span>
-        {timelineError ? <span className={styles.error}>{timelineError}</span> : null}
-      </div>
-      <svg className={styles.reviewTimelineSvg} viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="Evaluation timeline">
-        <rect className={styles.reviewTimelineBlack} x="0" y="0" width="100" height="28" />
-        {timelineAnalysesLength > 0 ? <path className={styles.reviewTimelineWhite} d={whiteAreaPath} /> : null}
-        <line className={styles.reviewTimelineMidline} x1="0" x2="100" y1="14" y2="14" />
-        {timelineAnalysesLength > 0 ? <path className={styles.reviewTimelinePath} d={boundaryPath} /> : null}
+      <div className={styles.reviewTimelineGraph}>
+        <svg className={styles.reviewTimelineSvg} viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="Evaluation timeline">
+          <rect className={styles.reviewTimelineBlack} x="0" y="0" width="100" height="28" />
+          {timelineAnalysesLength > 0 ? <path className={styles.reviewTimelineWhite} d={whiteAreaPath} /> : null}
+          <line className={styles.reviewTimelineMidline} x1="0" x2="100" y1="14" y2="14" />
+          {timelineAnalysesLength > 0 ? <path className={styles.reviewTimelinePath} d={boundaryPath} /> : null}
+          <line className={styles.reviewTimelineCursor} x1={cursorX} x2={cursorX} y1="0" y2="28" vectorEffect="non-scaling-stroke" />
+        </svg>
         {timelineReviews.map(review => {
-          if (!review.colorHex || !review.category) {
+          const dotColor = getReviewDotColor(review);
+
+          if (!dotColor) {
             return null;
           }
 
           const point = timelinePoints[review.ply - 1] ?? { x: 0, y: 14 };
 
           return (
-            <circle
+            <button
+              aria-label={`Go to ${review.moveLabel}`}
               className={styles.reviewTimelinePoint}
-              cx={point.x}
-              cy={point.y}
-              fill={review.colorHex}
               key={review.ply}
               onClick={() => jumpToIndex(review.ply)}
-              r={review.isKeyMoment ? 1.15 : 0.75}
-              vectorEffect="non-scaling-stroke"
+              style={{
+                ['--timeline-point-color' as string]: dotColor,
+                left: `${point.x}%`,
+                top: `${(point.y / 28) * 100}%`,
+              }}
+              type="button"
             />
           );
         })}
-        <line className={styles.reviewTimelineCursor} x1={cursorX} x2={cursorX} y1="0" y2="28" vectorEffect="non-scaling-stroke" />
-      </svg>
+      </div>
       {timelineAnalysesLength === 0 ? <div className={styles.reviewTimelineFallback}>{timelineLoading ? 'Analyzing...' : 'No review yet.'}</div> : null}
+      {timelineError ? <span className={styles.reviewTimelineError}>{timelineError}</span> : null}
     </div>
   );
 }
@@ -738,6 +742,20 @@ function compactCoachText(review: TimelineReview) {
 
   return review.coachText;
 }
+
+function getReviewDotColor(review: TimelineReview | null) {
+  if (!review?.category) {
+    return null;
+  }
+
+  if (!REVIEW_DOT_CATEGORIES.has(review.category)) {
+    return null;
+  }
+
+  return review.colorHex ?? '#b8f7a1';
+}
+
+const REVIEW_DOT_CATEGORIES = new Set<ReviewCategory>(['inaccuracy', 'miss', 'mistake', 'blunder']);
 
 function formatRecentGamePlayers(game: ChessComRecentGameSummary) {
   const player = game.playerUsername ?? 'You';

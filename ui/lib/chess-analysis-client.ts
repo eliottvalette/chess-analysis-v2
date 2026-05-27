@@ -117,22 +117,22 @@ export const reviewCategoryMeta: Record<
 > = {
   brilliant: {
     label: 'Brilliant',
-    color: '#9fd7ff',
+    color: '#b8f7a1',
     pointStyle: 'star',
   },
   book: {
     label: 'Book',
-    color: '#7d8797',
+    color: '#b0814c',
     pointStyle: 'rectRounded',
   },
   great: {
     label: 'Great',
-    color: '#8f75ff',
+    color: '#b8f7a1',
     pointStyle: 'triangle',
   },
   best: {
     label: 'Best',
-    color: '#f3f3ef',
+    color: '#b8f7a1',
     pointStyle: 'rectRounded',
   },
   excellent: {
@@ -152,17 +152,17 @@ export const reviewCategoryMeta: Record<
   },
   miss: {
     label: 'Miss',
-    color: '#ffc07a',
+    color: '#ff954a',
     pointStyle: 'rectRot',
   },
   mistake: {
     label: 'Mistake',
-    color: '#ff7b9b',
+    color: '#ff954a',
     pointStyle: 'crossRot',
   },
   blunder: {
     label: 'Blunder',
-    color: '#ff456f',
+    color: '#ff4444',
     pointStyle: 'cross',
   },
 };

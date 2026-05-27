@@ -147,6 +147,7 @@ export function ChessAnalysisLab() {
   const positionRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
   const timelineRefineRequestIdRef = useRef(0);
+  const reviewPlaybackRequestIdRef = useRef(0);
   const suppressSpaceKeyUpRef = useRef(false);
   const soundPlayersRef = useRef<Partial<Record<ChessSoundKey, HTMLAudioElement>>>({});
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
@@ -1091,8 +1092,54 @@ export function ChessAnalysisLab() {
     setMode('review');
     setReviewIndex(boundedIndex);
 
-    if (moment) {
-      jumpToIndex(Math.max(0, moment.ply - 1));
+    if (!moment) {
+      return;
+    }
+
+    void playToHistoryIndex(moment.ply);
+  }
+
+  async function playToHistoryIndex(targetIndex: number) {
+    const requestId = ++reviewPlaybackRequestIdRef.current;
+    const boundedTarget = Math.max(0, Math.min(targetIndex, moveHistory.length));
+
+    if (boundedTarget <= historyIndex) {
+      jumpToIndex(boundedTarget);
+      return;
+    }
+
+    for (let nextIndex = historyIndex + 1; nextIndex <= boundedTarget; nextIndex += 1) {
+      if (reviewPlaybackRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const nextGame = restoreGameFromHistory(moveHistory, initialFen, nextIndex);
+      const replayedMove = moveHistory[nextIndex - 1];
+
+      if (replayedMove) {
+        const playerSide = activeDeckCard?.side ?? reviewPlayerSide;
+        const isSelfMove =
+          playerSide == null
+            ? orientation === 'white'
+            : (playerSide === 'white' && replayedMove.color === 'w') || (playerSide === 'black' && replayedMove.color === 'b');
+
+        playSoundSequence(
+          getMoveSoundSequence({
+            move: replayedMove,
+            isSelfMove,
+            isCheck: nextGame.isCheck(),
+            isCheckmate: nextGame.isCheckmate(),
+            isGameOver: nextGame.isGameOver(),
+          }),
+        );
+      }
+
+      setHistoryIndex(nextIndex);
+      clearVariation();
+      setGame(nextGame);
+      clearSelection();
+
+      await delay(210);
     }
   }
 
@@ -1184,11 +1231,11 @@ export function ChessAnalysisLab() {
 
       const nextInitialFen = loadedGame.header().FEN ?? null;
       const nextHistory = loadedGame.history({ verbose: true }).map(toStoredMove);
-      const nextGame = restoreGameFromHistory(nextHistory, nextInitialFen);
+      const nextGame = restoreGameFromHistory(nextHistory, nextInitialFen, 0);
 
       setInitialFen(nextInitialFen);
       setMoveHistory(nextHistory);
-      setHistoryIndex(nextHistory.length);
+      setHistoryIndex(0);
       clearVariation();
       setGame(nextGame);
       setMetadata(extractMetadataFromGame(loadedGame));
@@ -1714,6 +1761,10 @@ function deleteCookie(name: string) {
   }
 
   document.cookie = `${name}=; path=/; max-age=0; samesite=lax`;
+}
+
+function delay(ms: number) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
 function FlipIcon() {
