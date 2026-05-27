@@ -11,8 +11,6 @@ import {
   filterReviewMoments,
   formatBestMove,
   formatPrincipalVariation,
-  reviewCategoryMeta,
-  reviewCategoryOrder,
   type GameMetadata,
   type ReviewSide,
   type StoredMove,
@@ -574,30 +572,6 @@ export function GameReviewPanel({
             {gameReview.opening.lastBookPly ? `book through ply ${gameReview.opening.lastBookPly}` : 'book not detected'}
           </span>
         </div>
-        <div className={styles.qualitySection}>
-          <div className={styles.qualityHeader}>
-            <span className={styles.metaLabel}>Move quality</span>
-            <span className={styles.statusText}>both players</span>
-          </div>
-          <div className={styles.qualityTable}>
-            {reviewCategoryOrder.map(category => {
-              const meta = reviewCategoryMeta[category];
-              const whiteCount = gameReview.counts.white[category];
-              const blackCount = gameReview.counts.black[category];
-
-              if (!whiteCount && !blackCount) {
-                return null;
-              }
-
-              return (
-                <div className={styles.qualityRow} key={category} style={{ ['--review-color' as string]: meta.color }}>
-                  <span>{meta.label}</span>
-                  <strong>{whiteCount + blackCount}</strong>
-                </div>
-              );
-            })}
-          </div>
-        </div>
       </section>
 
       <ChartSection
@@ -714,11 +688,37 @@ function formatCardLineTitle(card: DeckCard) {
 }
 
 function formatLearningPrompt(card: DeckCard) {
+  if (card.sourceType === 'recent_game') {
+    return card.prompt;
+  }
+
   if (card.opponentMoveSan) {
     return `Opponent just played ${card.opponentMoveSan}. Find the best reply.`;
   }
 
   return 'Find the best move in this position.';
+}
+
+function formatDeckCardLabel(card: DeckCard) {
+  return card.kind === 'repertoire_choice' ? 'Fix your mistake' : 'Find the punishment';
+}
+
+function formatProgressChip(progress: DeckProgressEntry | null) {
+  if (!progress || progress.seenCount === 0) {
+    return 'new';
+  }
+
+  if (progress.ignored) {
+    return 'ignored';
+  }
+
+  const due = Date.parse(progress.dueAt ?? '');
+
+  if (!Number.isFinite(due) || due <= Date.now()) {
+    return `due · ${progress.streak} streak`;
+  }
+
+  return `later · ${progress.intervalDays}d`;
 }
 
 export function LearnPanel({
@@ -875,7 +875,9 @@ export function DeckPanel({
         {card ? (
           <>
             <div className={styles.deckPrompt}>
-              <span className={styles.metaLabel}>Find the punishment</span>
+              <span className={styles.metaLabel}>
+                {formatDeckCardLabel(card)} · {formatProgressChip(activeCardProgress)}
+              </span>
               <strong>{formatLearningPrompt(card)}</strong>
             </div>
             {deckFeedback ? (
@@ -901,7 +903,7 @@ export function DeckPanel({
               <p className={styles.copy}>
                 {cardLoaded
                   ? card.validationMode === 'within_eval_loss' && card.maxEvalLossCp != null
-                    ? `Play the move on the board. Any punishment within ${formatCpSwing(card.maxEvalLossCp)} of best is accepted.`
+                    ? `Play the move on the board. Any move within ${formatCpSwing(card.maxEvalLossCp)} of best is accepted.`
                     : 'Play the exact move on the board. The answer is strict.'
                   : 'Load the card to put its position on the board.'}
               </p>

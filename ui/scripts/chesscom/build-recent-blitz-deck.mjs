@@ -14,13 +14,17 @@ const DEFAULT_DEPTH = 12;
 const DEFAULT_MOVETIME_MS = 250;
 const DEFAULT_MULTIPV = 1;
 const DEFAULT_MAX_PLY = 16;
-const DECK_ID = 'recent-blitz-punishments-v1';
+const DECK_ID = 'recent-blitz-trainer-v1';
 const execFileAsync = promisify(execFile);
 
 main().catch(error => {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });
+
+function logProgress(message) {
+  console.error(`[deck-build ${new Date().toISOString()}] ${message}`);
+}
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -39,47 +43,52 @@ async function main() {
   const multipv = Number(env.CHESSCOM_DECK_MULTIPV || DEFAULT_MULTIPV);
   const maxPly = Number(env.CHESSCOM_DECK_MAX_PLY || options.maxPly || DEFAULT_MAX_PLY);
 
+  logProgress(
+    `starting build username=${username} count=${options.count} time_class=${options.timeClass} max_ply=${maxPly} depth=${depth} movetime_ms=${movetimeMs}`,
+  );
+  logProgress(`checking analyze API at ${analyzeBaseUrl}`);
   await assertAnalyzeApi(analyzeBaseUrl);
 
+  logProgress(`fetching Chess.com archives for ${username}`);
   const archives = await fetchArchives(username);
+  logProgress(`fetching ${options.count} recent ${options.timeClass} games`);
   const games = await fetchRecentGames({
     username,
     archives,
     count: options.count,
     timeClass: options.timeClass,
   });
-
-  const deck = {
-    id: DECK_ID,
-    name: 'Recent Blitz Punishments',
-    description: `Personalized punish cards built from recent public ${options.timeClass} games for ${username}.`,
-    version: 1,
-    is_active: options.setActive,
-  };
+  logProgress(`fetched ${games.length} games`);
 
   const openingLines = [];
   const cards = [];
 
-  for (const game of games) {
+  for (const [gameIndex, game] of games.entries()) {
     const line = buildLineRecord(game, username);
     openingLines.push(line);
-    cards.push(
-      ...(await buildCardsForGame({
-        game,
-        line,
-        username,
-        analyzeBaseUrl,
-        depth,
-        movetimeMs,
-        multipv,
-        thresholdCp,
-        acceptableLossCp,
-        maxPly,
-      })),
+    logProgress(`[${gameIndex + 1}/${games.length}] analyzing ${line.name}`);
+    const gameCards = await buildCardsForGame({
+      game,
+      line,
+      username,
+      analyzeBaseUrl,
+      depth,
+      movetimeMs,
+      multipv,
+      thresholdCp,
+      acceptableLossCp,
+      maxPly,
+      gameIndex,
+      totalGames: games.length,
+    });
+    cards.push(...gameCards);
+    logProgress(
+      `[${gameIndex + 1}/${games.length}] done ${line.name}: +${gameCards.length} cards (${cards.length} total)`,
     );
   }
 
   if (options.writeSupabase) {
+    logProgress('writing deck to Supabase');
     const supabaseUrl = requireEnv(env, 'NEXT_PUBLIC_SUPABASE_URL');
     const adminKey = requireAdminKey(env);
     const supabase = createClient(supabaseUrl, adminKey, {
@@ -88,19 +97,37 @@ async function main() {
         autoRefreshToken: false,
       },
     });
+    const ownerProfileId = await findTrainingProfileId(supabase, username);
+    const deck = {
+      id: ownerProfileId ? `${DECK_ID}-${username}` : DECK_ID,
+      owner_profile_id: ownerProfileId,
+      name: ownerProfileId ? `Recent Blitz Trainer · ${username}` : 'Recent Blitz Trainer',
+      description: `Personalized fix and punish cards built from recent public ${options.timeClass} games for ${username}.`,
+      version: 1,
+      is_active: options.setActive,
+    };
+    const deckCards = cards.map(card => ({ ...card, deck_id: deck.id }));
+    const deckLines = openingLines.map(line => ({ ...line, deck_id: deck.id }));
 
-    if (options.setActive) {
-      const { error: deactivateError } = await supabase.from('decks').update({ is_active: false }).neq('id', DECK_ID);
-
-      if (deactivateError) {
-        throw new Error(`deactivate decks: ${deactivateError.message}`);
-      }
+    if (ownerProfileId) {
+      logProgress(`using owner training profile ${ownerProfileId}`);
+    } else {
+      logProgress(`no training profile found for ${username}; writing global deck`);
     }
 
-    await upsert(supabase, 'decks', deck, 'id');
-    await deleteExistingDeckRows(supabase, DECK_ID);
-    await upsert(supabase, 'opening_lines', openingLines, 'id');
-    await upsert(supabase, 'deck_cards', cards, 'id');
+    if (options.setActive) {
+      logProgress(`deactivating sibling decks before activating ${deck.id}`);
+      await deactivateSiblingDecks(supabase, deck.id, ownerProfileId);
+    }
+
+    await upsertDeck(supabase, deck);
+    logProgress(`upserted deck ${deck.id}`);
+    await deleteExistingDeckRows(supabase, deck.id);
+    logProgress(`deleted existing rows for deck ${deck.id}`);
+    await upsert(supabase, 'opening_lines', deckLines, 'id');
+    logProgress(`upserted ${deckLines.length} opening lines`);
+    await upsert(supabase, 'deck_cards', deckCards, 'id');
+    logProgress(`upserted ${deckCards.length} deck cards`);
   }
 
   console.log(
@@ -116,6 +143,7 @@ async function main() {
         cards: cards.length,
         top_cards: cards.slice(0, 10).map(card => ({
           id: card.id,
+          kind: card.kind,
           line_name: card.line_name,
           prompt: card.prompt,
           score_swing_cp: card.score_swing_cp,
@@ -187,7 +215,7 @@ function buildLineRecord(game, username) {
   const opponent = playerColor === 'white' ? game.black?.username : game.white?.username;
   const eco = extractTag(game.pgn, 'ECO') ?? 'GAME';
   const date = extractTag(game.pgn, 'UTCDate') ?? 'recent';
-  const lineId = `recent-${game.url.split('/').pop()}`;
+  const lineId = `recent-${username.toLowerCase()}-${game.url.split('/').pop()}`;
   const lineName = `${date} vs ${opponent ?? 'opponent'} · ${eco}`;
   const moves = extractSanMoves(game.pgn);
 
@@ -212,6 +240,8 @@ async function buildCardsForGame({
   thresholdCp,
   acceptableLossCp,
   maxPly,
+  gameIndex,
+  totalGames,
 }) {
   const cards = [];
   const playerColor = inferPlayerColor(game, username);
@@ -234,6 +264,7 @@ async function buildCardsForGame({
     const moveUci = `${move.from}${move.to}${move.promotion ?? ''}`;
 
     if (sideToMove === playerColor) {
+      logProgress(`[${gameIndex + 1}/${totalGames}] ply ${index + 1}: checking your move ${move.san}`);
       const beforeAnalysis = await analyzePosition(analyzeBaseUrl, {
         fen: fenBefore,
         depth,
@@ -241,6 +272,7 @@ async function buildCardsForGame({
         multipv,
       });
       const bestScore = scoreToCpForSide(beforeAnalysis.whitePerspective, playerColor);
+      const contextBeforeMove = moveHistory.length > 0 ? moveHistory.join(' ') : 'starting position';
 
       chess.move(move);
       moveHistory.push(move.san);
@@ -255,18 +287,47 @@ async function buildCardsForGame({
       const afterScore = scoreToCpForSide(afterAnalysis.whitePerspective, playerColor);
       const punishmentScore = scoreToCpForSide(afterAnalysis.whitePerspective, trainingSide);
 
-      if (bestScore == null || afterScore == null || punishmentScore == null || !afterAnalysis.bestMove) {
+      if (bestScore == null || afterScore == null || punishmentScore == null || !beforeAnalysis.bestMove || !afterAnalysis.bestMove) {
+        logProgress(`[${gameIndex + 1}/${totalGames}] ply ${index + 1}: skipped ${move.san} (missing eval/best move)`);
         continue;
       }
 
       const scoreSwingCp = Math.round(bestScore - afterScore);
 
       if (scoreSwingCp < thresholdCp) {
+        logProgress(`[${gameIndex + 1}/${totalGames}] ply ${index + 1}: ok ${move.san} loss=${scoreSwingCp}cp`);
         continue;
       }
 
+      logProgress(
+        `[${gameIndex + 1}/${totalGames}] ply ${index + 1}: found mistake ${move.san} loss=${scoreSwingCp}cp -> +2 cards`,
+      );
+
       cards.push({
-        id: `${line.id}-ply-${index + 1}`,
+        id: `${line.id}-ply-${index + 1}-fix`,
+        deck_id: DECK_ID,
+        line_id: line.id,
+        kind: 'repertoire_choice',
+        line_name: line.name,
+        eco,
+        side: playerColor,
+        ply: index + 1,
+        fen: fenBefore,
+        answer_uci: beforeAnalysis.bestMove,
+        answer_san: moveFromFen(fenBefore, beforeAnalysis.bestMove)?.san ?? beforeAnalysis.bestMove,
+        prompt: `In your game vs ${opponent ?? 'opponent'}, before ${move.san}, find your best move.`,
+        context: `${gameDate} · ${eco} · result ${gameResult} · line ${contextBeforeMove}`,
+        source_type: 'recent_game',
+        validation_mode: 'within_eval_loss',
+        reference_eval_cp: Math.round(bestScore),
+        max_eval_loss_cp: acceptableLossCp,
+        opponent_move_uci: null,
+        opponent_move_san: null,
+        score_swing_cp: scoreSwingCp,
+      });
+
+      cards.push({
+        id: `${line.id}-ply-${index + 1}-punish`,
         deck_id: DECK_ID,
         line_id: line.id,
         kind: 'punish_mistake',
@@ -387,6 +448,63 @@ async function upsert(supabase, table, rows, onConflict) {
   if (error) {
     throw new Error(`${table}: ${error.message}`);
   }
+}
+
+async function upsertDeck(supabase, deck) {
+  const { error } = await supabase.from('decks').upsert(deck, { onConflict: 'id' });
+
+  if (!error) {
+    return;
+  }
+
+  if (!error.message.includes('owner_profile_id')) {
+    throw new Error(`decks: ${error.message}`);
+  }
+
+  const legacyDeck = { ...deck };
+  delete legacyDeck.owner_profile_id;
+  logProgress('decks.owner_profile_id is missing; writing deck without profile ownership');
+  const fallback = await supabase.from('decks').upsert(legacyDeck, { onConflict: 'id' });
+
+  if (fallback.error) {
+    throw new Error(`decks: ${fallback.error.message}`);
+  }
+}
+
+async function deactivateSiblingDecks(supabase, deckId, ownerProfileId) {
+  const deactivateQuery = supabase.from('decks').update({ is_active: false }).neq('id', deckId);
+  const { error } = ownerProfileId
+    ? await deactivateQuery.eq('owner_profile_id', ownerProfileId)
+    : await deactivateQuery.is('owner_profile_id', null);
+
+  if (!error) {
+    return;
+  }
+
+  if (!error.message.includes('owner_profile_id')) {
+    throw new Error(`deactivate decks: ${error.message}`);
+  }
+
+  logProgress('decks.owner_profile_id is missing; deactivating other decks globally');
+  const fallback = await supabase.from('decks').update({ is_active: false }).neq('id', deckId);
+
+  if (fallback.error) {
+    throw new Error(`deactivate decks: ${fallback.error.message}`);
+  }
+}
+
+async function findTrainingProfileId(supabase, username) {
+  const { data, error } = await supabase
+    .from('training_profiles')
+    .select('id')
+    .eq('username', username.toLowerCase())
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`training_profiles: ${error.message}`);
+  }
+
+  return data?.id ?? null;
 }
 
 async function deleteExistingDeckRows(supabase, deckId) {

@@ -57,12 +57,12 @@ import {
 import {
   applyDeckAttempt,
   getDeckProgressEntry,
+  sortCardsForReview,
   summarizeDeckProgress,
   toggleDeckIgnored,
   type DeckProgressMap,
 } from '@/lib/deck-progress';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
-import { createClient as createSupabaseClient } from '@/utils/supabase/client';
 import styles from './chess-analysis-lab.module.css';
 
 const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
@@ -72,8 +72,8 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
-const POSITION_DEPTH = 24;
-const POSITION_MOVETIME_MS = 500;
+const POSITION_DEPTH = 20;
+const POSITION_MOVETIME_MS = 400;
 const TIMELINE_MOVETIME_MS = 80;
 const POSITION_MULTIPV = 3;
 const PRELOAD_AHEAD = 15;
@@ -99,8 +99,6 @@ const REVIEW_MOVE_STYLES: Partial<Record<ReviewCategory, CSSProperties>> = {
     boxShadow: 'inset 0 0 0 2px rgba(255, 162, 162, 0.58)',
   },
 };
-const DECK_CARD_SELECT =
-  'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp';
 const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
 const CHESSCOM_TIME_CLASS_COOKIE = 'chesscom_time_class';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
@@ -159,6 +157,7 @@ export function ChessAnalysisLab() {
   const evalRailRef = useRef<HTMLDivElement | null>(null);
   const positionRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
+  const timelineRefineRequestIdRef = useRef(0);
   const suppressSpaceKeyUpRef = useRef(false);
   const soundPlayersRef = useRef<Partial<Record<ChessSoundKey, HTMLAudioElement>>>({});
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
@@ -200,7 +199,7 @@ export function ChessAnalysisLab() {
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
   const availableDeckCards = useMemo(
-    () => deckCards.filter(card => !getDeckProgressEntry(deckProgress, card.id).ignored),
+    () => sortCardsForReview(deckCards.filter(card => !getDeckProgressEntry(deckProgress, card.id).ignored), deckProgress),
     [deckCards, deckProgress],
   );
   const deckStats = useMemo(() => summarizeDeckProgress(deckCards, deckProgress), [deckCards, deckProgress]);
@@ -388,7 +387,7 @@ export function ChessAnalysisLab() {
 
     observer.observe(stage);
     return () => observer.disconnect();
-  }, []);
+  }, [trainingProfile?.id]);
 
   const fetchRecentChessGames = useCallback(
     async (usernameOverride?: string, timeClassOverride?: 'bullet' | 'blitz' | 'rapid') => {
@@ -434,6 +433,29 @@ export function ChessAnalysisLab() {
       });
     } catch {
       // Local storage remains the fallback when server sync is unavailable.
+    }
+  }, []);
+
+  const saveTrainingAttempt = useCallback(async (card: DeckCard, feedback: DeckFeedback) => {
+    try {
+      await fetch('/api/training-progress', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          attempt: {
+            cardId: card.id,
+            playedUci: feedback.playedUci,
+            playedSan: feedback.playedSan,
+            expectedUci: card.answerUci,
+            expectedSan: feedback.expectedSan,
+            correct: feedback.correct,
+            exact: feedback.exact,
+            evalLossCp: feedback.evalLossCp ?? null,
+          },
+        }),
+      });
+    } catch {
+      // Progress still syncs separately; attempts are best-effort telemetry.
     }
   }, []);
 
@@ -574,37 +596,43 @@ export function ChessAnalysisLab() {
     let cancelled = false;
 
     async function loadDeck() {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-      if (!supabaseUrl || !publishableKey) {
-        if (!cancelled) {
-          setOpeningLines([]);
-          setDeckCards([]);
-          setDeckLoadError('Supabase deck is not configured in this deployment.');
-          setDeckLoading(false);
-        }
-        return;
-      }
-
       setDeckLoading(true);
       setDeckLoadError('');
 
       try {
-        const supabase = createSupabaseClient();
-        const { data: activeDeck, error: deckError } = await supabase
-          .from('decks')
-          .select('id')
-          .eq('is_active', true)
-          .order('version', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const response = await fetch('/api/training-deck');
+        const payload = (await response.json()) as {
+          deck?: { id: string; ownerProfileId: string | null } | null;
+          lines?: Array<{ id: string; name: string; eco: string; side: string; moves: string[] | null }>;
+          cards?: Array<{
+            id: string;
+            kind: string;
+            line_id: string | null;
+            line_name: string;
+            eco: string;
+            side: string;
+            ply: number;
+            fen: string;
+            answer_uci: string;
+            answer_san: string;
+            prompt: string;
+            context: string;
+            source_type?: string | null;
+            validation_mode?: string | null;
+            reference_eval_cp?: number | null;
+            max_eval_loss_cp?: number | null;
+            opponent_move_uci?: string | null;
+            opponent_move_san?: string | null;
+            score_swing_cp?: number | null;
+          }>;
+          error?: string;
+        };
 
-        if (deckError) {
-          throw new Error(deckError.message);
+        if (!response.ok) {
+          throw new Error(payload.error ?? `Training deck fetch failed: HTTP ${response.status}`);
         }
 
-        if (!activeDeck) {
+        if (!payload.deck) {
           if (!cancelled) {
             setOpeningLines([]);
             setDeckCards([]);
@@ -612,31 +640,12 @@ export function ChessAnalysisLab() {
           return;
         }
 
-        const [{ data: lines, error: linesError }, { data: cards, error: cardsError }] = await Promise.all([
-          supabase.from('opening_lines').select('id,name,eco,side,moves').eq('deck_id', activeDeck.id).order('id'),
-          supabase
-            .from('deck_cards')
-            .select(DECK_CARD_SELECT)
-            .eq('deck_id', activeDeck.id)
-            .eq('kind', 'punish_mistake')
-            .lte('ply', 24)
-            .order('score_swing_cp', { ascending: false, nullsFirst: false }),
-        ]);
-
-        if (linesError) {
-          throw new Error(linesError.message);
-        }
-
-        if (cardsError) {
-          throw new Error(cardsError.message);
-        }
-
         if (cancelled) {
           return;
         }
 
         setOpeningLines(
-          (lines ?? []).map((line: { id: string; name: string; eco: string; side: string; moves: string[] | null }) => ({
+          (payload.lines ?? []).map(line => ({
             id: String(line.id),
             name: String(line.name),
             eco: String(line.eco),
@@ -646,30 +655,10 @@ export function ChessAnalysisLab() {
         );
         setDeckCards(
           (
-            cards ?? []
-          ).map(
-            (card: {
-              id: string;
-              line_id: string | null;
-              line_name: string;
-              eco: string;
-              side: string;
-              ply: number;
-              fen: string;
-              answer_uci: string;
-              answer_san: string;
-              prompt: string;
-              context: string;
-              source_type?: string | null;
-              validation_mode?: string | null;
-              reference_eval_cp?: number | null;
-              max_eval_loss_cp?: number | null;
-              opponent_move_uci?: string | null;
-              opponent_move_san?: string | null;
-              score_swing_cp?: number | null;
-            }) => ({
+            payload.cards ?? []
+          ).map(card => ({
             id: String(card.id),
-            kind: 'punish_mistake',
+            kind: card.kind === 'repertoire_choice' ? 'repertoire_choice' : 'punish_mistake',
             lineId: card.line_id ? String(card.line_id) : '',
             lineName: String(card.line_name),
             eco: String(card.eco),
@@ -785,7 +774,8 @@ export function ChessAnalysisLab() {
 
     setDeckFeedback(gradedFeedback);
     setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
-  }, [activeDeckCard, deckFeedback, historyIndex, moveHistory.length, positionAnalysis, positionLoading]);
+    void saveTrainingAttempt(activeDeckCard, gradedFeedback);
+  }, [activeDeckCard, deckFeedback, historyIndex, moveHistory.length, positionAnalysis, positionLoading, saveTrainingAttempt]);
 
   useEffect(() => {
     setReviewIndex(value => Math.max(0, Math.min(value, Math.max(0, reviewMoments.length - 1))));
@@ -860,6 +850,7 @@ export function ChessAnalysisLab() {
       setGame(nextGame);
       setPositionAnalysis(null);
       setTimelineAnalyses([]);
+      timelineRefineRequestIdRef.current += 1;
       setServerError('');
       setTimelineError('');
       setSelectedSquare(null);
@@ -883,10 +874,11 @@ export function ChessAnalysisLab() {
           const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback, null);
           setDeckFeedback(gradedFeedback);
           setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
+          void saveTrainingAttempt(activeDeckCard, gradedFeedback);
         }
       }
     },
-    [activeDeckCard, deckFeedback, hasLoadedGame, historyIndex, moveHistory, playSoundSequence, variationBaseIndex, variationMoves],
+    [activeDeckCard, deckFeedback, hasLoadedGame, historyIndex, moveHistory, playSoundSequence, saveTrainingAttempt, variationBaseIndex, variationMoves],
   );
 
   const tryMove = useCallback(
@@ -936,6 +928,7 @@ export function ChessAnalysisLab() {
     setMetadata(null);
     setFileName('');
     setPreMoveAnalyses([]);
+    timelineRefineRequestIdRef.current += 1;
     setMode('train');
     setActiveDeckCard(card);
     setDeckFeedback(null);
@@ -1131,6 +1124,7 @@ export function ChessAnalysisLab() {
 
   async function runTimelineAnalysis(nextMoves = moveHistory, nextInitialFen = initialFen) {
     const requestId = ++timelineRequestIdRef.current;
+    timelineRefineRequestIdRef.current += 1;
 
     if (nextMoves.length === 0) {
       setPreMoveAnalyses([]);
@@ -1157,6 +1151,7 @@ export function ChessAnalysisLab() {
       const sequence = response.analyses ?? [];
       setPreMoveAnalyses(sequence.slice(0, -1));
       setTimelineAnalyses(sequence.slice(1));
+      void refineTimelineAnalysis(nextMoves, nextInitialFen);
     } catch (error) {
       if (timelineRequestIdRef.current !== requestId) {
         return;
@@ -1172,7 +1167,43 @@ export function ChessAnalysisLab() {
     }
   }
 
+  async function refineTimelineAnalysis(nextMoves = moveHistory, nextInitialFen = initialFen) {
+    if (nextMoves.length === 0) {
+      return;
+    }
+
+    const requestId = ++timelineRefineRequestIdRef.current;
+    const sequence: AnalysisResult[] = [];
+
+    try {
+      for (const position of buildTimelineSequencePositions(nextMoves, nextInitialFen)) {
+        if (timelineRefineRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        const moves = position.moves ?? [];
+        if (!position.fen) {
+          throw new Error('Missing timeline position.');
+        }
+
+        const cacheKey = getPositionCacheKey(nextInitialFen, moves);
+        sequence.push(await fetchCachedPositionAnalysis(cacheKey, position.fen, moves));
+      }
+
+      if (timelineRefineRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setPreMoveAnalyses(sequence.slice(0, -1));
+      setTimelineAnalyses(sequence.slice(1));
+    } catch {
+      // Keep the fast timeline in place if the background high-quality pass fails.
+    }
+  }
+
   async function loadPgnText(name: string, content: string, preferredOrientation?: 'white' | 'black') {
+    timelineRefineRequestIdRef.current += 1;
+
     try {
       const loadedGame = new Chess();
       loadedGame.loadPgn(content);
@@ -1272,6 +1303,7 @@ export function ChessAnalysisLab() {
   function resetWorkspace() {
     positionRequestIdRef.current += 1;
     timelineRequestIdRef.current += 1;
+    timelineRefineRequestIdRef.current += 1;
     setGame(new Chess());
     setInitialFen(null);
     setMoveHistory([]);
@@ -1584,9 +1616,14 @@ function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckP
       seenCount: Math.max(serverEntry.seenCount, localEntry.seenCount),
       correctCount: Math.max(serverEntry.correctCount, localEntry.correctCount),
       missCount: Math.max(serverEntry.missCount, localEntry.missCount),
+      reviewCount: Math.max(serverEntry.reviewCount, localEntry.reviewCount),
+      lapseCount: Math.max(serverEntry.lapseCount, localEntry.lapseCount),
       streak: localIsLater ? localEntry.streak : serverEntry.streak,
+      ease: localIsLater ? localEntry.ease : serverEntry.ease,
+      intervalDays: localIsLater ? localEntry.intervalDays : serverEntry.intervalDays,
       ignored: serverEntry.ignored || localEntry.ignored,
       lastOutcome: localIsLater ? localEntry.lastOutcome : serverEntry.lastOutcome,
+      dueAt: localIsLater ? localEntry.dueAt : serverEntry.dueAt,
       lastSeenAt: localIsLater ? localEntry.lastSeenAt : serverEntry.lastSeenAt,
     };
   }

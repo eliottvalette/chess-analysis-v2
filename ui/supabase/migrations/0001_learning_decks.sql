@@ -80,6 +80,9 @@ create table if not exists public.training_profiles (
   updated_at timestamptz not null default now()
 );
 
+alter table public.decks
+add column if not exists owner_profile_id uuid references public.training_profiles(id) on delete cascade;
+
 create table if not exists public.training_card_progress (
   profile_id uuid not null references public.training_profiles(id) on delete cascade,
   card_id text not null references public.deck_cards(id) on delete cascade,
@@ -87,18 +90,40 @@ create table if not exists public.training_card_progress (
   correct_count integer not null default 0,
   miss_count integer not null default 0,
   streak integer not null default 0,
+  review_count integer not null default 0,
+  lapse_count integer not null default 0,
+  ease numeric not null default 2.5,
+  interval_days integer not null default 0,
   ignored boolean not null default false,
   last_outcome text check (last_outcome in ('correct', 'miss')),
+  due_at timestamptz not null default now(),
   last_seen_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (profile_id, card_id)
 );
 
+create table if not exists public.training_card_attempts (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid not null references public.training_profiles(id) on delete cascade,
+  card_id text not null references public.deck_cards(id) on delete cascade,
+  played_uci text not null,
+  played_san text not null,
+  expected_uci text not null,
+  expected_san text not null,
+  correct boolean not null,
+  exact boolean not null default false,
+  eval_loss_cp integer,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists deck_cards_deck_id_idx on public.deck_cards(deck_id);
 create index if not exists deck_cards_line_id_idx on public.deck_cards(line_id);
+create index if not exists decks_owner_profile_id_idx on public.decks(owner_profile_id);
 create index if not exists user_card_attempts_user_id_created_at_idx on public.user_card_attempts(user_id, created_at desc);
 create index if not exists training_card_progress_profile_id_idx on public.training_card_progress(profile_id);
+create index if not exists training_card_progress_due_idx on public.training_card_progress(profile_id, due_at);
+create index if not exists training_card_attempts_profile_id_created_at_idx on public.training_card_attempts(profile_id, created_at desc);
 
 alter table public.decks enable row level security;
 alter table public.opening_lines enable row level security;
@@ -107,11 +132,12 @@ alter table public.user_card_progress enable row level security;
 alter table public.user_card_attempts enable row level security;
 alter table public.training_profiles enable row level security;
 alter table public.training_card_progress enable row level security;
+alter table public.training_card_attempts enable row level security;
 
 drop policy if exists "Decks are readable" on public.decks;
 create policy "Decks are readable"
 on public.decks for select
-using (true);
+using (owner_profile_id is null);
 
 drop policy if exists "Opening lines are readable" on public.opening_lines;
 create policy "Opening lines are readable"

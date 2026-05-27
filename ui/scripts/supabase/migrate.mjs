@@ -7,6 +7,9 @@ import { loadLocalEnv, requireEnv } from './env.mjs';
 
 const { Client } = pg;
 const RESET_DECK_SCHEMA_SQL = `
+drop table if exists public.training_card_attempts cascade;
+drop table if exists public.training_card_progress cascade;
+drop table if exists public.training_profiles cascade;
 drop table if exists public.user_card_attempts cascade;
 drop table if exists public.user_card_progress cascade;
 drop table if exists public.deck_cards cascade;

@@ -17,8 +17,13 @@ test('applyDeckAttempt increments seen counts and resets streak on misses', () =
     correctCount: 1,
     missCount: 1,
     streak: 0,
+    reviewCount: 2,
+    lapseCount: 1,
+    ease: 2.3,
+    intervalDays: 0,
     ignored: false,
     lastOutcome: 'miss',
+    dueAt: '2026-05-24T10:15:00.000Z',
     lastSeenAt: '2026-05-24T10:05:00.000Z',
   });
 });
