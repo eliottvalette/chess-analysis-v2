@@ -93,6 +93,14 @@ export async function POST(request: Request) {
     return deleteDeckCard(profile, body);
   }
 
+  if (action === 'rename_deck') {
+    return renameDeck(profile, body);
+  }
+
+  if (action === 'delete_deck') {
+    return deleteDeck(profile, body);
+  }
+
   return NextResponse.json({ error: 'Unknown deck action.' }, { status: 400 });
 }
 
@@ -281,6 +289,107 @@ async function deleteDeckCard(profile: TrainingProfileCookie, body: Record<strin
   }
 
   return NextResponse.json({ cardId });
+}
+
+async function renameDeck(profile: TrainingProfileCookie, body: Record<string, unknown>) {
+  const deckId = String(body.deckId ?? '');
+  const name = clampText(String(body.name ?? ''), 80);
+
+  if (!deckId) {
+    return NextResponse.json({ error: 'Deck is required.' }, { status: 400 });
+  }
+
+  if (!name) {
+    return NextResponse.json({ error: 'Deck title is required.' }, { status: 400 });
+  }
+
+  const ownedDeck = await getOwnedDeck(profile, deckId);
+
+  if (!ownedDeck) {
+    return NextResponse.json({ error: 'You can only rename your own decks.' }, { status: 403 });
+  }
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from('decks')
+    .update({ name })
+    .eq('id', deckId)
+    .eq('owner_profile_id', profile.id)
+    .select(DECK_SELECT)
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  const progressByCardId = await fetchProgressByCardId(supabase, profile.id);
+  const deckCounts = await fetchDeckCounts(supabase, [deckId]);
+
+  return NextResponse.json({
+    deck: summarizeDeck(data, deckCounts.get(deckId) ?? [], progressByCardId, profile.id),
+  });
+}
+
+async function deleteDeck(profile: TrainingProfileCookie, body: Record<string, unknown>) {
+  const deckId = String(body.deckId ?? '');
+
+  if (!deckId) {
+    return NextResponse.json({ error: 'Deck is required.' }, { status: 400 });
+  }
+
+  const ownedDeck = await getOwnedDeck(profile, deckId);
+
+  if (!ownedDeck) {
+    return NextResponse.json({ error: 'You can only delete your own decks.' }, { status: 403 });
+  }
+
+  const supabase = createAdminClient();
+  const { data: cards, error: cardsError } = await supabase.from('deck_cards').select('id').eq('deck_id', deckId);
+
+  if (cardsError) {
+    return NextResponse.json({ error: cardsError.message }, { status: 500 });
+  }
+
+  const cardIds = (cards ?? []).map(card => String(card.id));
+
+  if (cardIds.length > 0) {
+    const { error: progressError } = await supabase
+      .from('training_card_progress')
+      .delete()
+      .eq('profile_id', profile.id)
+      .in('card_id', cardIds);
+
+    if (progressError) {
+      return NextResponse.json({ error: progressError.message }, { status: 500 });
+    }
+  }
+
+  const { error: deleteError } = await supabase.from('decks').delete().eq('id', deckId).eq('owner_profile_id', profile.id);
+
+  if (deleteError) {
+    return NextResponse.json({ error: deleteError.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ deckId });
+}
+
+async function getOwnedDeck(profile: TrainingProfileCookie, deckId: string) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from('decks')
+    .select('id,owner_profile_id')
+    .eq('id', deckId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data || data.owner_profile_id !== profile.id) {
+    return null;
+  }
+
+  return data;
 }
 
 async function fetchAccessibleDecks(supabase: ReturnType<typeof createAdminClient>, profileId: string | null) {

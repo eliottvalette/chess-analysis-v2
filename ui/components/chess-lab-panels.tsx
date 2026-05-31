@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useRef, type ChangeEvent, type ReactNode, type RefObject } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type RefObject } from 'react';
 
 import type { AnalysisLine, AnalysisResult } from '@/lib/analysis-types';
 import {
@@ -204,6 +204,8 @@ export function TrainPanel({
   onNext,
   onDeleteCard,
   onTrainDeck,
+  onRenameDeck,
+  onDeleteDeck,
   onNewDeckTitleChange,
   selectedDeckId,
   startCard,
@@ -228,6 +230,8 @@ export function TrainPanel({
   onNext: () => void;
   onDeleteCard: () => void;
   onTrainDeck: (deckId: string) => void;
+  onRenameDeck: (deckId: string, name: string) => void;
+  onDeleteDeck: (deckId: string) => void;
   onNewDeckTitleChange: (value: string) => void;
   selectedDeckId: string | null;
   startCard: (card: DeckCard | null) => void;
@@ -245,6 +249,8 @@ export function TrainPanel({
         onGenerateRecentDeck={onGenerateRecentDeck}
         onNewDeckTitleChange={onNewDeckTitleChange}
         onTrainDeck={onTrainDeck}
+        onRenameDeck={onRenameDeck}
+        onDeleteDeck={onDeleteDeck}
         selectedDeckId={selectedDeckId}
       />
     );
@@ -957,6 +963,177 @@ function formatProgressChip(progress: DeckProgressEntry | null) {
   return `later · ${progress.intervalDays}d`;
 }
 
+function DeckLibraryItem({
+  deck,
+  deckActionLoading,
+  deckLoading,
+  isSelected,
+  onDeleteDeck,
+  onRenameDeck,
+  onTrainDeck,
+}: {
+  deck: TrainingDeckSummary;
+  deckActionLoading: boolean;
+  deckLoading: boolean;
+  isSelected: boolean;
+  onDeleteDeck: (deckId: string) => void;
+  onRenameDeck: (deckId: string, name: string) => void;
+  onTrainDeck: (deckId: string) => void;
+}) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState('');
+  const trainDisabled = deckLoading || deckActionLoading || deck.cardCount === 0;
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return undefined;
+    }
+
+    const closeMenu = (event: PointerEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setMenuOpen(false);
+    };
+
+    window.addEventListener('pointerdown', closeMenu);
+
+    return () => {
+      window.removeEventListener('pointerdown', closeMenu);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!renaming) {
+      return undefined;
+    }
+
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+
+    return undefined;
+  }, [renaming]);
+
+  function startRename() {
+    setMenuOpen(false);
+    setRenameDraft(deck.name);
+    setRenaming(true);
+  }
+
+  function cancelRename() {
+    setRenaming(false);
+    setRenameDraft(deck.name);
+  }
+
+  function submitRename() {
+    const trimmedName = renameDraft.trim();
+
+    if (!trimmedName) {
+      cancelRename();
+      return;
+    }
+
+    if (trimmedName !== deck.name) {
+      onRenameDeck(deck.id, trimmedName);
+    }
+
+    setRenaming(false);
+  }
+
+  function handleDeleteDeck() {
+    setMenuOpen(false);
+    onDeleteDeck(deck.id);
+  }
+
+  return (
+    <div className={`${styles.deckLibraryItemWrap} ${isSelected ? styles.activeDeckLibraryItemWrap : ''}`}>
+      <button
+        className={`${styles.deckLibraryItem} ${isSelected ? styles.activeDeckLibraryItem : ''}`}
+        disabled={trainDisabled}
+        onClick={() => onTrainDeck(deck.id)}
+        type="button"
+      >
+        <span className={styles.deckLibraryHead}>
+          {renaming ? (
+            <input
+              className={`${styles.inlineInput} ${styles.deckRenameInput}`}
+              onBlur={submitRename}
+              onChange={event => setRenameDraft(event.target.value)}
+              onClick={event => event.stopPropagation()}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  submitRename();
+                }
+
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelRename();
+                }
+              }}
+              onPointerDown={event => event.stopPropagation()}
+              ref={renameInputRef}
+              value={renameDraft}
+            />
+          ) : (
+            <strong>{deck.name}</strong>
+          )}
+          <span>{deck.cardCount} cards</span>
+        </span>
+        <span className={styles.deckLibraryMeta}>
+          <span>{deck.newCount} new</span>
+          <span>{deck.learningCount} learning</span>
+          <span>{deck.dueCount} due</span>
+        </span>
+      </button>
+
+      {deck.isOwned ? (
+        <div className={styles.deckLibraryMenuAnchor} ref={menuRef}>
+          <button
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            aria-label={`Deck options for ${deck.name}`}
+            className={styles.deckLibraryMenuButton}
+            disabled={deckLoading || deckActionLoading}
+            onClick={event => {
+              event.stopPropagation();
+              setMenuOpen(open => !open);
+            }}
+            type="button"
+          >
+            <DeckMoreIcon />
+          </button>
+
+          {menuOpen ? (
+            <div className={styles.deckLibraryMenu} role="menu">
+              <button className={styles.deckLibraryMenuOption} onClick={startRename} role="menuitem" type="button">
+                Rename
+              </button>
+              <button className={`${styles.deckLibraryMenuOption} ${styles.deckLibraryMenuOptionDanger}`} onClick={handleDeleteDeck} role="menuitem" type="button">
+                Delete
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DeckMoreIcon() {
+  return (
+    <svg className={styles.deckMenuIcon} viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+      <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function LearnPanel({
   deckActionError,
   deckActionLoading,
@@ -968,6 +1145,8 @@ export function LearnPanel({
   onGenerateRecentDeck,
   onNewDeckTitleChange,
   onTrainDeck,
+  onRenameDeck,
+  onDeleteDeck,
   selectedDeckId,
 }: {
   deckActionError: string;
@@ -980,6 +1159,8 @@ export function LearnPanel({
   onGenerateRecentDeck: () => void;
   onNewDeckTitleChange: (value: string) => void;
   onTrainDeck: (deckId: string) => void;
+  onRenameDeck: (deckId: string, name: string) => void;
+  onDeleteDeck: (deckId: string) => void;
   selectedDeckId: string | null;
 }) {
   return (
@@ -1000,23 +1181,16 @@ export function LearnPanel({
         ) : (
           <div className={styles.deckLibrary}>
             {deckSummaries.map(deck => (
-              <button
-                className={`${styles.deckLibraryItem} ${deck.id === selectedDeckId ? styles.activeDeckLibraryItem : ''}`}
-                disabled={deckLoading || deckActionLoading || deck.cardCount === 0}
+              <DeckLibraryItem
+                deck={deck}
+                deckActionLoading={deckActionLoading}
+                deckLoading={deckLoading}
+                isSelected={deck.id === selectedDeckId}
                 key={deck.id}
-                onClick={() => onTrainDeck(deck.id)}
-                type="button"
-              >
-                <span className={styles.deckLibraryHead}>
-                  <strong>{deck.name}</strong>
-                  <span>{deck.cardCount} cards</span>
-                </span>
-                <span className={styles.deckLibraryMeta}>
-                  <span>{deck.newCount} new</span>
-                  <span>{deck.learningCount} learning</span>
-                  <span>{deck.dueCount} due</span>
-                </span>
-              </button>
+                onDeleteDeck={onDeleteDeck}
+                onRenameDeck={onRenameDeck}
+                onTrainDeck={onTrainDeck}
+              />
             ))}
           </div>
         )}

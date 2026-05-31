@@ -1523,6 +1523,68 @@ export function ChessAnalysisLab() {
     }
   }
 
+  async function renameTrainingDeck(deckId: string, name: string) {
+    setDeckActionLoading(true);
+    setDeckActionError('');
+
+    try {
+      const response = await fetch('/api/training-deck', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'rename_deck', deckId, name }),
+      });
+      const payload = (await response.json()) as { deck?: TrainingDeckSummary; error?: string };
+
+      if (!response.ok || !payload.deck) {
+        throw new Error(payload.error ?? 'Unable to rename deck.');
+      }
+
+      await loadTrainingDeck(selectedDeckId === deckId ? deckId : selectedDeckId);
+    } catch (error) {
+      setDeckActionError(error instanceof Error ? error.message : 'Unable to rename deck.');
+    } finally {
+      setDeckActionLoading(false);
+    }
+  }
+
+  async function deleteTrainingDeck(deckId: string) {
+    setDeckActionLoading(true);
+    setDeckActionError('');
+
+    try {
+      const response = await fetch('/api/training-deck', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_deck', deckId }),
+      });
+      const payload = (await response.json()) as { deckId?: string; error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Unable to delete deck.');
+      }
+
+      if (selectedDeckId === deckId) {
+        setSelectedDeckId(null);
+        setActiveDeckCard(null);
+        setDeckFeedback(null);
+        setDeckCards([]);
+        setOpeningLines([]);
+
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem(LAST_TRAINING_DECK_STORAGE_KEY);
+        }
+      }
+
+      await loadTrainingDeck(selectedDeckId === deckId ? null : selectedDeckId);
+    } catch (error) {
+      setDeckActionError(error instanceof Error ? error.message : 'Unable to delete deck.');
+    } finally {
+      setDeckActionLoading(false);
+    }
+  }
+
   async function saveReviewPositionToDeck() {
     setReviewDeckSaveStatus('Saving');
     setDeckActionError('');
@@ -1865,6 +1927,8 @@ export function ChessAnalysisLab() {
                 onNext={advanceDeckCard}
                 onNewDeckTitleChange={setNewDeckTitle}
                 onTrainDeck={deckId => void trainDeckFromLibrary(deckId)}
+                onRenameDeck={(deckId, name) => void renameTrainingDeck(deckId, name)}
+                onDeleteDeck={deckId => void deleteTrainingDeck(deckId)}
                 selectedDeckId={selectedDeckId}
                 startCard={loadDeckCard}
               />
