@@ -16,7 +16,9 @@ const DECK_SELECT = 'id,name,description,version,is_active,owner_profile_id,crea
 export async function GET(request: Request) {
   const supabase = createAdminClient();
   const profile = await getTrainingProfileFromCookie();
-  const selectedDeckId = new URL(request.url).searchParams.get('deckId');
+  const requestUrl = new URL(request.url);
+  const scope = requestUrl.searchParams.get('scope');
+  const selectedDeckId = requestUrl.searchParams.get('deckId');
 
   const { data: decks, error: deckError } = await fetchAccessibleDecks(supabase, profile?.id ?? null);
   if (deckError) {
@@ -25,17 +27,48 @@ export async function GET(request: Request) {
 
   const accessibleDecks = decks ?? [];
   const accessibleIds = accessibleDecks.map(deck => String(deck.id));
-  const selectedDeck =
-    (selectedDeckId && accessibleDecks.find(deck => deck.id === selectedDeckId)) ||
-    (profile ? accessibleDecks.find(deck => deck.owner_profile_id === profile.id) : null) ||
-    accessibleDecks[0] ||
-    null;
-
   const [deckCounts, progressByCardId] = await Promise.all([
     fetchDeckCounts(supabase, accessibleIds),
     profile ? fetchProgressByCardId(supabase, profile.id) : Promise.resolve(new Map<string, ProgressRow>()),
   ]);
   const summaries = accessibleDecks.map(deck => summarizeDeck(deck, deckCounts.get(deck.id) ?? [], progressByCardId, profile?.id ?? null));
+
+  if (scope === 'all') {
+    if (accessibleIds.length === 0) {
+      return NextResponse.json({ decks: summaries, deck: null, lines: [], cards: [] });
+    }
+
+    const [{ data: lines, error: linesError }, { data: cards, error: cardsError }] = await Promise.all([
+      supabase.from('opening_lines').select('id,name,eco,side,moves').in('deck_id', accessibleIds).order('id'),
+      supabase
+        .from('deck_cards')
+        .select(DECK_CARD_SELECT)
+        .in('deck_id', accessibleIds)
+        .lte('ply', 80)
+        .order('score_swing_cp', { ascending: false, nullsFirst: false }),
+    ]);
+
+    if (linesError) {
+      return NextResponse.json({ error: linesError.message }, { status: 500 });
+    }
+
+    if (cardsError) {
+      return NextResponse.json({ error: cardsError.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      decks: summaries,
+      deck: null,
+      lines: lines ?? [],
+      cards: cards ?? [],
+    });
+  }
+
+  const selectedDeck =
+    (selectedDeckId && accessibleDecks.find(deck => deck.id === selectedDeckId)) ||
+    (profile ? accessibleDecks.find(deck => deck.owner_profile_id === profile.id) : null) ||
+    accessibleDecks[0] ||
+    null;
 
   if (!selectedDeck) {
     return NextResponse.json({ decks: summaries, deck: null, lines: [], cards: [] });

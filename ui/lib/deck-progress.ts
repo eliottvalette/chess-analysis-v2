@@ -130,6 +130,24 @@ export function summarizeDeckProgress(cards: DeckCard[], progress: DeckProgressM
   };
 }
 
+export function shuffleDeckCards(cards: DeckCard[]): DeckCard[] {
+  const shuffled = [...cards];
+
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const left = shuffled[index];
+    shuffled[index] = shuffled[swapIndex];
+    shuffled[swapIndex] = left;
+  }
+
+  return shuffled;
+}
+
+export function buildMixedTrainingQueue(cards: DeckCard[], progress: DeckProgressMap): DeckCard[] {
+  const activeCards = cards.filter(card => !getDeckProgressEntry(progress, card.id).ignored);
+  return shuffleDeckCards(activeCards);
+}
+
 export function sortCardsForReview(cards: DeckCard[], progress: DeckProgressMap, nowIso = new Date().toISOString()) {
   const now = Date.parse(nowIso);
 

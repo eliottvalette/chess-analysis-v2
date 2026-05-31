@@ -236,7 +236,7 @@ export function TrainPanel({
   onNext: () => void;
   onDeleteCard: () => void;
   onTrainDeck: (deckId: string) => void;
-  onTrainAll: (deckId: string) => void;
+  onTrainAll: () => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
   focusCreateDeck: boolean;
@@ -1201,15 +1201,15 @@ export function LearnPanel({
   onGenerateRecentDeck: () => void;
   onNewDeckTitleChange: (value: string) => void;
   onTrainDeck: (deckId: string) => void;
-  onTrainAll: (deckId: string) => void;
+  onTrainAll: () => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
   selectedDeckId: string | null;
 }) {
   const createDeckInputRef = useRef<HTMLInputElement | null>(null);
   const createDeckSectionRef = useRef<HTMLElement | null>(null);
-  const selectedDeck = deckSummaries.find(deck => deck.id === selectedDeckId) ?? null;
-  const canTrainAll = Boolean(selectedDeck && selectedDeck.cardCount > 0 && !deckLoading && !deckActionLoading);
+  const totalCardCount = deckSummaries.reduce((total, deck) => total + deck.cardCount, 0);
+  const canTrainAll = totalCardCount > 0 && !deckLoading && !deckActionLoading;
 
   useEffect(() => {
     if (!focusCreateDeck) {
@@ -1261,11 +1261,11 @@ export function LearnPanel({
         {deckSummaries.length > 0 ? (
           <button
             className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`}
-            disabled={!canTrainAll || !selectedDeckId}
-            onClick={() => selectedDeckId && onTrainAll(selectedDeckId)}
+            disabled={!canTrainAll}
+            onClick={onTrainAll}
             type="button"
           >
-            {selectedDeck ? `Train on all · ${selectedDeck.name}` : 'Train on all'}
+            Train on all decks
           </button>
         ) : null}
       </section>
