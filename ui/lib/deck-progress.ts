@@ -10,6 +10,7 @@ export type DeckProgressEntry = {
   streak: number;
   reviewCount: number;
   lapseCount: number;
+  learningStep: number;
   ease: number;
   intervalDays: number;
   ignored: boolean;
@@ -47,6 +48,7 @@ export function buildDefaultDeckProgressEntry(): DeckProgressEntry {
     streak: 0,
     reviewCount: 0,
     lapseCount: 0,
+    learningStep: 0,
     ease: 2.5,
     intervalDays: 0,
     ignored: false,
@@ -70,6 +72,7 @@ export function normalizeDeckProgressEntry(entry: Partial<DeckProgressEntry> | n
     streak: clampProgressNumber(entry.streak, fallback.streak),
     reviewCount: clampProgressNumber(entry.reviewCount, fallback.reviewCount),
     lapseCount: clampProgressNumber(entry.lapseCount, fallback.lapseCount),
+    learningStep: clampProgressNumber(entry.learningStep, fallback.learningStep),
     ease: Math.max(1.3, Math.min(3.2, Number.isFinite(Number(entry.ease)) ? Number(entry.ease) : fallback.ease)),
     intervalDays: clampProgressNumber(entry.intervalDays, fallback.intervalDays),
     ignored: Boolean(entry.ignored),
@@ -93,6 +96,7 @@ export function applyDeckAttempt(progress: DeckProgressMap, cardId: string, corr
       streak: correct ? current.streak + 1 : 0,
       reviewCount: current.reviewCount + 1,
       lapseCount: current.lapseCount + (correct ? 0 : 1),
+      learningStep: nextSchedule.learningStep,
       ease: nextSchedule.ease,
       intervalDays: nextSchedule.intervalDays,
       lastOutcome: correct ? 'correct' : 'miss',
@@ -184,6 +188,28 @@ export function buildMixedTrainingQueue(cards: DeckCard[], progress: DeckProgres
   return shuffleDeckCards(activeCards);
 }
 
+export function getDeckStudyQueue(cards: DeckCard[], progress: DeckProgressMap, nowIso = new Date().toISOString()) {
+  return sortCardsForReview(cards, progress, nowIso).filter(card => isDeckCardStudyable(getDeckProgressEntry(progress, card.id), nowIso));
+}
+
+export function isDeckCardStudyable(entry: DeckProgressEntry, nowIso = new Date().toISOString()) {
+  if (entry.ignored) {
+    return false;
+  }
+
+  const state = getDeckCardState(entry, nowIso);
+
+  if (state === 'new' || state === 'due') {
+    return true;
+  }
+
+  if (entry.lastOutcome === 'miss') {
+    return true;
+  }
+
+  return false;
+}
+
 export function sortCardsForReview(cards: DeckCard[], progress: DeckProgressMap, nowIso = new Date().toISOString()) {
   const now = Date.parse(nowIso);
 
@@ -249,6 +275,10 @@ function getReviewRank(entry: DeckProgressEntry, now: number) {
     return 4;
   }
 
+  if (entry.lastOutcome === 'miss') {
+    return 0;
+  }
+
   if (entry.seenCount === 0) {
     return 1;
   }
@@ -262,26 +292,52 @@ function getReviewRank(entry: DeckProgressEntry, now: number) {
   return 2;
 }
 
+const LEARNING_STEP_DELAYS_MS = [60_000, 10 * 60_000];
+const RELEARN_DELAY_MS = 60_000;
+const GRADUATION_DAYS = 1;
+
 function getNextSchedule(entry: DeckProgressEntry, correct: boolean, seenAt: string) {
   const seenTime = Date.parse(seenAt);
   const baseTime = Number.isFinite(seenTime) ? seenTime : Date.now();
 
   if (!correct) {
     return {
-      dueAt: new Date(baseTime + 10 * 60 * 1000).toISOString(),
+      dueAt: new Date(baseTime + RELEARN_DELAY_MS).toISOString(),
       ease: Math.max(1.3, Number((entry.ease - 0.2).toFixed(2))),
       intervalDays: 0,
+      learningStep: 0,
+    };
+  }
+
+  if (entry.intervalDays === 0) {
+    const nextLearningStep = entry.learningStep + 1;
+
+    if (nextLearningStep <= LEARNING_STEP_DELAYS_MS.length) {
+      return {
+        dueAt: new Date(baseTime + LEARNING_STEP_DELAYS_MS[nextLearningStep - 1]).toISOString(),
+        ease: entry.ease,
+        intervalDays: 0,
+        learningStep: nextLearningStep,
+      };
+    }
+
+    return {
+      dueAt: new Date(baseTime + GRADUATION_DAYS * 24 * 60 * 60 * 1000).toISOString(),
+      ease: entry.ease,
+      intervalDays: GRADUATION_DAYS,
+      learningStep: 0,
     };
   }
 
   const ease = Math.min(3.2, Number((entry.ease + (entry.streak >= 2 ? 0.05 : 0)).toFixed(2)));
   const intervalDays =
-    entry.reviewCount === 0 ? 1 : entry.intervalDays <= 1 ? 3 : Math.max(1, Math.round(entry.intervalDays * ease));
+    entry.intervalDays <= 1 ? 3 : Math.max(1, Math.round(entry.intervalDays * ease));
 
   return {
     dueAt: new Date(baseTime + intervalDays * 24 * 60 * 60 * 1000).toISOString(),
     ease,
     intervalDays,
+    learningStep: 0,
   };
 }
 

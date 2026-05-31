@@ -47,8 +47,8 @@ import {
 import {
   applyDeckAttempt,
   buildMixedTrainingQueue,
-  getDeckCardState,
   getDeckProgressEntry,
+  getDeckStudyQueue,
   sortCardsForReview,
   summarizeDeckProgress,
   type DeckProgressMap,
@@ -303,7 +303,7 @@ export function ChessAnalysisLab() {
     [deckCards, deckProgress],
   );
   const availableDeckCards = useMemo(
-    () => getStudyQueueCards(sortedDeckCards, deckProgress),
+    () => getDeckStudyQueue(sortedDeckCards, deckProgress),
     [deckProgress, sortedDeckCards],
   );
   const trainStatsCards = trainAllSession ? trainAllQueue : deckCards;
@@ -872,7 +872,7 @@ export function ChessAnalysisLab() {
       setDeckIndex(0);
 
       if (options?.autoStart && cards.length > 0) {
-        const nextCard = getStudyQueueCards(sortCardsForReview(cards, deckProgressRef.current), deckProgressRef.current)[0] ?? null;
+        const nextCard = getDeckStudyQueue(cards, deckProgressRef.current)[0] ?? null;
 
         if (nextCard) {
           beginDeckCardSession(nextCard, lines);
@@ -1240,7 +1240,7 @@ export function ChessAnalysisLab() {
     }
 
     if (deckId === selectedDeckId && deckCards.length > 0 && !deckLoading) {
-      const nextCard = getStudyQueueCards(sortCardsForReview(deckCards, deckProgress), deckProgress)[0] ?? null;
+      const nextCard = getDeckStudyQueue(deckCards, deckProgress)[0] ?? null;
 
       if (nextCard) {
         setDeckIndex(0);
@@ -1350,7 +1350,7 @@ export function ChessAnalysisLab() {
       setActiveDeckCard(null);
       setDeckFeedback(null);
 
-      const nextTrainingCard = getStudyQueueCards(sortCardsForReview(remainingCards, nextProgress), nextProgress)[0] ?? null;
+      const nextTrainingCard = getDeckStudyQueue(remainingCards, nextProgress)[0] ?? null;
 
       if (nextTrainingCard) {
         loadDeckCard(nextTrainingCard);
@@ -2394,6 +2394,7 @@ function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckP
       streak: localIsLater ? localEntry.streak : serverEntry.streak,
       ease: localIsLater ? localEntry.ease : serverEntry.ease,
       intervalDays: localIsLater ? localEntry.intervalDays : serverEntry.intervalDays,
+      learningStep: localIsLater ? localEntry.learningStep : serverEntry.learningStep,
       ignored: serverEntry.ignored || localEntry.ignored,
       lastOutcome: localIsLater ? localEntry.lastOutcome : serverEntry.lastOutcome,
       dueAt: localIsLater ? localEntry.dueAt : serverEntry.dueAt,
@@ -2402,13 +2403,6 @@ function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckP
   }
 
   return merged;
-}
-
-function getStudyQueueCards(cards: DeckCard[], progress: DeckProgressMap) {
-  return cards.filter(card => {
-    const state = getDeckCardState(getDeckProgressEntry(progress, card.id));
-    return state === 'new' || state === 'due';
-  });
 }
 
 function buildDeckCardState(card: DeckCard, openingLines: OpeningSeedLine[]) {

@@ -6,11 +6,33 @@ import {
   getDeckCardState,
   getDeckQueueCounts,
   getDeckProgressEntry,
+  getDeckStudyQueue,
+  isDeckCardStudyable,
   summarizeDeckProgress,
   toggleDeckIgnored,
 } from './deck-progress.ts';
 
-test('applyDeckAttempt increments seen counts and resets streak on misses', () => {
+test('applyDeckAttempt uses Anki-style learning steps on first success', () => {
+  const first = applyDeckAttempt({}, 'card-1', true, '2026-05-24T10:00:00.000Z');
+
+  assert.deepEqual(getDeckProgressEntry(first, 'card-1'), {
+    seenCount: 1,
+    correctCount: 1,
+    missCount: 0,
+    streak: 1,
+    reviewCount: 1,
+    lapseCount: 0,
+    learningStep: 1,
+    ease: 2.5,
+    intervalDays: 0,
+    ignored: false,
+    lastOutcome: 'correct',
+    dueAt: '2026-05-24T10:01:00.000Z',
+    lastSeenAt: '2026-05-24T10:00:00.000Z',
+  });
+});
+
+test('applyDeckAttempt increments seen counts and reschedules misses in one minute', () => {
   const first = applyDeckAttempt({}, 'card-1', true, '2026-05-24T10:00:00.000Z');
   const second = applyDeckAttempt(first, 'card-1', false, '2026-05-24T10:05:00.000Z');
 
@@ -21,13 +43,56 @@ test('applyDeckAttempt increments seen counts and resets streak on misses', () =
     streak: 0,
     reviewCount: 2,
     lapseCount: 1,
+    learningStep: 0,
     ease: 2.3,
     intervalDays: 0,
     ignored: false,
     lastOutcome: 'miss',
-    dueAt: '2026-05-24T10:15:00.000Z',
+    dueAt: '2026-05-24T10:06:00.000Z',
     lastSeenAt: '2026-05-24T10:05:00.000Z',
   });
+});
+
+test('applyDeckAttempt graduates after completing all learning steps', () => {
+  let progress = applyDeckAttempt({}, 'card-1', true, '2026-05-24T10:00:00.000Z');
+  progress = applyDeckAttempt(progress, 'card-1', true, '2026-05-24T10:01:00.000Z');
+  progress = applyDeckAttempt(progress, 'card-1', true, '2026-05-24T10:11:00.000Z');
+
+  assert.deepEqual(getDeckProgressEntry(progress, 'card-1'), {
+    seenCount: 3,
+    correctCount: 3,
+    missCount: 0,
+    streak: 3,
+    reviewCount: 3,
+    lapseCount: 0,
+    learningStep: 0,
+    ease: 2.5,
+    intervalDays: 1,
+    ignored: false,
+    lastOutcome: 'correct',
+    dueAt: '2026-05-25T10:11:00.000Z',
+    lastSeenAt: '2026-05-24T10:11:00.000Z',
+  });
+});
+
+test('isDeckCardStudyable keeps missed cards in the study queue immediately', () => {
+  const missed = applyDeckAttempt({}, 'card-1', false, '2026-05-24T10:05:00.000Z');
+
+  assert.equal(
+    isDeckCardStudyable(getDeckProgressEntry(missed, 'card-1'), '2026-05-24T10:05:30.000Z'),
+    true,
+  );
+});
+
+test('getDeckStudyQueue includes new, due, and missed cards', () => {
+  const progress = applyDeckAttempt({}, 'card-missed', false, '2026-05-24T10:05:00.000Z');
+  const cards = [{ id: 'card-new' }, { id: 'card-missed' }];
+  const queue = getDeckStudyQueue(cards, progress, '2026-05-24T10:05:30.000Z');
+
+  assert.deepEqual(
+    queue.map(card => card.id),
+    ['card-missed', 'card-new'],
+  );
 });
 
 test('toggleDeckIgnored flips ignored state without losing counters', () => {
@@ -65,10 +130,10 @@ test('summarizeDeckProgress reports review totals and SRS state buckets', () => 
     remaining: 2,
     new: 1,
     learning: 0,
-    due: 0,
-    review: 1,
+    due: 1,
+    review: 0,
     mature: 0,
-    later: 1,
+    later: 0,
   });
 });
 

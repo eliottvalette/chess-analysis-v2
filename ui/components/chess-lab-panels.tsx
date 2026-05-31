@@ -1486,7 +1486,7 @@ export function DeckPanel({
           </>
         ) : (
           <>
-            <p className={styles.empty}>{deckLoading ? 'Loading learning cards from Supabase.' : trainAllSession ? 'No cram cards loaded.' : 'No new or due cards in this deck.'}</p>
+            <p className={styles.empty}>{deckLoading ? 'Loading learning cards from Supabase.' : trainAllSession ? 'No cram cards loaded.' : 'Nothing to study right now in this deck.'}</p>
             {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
           </>
         )}
