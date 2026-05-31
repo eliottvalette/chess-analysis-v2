@@ -228,8 +228,8 @@
   white-space: nowrap;
 }
 
-.modeTab:hover,
-.sideTab:hover,
+.modeTab:hover:not(.activeModeTab),
+.sideTab:hover:not(.activeSideTab),
 .action:hover:not(:disabled),
 .iconButton:hover:not(:disabled),
 .moveChip:hover:not(:disabled),
@@ -237,6 +237,13 @@
 .openingButton:hover:not(:disabled) {
   border-color: rgba(214, 226, 244, 0.28);
   background: rgba(4, 8, 15, 0.58);
+  color: var(--text);
+}
+
+.activeModeTab:hover,
+.activeSideTab:hover {
+  border-color: rgba(198, 215, 255, 0.58);
+  background: rgba(46, 58, 82, 0.58);
   color: var(--text);
 }
 
@@ -1496,6 +1503,13 @@
   font-weight: 760;
 }
 
+.createDeckSectionFocus {
+  border-color: rgba(198, 215, 255, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 0 0 1px rgba(198, 215, 255, 0.14);
+}
+
 .deckLibraryHead,
 .deckLibraryMeta {
   min-width: 0;
@@ -1618,13 +1632,31 @@
   background: rgba(56, 148, 115, 0.12);
 }
 
+.recentGameButton.recentGameWin:hover:not(:disabled) {
+  border-color: rgba(138, 227, 193, 0.56);
+  background: rgba(56, 148, 115, 0.24);
+  color: var(--text-muted);
+}
+
 .recentGameLoss {
   border-color: rgba(255, 141, 145, 0.42);
   background: rgba(180, 58, 66, 0.12);
 }
 
+.recentGameButton.recentGameLoss:hover:not(:disabled) {
+  border-color: rgba(255, 141, 145, 0.56);
+  background: rgba(180, 58, 66, 0.24);
+  color: var(--text-muted);
+}
+
 .recentGameDraw {
   border-color: rgba(152, 184, 255, 0.28);
+}
+
+.recentGameButton.recentGameDraw:hover:not(:disabled) {
+  border-color: rgba(152, 184, 255, 0.44);
+  background: rgba(46, 58, 82, 0.34);
+  color: var(--text-muted);
 }
 
 .deckStats {
@@ -1744,16 +1776,30 @@
   gap: 6px;
 }
 
-.deleteAction {
+.deleteAction,
+.backAction {
   border-color: rgba(255, 120, 120, 0.34);
   background: rgba(120, 28, 28, 0.18);
   color: #ffc8c6;
 }
 
-.deleteAction:hover:not(:disabled) {
+.deleteAction:hover:not(:disabled),
+.backAction:hover:not(:disabled) {
   border-color: rgba(255, 120, 120, 0.52);
   background: rgba(120, 28, 28, 0.28);
   color: #ffe0df;
+}
+
+.confirmAction {
+  border-color: rgba(184, 247, 161, 0.52);
+  background: rgba(184, 247, 161, 0.12);
+  color: #d8f5cc;
+}
+
+.confirmAction:hover:not(:disabled) {
+  border-color: rgba(184, 247, 161, 0.72);
+  background: rgba(184, 247, 161, 0.18);
+  color: #d8f5cc;
 }
 
 .deckActions .action {

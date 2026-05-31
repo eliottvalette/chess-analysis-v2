@@ -150,6 +150,28 @@ type TrainingDeckCardRow = {
   score_swing_cp?: number | null;
 };
 
+type WorkspaceSnapshot = {
+  initialFen: string | null;
+  moveHistory: StoredMove[];
+  historyIndex: number;
+  variationBaseIndex: number | null;
+  variationMoves: StoredMove[];
+  metadata: GameMetadata | null;
+  fileName: string;
+  orientation: 'white' | 'black';
+  showArrow: boolean;
+  reviewIndex: number;
+  activeDeckCard: DeckCard | null;
+  deckFeedback: DeckFeedback | null;
+  deckIndex: number;
+  trainAllSession: boolean;
+  positionAnalysis: AnalysisResult | null;
+  preMoveAnalyses: AnalysisResult[];
+  timelineAnalyses: AnalysisResult[];
+  serverError: string;
+  timelineError: string;
+};
+
 export function ChessAnalysisLab() {
   const [game, setGame] = useState(() => new Chess());
   const [initialFen, setInitialFen] = useState<string | null>(null);
@@ -177,6 +199,7 @@ export function ChessAnalysisLab() {
   const [timelineError, setTimelineError] = useState('');
   const [boardWidth, setBoardWidth] = useState(640);
   const [deckIndex, setDeckIndex] = useState(0);
+  const [trainAllSession, setTrainAllSession] = useState(false);
   const [activeDeckCard, setActiveDeckCard] = useState<DeckCard | null>(null);
   const [deckFeedback, setDeckFeedback] = useState<DeckFeedback | null>(null);
   const [openingLines, setOpeningLines] = useState<OpeningSeedLine[]>([]);
@@ -202,6 +225,7 @@ export function ChessAnalysisLab() {
   const [trainingProfileError, setTrainingProfileError] = useState('');
   const [trainingUsername, setTrainingUsername] = useState('');
   const [trainingPassword, setTrainingPassword] = useState('');
+  const [focusTrainCreateDeck, setFocusTrainCreateDeck] = useState(false);
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
   const evalRailRef = useRef<HTMLDivElement | null>(null);
@@ -215,6 +239,10 @@ export function ChessAnalysisLab() {
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
   const progressHydratedRef = useRef(false);
   const progressSyncTimerRef = useRef<number | null>(null);
+  const reviewWorkspaceSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
+  const trainWorkspaceSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
+  const workspaceStateRef = useRef<WorkspaceSnapshot>(createEmptyWorkspaceSnapshot());
+  const modeRef = useRef<WorkspaceMode>('review');
 
   const currentFen = useMemo(() => game.fen(), [game]);
   const hasLoadedGame = moveHistory.length > 0 && metadata !== null;
@@ -645,6 +673,7 @@ export function ChessAnalysisLab() {
   }, []);
 
   const beginDeckCardSession = useCallback((card: DeckCard, lines: OpeningSeedLine[]) => {
+    persistReviewWorkspaceSnapshot();
     const deckState = buildDeckCardState(card, lines);
 
     setInitialFen(deckState.initialFen);
@@ -657,6 +686,7 @@ export function ChessAnalysisLab() {
     setPreMoveAnalyses([]);
     timelineRefineRequestIdRef.current += 1;
     setMode('train');
+    modeRef.current = 'train';
     setActiveDeckCard(card);
     setDeckFeedback(null);
     setOrientation(card.side);
@@ -668,7 +698,7 @@ export function ChessAnalysisLab() {
     playSound('game-start');
   }, [playSound]);
 
-  const loadTrainingDeck = useCallback(async (deckId = selectedDeckId, options?: { autoStart?: boolean }) => {
+  const loadTrainingDeck = useCallback(async (deckId = selectedDeckId, options?: { autoStart?: boolean; trainAll?: boolean }) => {
     setDeckLoading(true);
     setDeckLoadError('');
 
@@ -707,7 +737,11 @@ export function ChessAnalysisLab() {
       setDeckIndex(0);
 
       if (options?.autoStart && cards.length > 0) {
-        const nextCard = sortCardsForReview(cards, deckProgress)[0] ?? null;
+        if (options.trainAll) {
+          setTrainAllSession(true);
+        }
+
+        const nextCard = options.trainAll ? cards[0] : sortCardsForReview(cards, deckProgress)[0] ?? null;
 
         if (nextCard) {
           beginDeckCardSession(nextCard, lines);
@@ -817,6 +851,89 @@ export function ChessAnalysisLab() {
   function clearVariation() {
     setVariationBaseIndex(null);
     setVariationMoves([]);
+  }
+
+  const applyWorkspaceSnapshot = useCallback((snapshot: WorkspaceSnapshot) => {
+    positionRequestIdRef.current += 1;
+    timelineRequestIdRef.current += 1;
+    timelineRefineRequestIdRef.current += 1;
+    const nextGame = restoreGameFromHistory(snapshot.moveHistory, snapshot.initialFen, snapshot.historyIndex);
+
+    setInitialFen(snapshot.initialFen);
+    setMoveHistory(snapshot.moveHistory);
+    setHistoryIndex(snapshot.historyIndex);
+    setVariationBaseIndex(snapshot.variationBaseIndex);
+    setVariationMoves(snapshot.variationMoves);
+    setGame(nextGame);
+    setMetadata(snapshot.metadata);
+    setFileName(snapshot.fileName);
+    setOrientation(snapshot.orientation);
+    setShowArrow(snapshot.showArrow);
+    setReviewIndex(snapshot.reviewIndex);
+    setActiveDeckCard(snapshot.activeDeckCard);
+    setDeckFeedback(snapshot.deckFeedback);
+    setDeckIndex(snapshot.deckIndex);
+    setTrainAllSession(snapshot.trainAllSession);
+    setPositionAnalysis(snapshot.positionAnalysis);
+    setPreMoveAnalyses(snapshot.preMoveAnalyses);
+    setTimelineAnalyses(snapshot.timelineAnalyses);
+    setPositionLoading(false);
+    setTimelineLoading(false);
+    setServerError(snapshot.serverError);
+    setTimelineError(snapshot.timelineError);
+    setSelectedSquare(null);
+    setSquareStyles({});
+  }, []);
+
+  const switchWorkspaceMode = useCallback((nextMode: WorkspaceMode) => {
+    if (nextMode === modeRef.current) {
+      return;
+    }
+
+    const snapshot = normalizeWorkspaceSnapshot(workspaceStateRef.current);
+
+    if (modeRef.current === 'review') {
+      reviewWorkspaceSnapshotRef.current = snapshot;
+    } else {
+      trainWorkspaceSnapshotRef.current = snapshot;
+    }
+
+    const restoreTarget =
+      nextMode === 'review' ? reviewWorkspaceSnapshotRef.current : trainWorkspaceSnapshotRef.current;
+
+    setMode(nextMode);
+    modeRef.current = nextMode;
+    applyWorkspaceSnapshot(restoreTarget ?? createEmptyWorkspaceSnapshot());
+  }, [applyWorkspaceSnapshot]);
+
+  const openTrainCreateDeck = useCallback(() => {
+    if (modeRef.current !== 'train') {
+      switchWorkspaceMode('train');
+    }
+
+    setActiveDeckCard(null);
+    setDeckFeedback(null);
+    setFocusTrainCreateDeck(true);
+  }, [switchWorkspaceMode]);
+
+  const handleCreateDeckFocusHandled = useCallback(() => {
+    setFocusTrainCreateDeck(false);
+  }, []);
+
+  function persistReviewWorkspaceSnapshot() {
+    if (modeRef.current !== 'review' || workspaceStateRef.current.metadata == null) {
+      return;
+    }
+
+    reviewWorkspaceSnapshotRef.current = normalizeWorkspaceSnapshot(workspaceStateRef.current);
+  }
+
+  function persistTrainWorkspaceSnapshot() {
+    if (modeRef.current !== 'train') {
+      return;
+    }
+
+    trainWorkspaceSnapshotRef.current = normalizeWorkspaceSnapshot(workspaceStateRef.current);
   }
 
   function highlightMoves(square: string) {
@@ -949,7 +1066,30 @@ export function ChessAnalysisLab() {
     beginDeckCardSession(card, openingLines);
   }, [beginDeckCardSession, openingLines]);
 
+  const finishDeckTrainingSession = useCallback(() => {
+    setTrainAllSession(false);
+    setActiveDeckCard(null);
+    setDeckFeedback(null);
+    positionRequestIdRef.current += 1;
+    setGame(new Chess());
+    setInitialFen(null);
+    setMoveHistory([]);
+    setHistoryIndex(0);
+    clearVariation();
+    setMetadata(null);
+    setFileName('');
+    setPositionAnalysis(null);
+    setPreMoveAnalyses([]);
+    setTimelineAnalyses([]);
+    setPositionLoading(false);
+    setTimelineLoading(false);
+    setServerError('');
+    setTimelineError('');
+    clearSelection();
+  }, []);
+
   const trainDeckFromLibrary = useCallback(async (deckId: string) => {
+    setTrainAllSession(false);
     setActiveDeckCard(null);
     setDeckFeedback(null);
     setSelectedDeckId(deckId);
@@ -972,6 +1112,30 @@ export function ChessAnalysisLab() {
     await loadTrainingDeck(deckId, { autoStart: true });
   }, [beginDeckCardSession, deckCards, deckLoading, deckProgress, loadTrainingDeck, openingLines, selectedDeckId]);
 
+  const trainAllDeckCards = useCallback(async (deckId: string) => {
+    setTrainAllSession(true);
+    setActiveDeckCard(null);
+    setDeckFeedback(null);
+    setSelectedDeckId(deckId);
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
+    }
+
+    if (deckId === selectedDeckId && deckCards.length > 0 && !deckLoading) {
+      const nextCard = deckCards[0] ?? null;
+
+      if (nextCard) {
+        setDeckIndex(0);
+        beginDeckCardSession(nextCard, openingLines);
+      }
+
+      return;
+    }
+
+    await loadTrainingDeck(deckId, { autoStart: true, trainAll: true });
+  }, [beginDeckCardSession, deckCards, deckLoading, loadTrainingDeck, openingLines, selectedDeckId]);
+
   function selectSaveDeck(deckId: string) {
     setSelectedDeckId(deckId);
 
@@ -981,17 +1145,32 @@ export function ChessAnalysisLab() {
   }
 
   const advanceDeckCard = useCallback(() => {
-    if (availableDeckCards.length === 0) {
+    const sessionCards = trainAllSession ? deckCards : availableDeckCards;
+
+    if (sessionCards.length === 0) {
       return;
     }
 
-    const currentCardId = activeDeckCard?.id ?? nextDeckCard?.id ?? null;
-    const currentIndex = currentCardId ? availableDeckCards.findIndex(card => card.id === currentCardId) : -1;
-    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % availableDeckCards.length : deckIndex % availableDeckCards.length;
+    const currentCardId = activeDeckCard?.id ?? null;
+    const currentIndex = currentCardId ? sessionCards.findIndex(card => card.id === currentCardId) : -1;
+
+    if (trainAllSession && currentIndex >= 0) {
+      if (currentIndex >= sessionCards.length - 1) {
+        finishDeckTrainingSession();
+        return;
+      }
+
+      const nextIndex = currentIndex + 1;
+      setDeckIndex(nextIndex);
+      loadDeckCard(sessionCards[nextIndex]);
+      return;
+    }
+
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % sessionCards.length : deckIndex % sessionCards.length;
 
     setDeckIndex(nextIndex);
-    loadDeckCard(availableDeckCards[nextIndex]);
-  }, [activeDeckCard, availableDeckCards, deckIndex, loadDeckCard, nextDeckCard]);
+    loadDeckCard(sessionCards[nextIndex]);
+  }, [activeDeckCard, availableDeckCards, deckCards, deckIndex, finishDeckTrainingSession, loadDeckCard, trainAllSession]);
 
   const deleteActiveDeckCard = useCallback(async () => {
     const card = activeDeckCard ?? nextDeckCard;
@@ -1357,6 +1536,8 @@ export function ChessAnalysisLab() {
   }
 
   async function loadPgnText(name: string, content: string, preferredOrientation?: 'white' | 'black') {
+    persistTrainWorkspaceSnapshot();
+    reviewWorkspaceSnapshotRef.current = null;
     timelineRefineRequestIdRef.current += 1;
 
     try {
@@ -1375,6 +1556,7 @@ export function ChessAnalysisLab() {
       setMetadata(extractMetadataFromGame(loadedGame));
       setFileName(name);
       setMode('review');
+      modeRef.current = 'review';
       setReviewIndex(0);
       setActiveDeckCard(null);
       setDeckFeedback(null);
@@ -1638,6 +1820,8 @@ export function ChessAnalysisLab() {
     positionRequestIdRef.current += 1;
     timelineRequestIdRef.current += 1;
     timelineRefineRequestIdRef.current += 1;
+    reviewWorkspaceSnapshotRef.current = null;
+    trainWorkspaceSnapshotRef.current = null;
     setGame(new Chess());
     setInitialFen(null);
     setMoveHistory([]);
@@ -1646,6 +1830,7 @@ export function ChessAnalysisLab() {
     setMetadata(null);
     setFileName('');
     setMode('review');
+    modeRef.current = 'review';
     setReviewIndex(0);
     setPositionAnalysis(null);
     setPreMoveAnalyses([]);
@@ -1661,6 +1846,29 @@ export function ChessAnalysisLab() {
     clearSelection();
     playSound('game-start');
   }
+
+  modeRef.current = mode;
+  workspaceStateRef.current = {
+    initialFen,
+    moveHistory,
+    historyIndex,
+    variationBaseIndex,
+    variationMoves,
+    metadata,
+    fileName,
+    orientation,
+    showArrow,
+    reviewIndex,
+    activeDeckCard,
+    deckFeedback,
+    deckIndex,
+    trainAllSession,
+    positionAnalysis,
+    preMoveAnalyses,
+    timelineAnalyses,
+    serverError,
+    timelineError,
+  };
 
   return (
     <main className={styles.page}>
@@ -1777,19 +1985,20 @@ export function ChessAnalysisLab() {
         </section>
 
         <aside className={`${styles.panel} ${styles.contextPanel}`}>
-          {mode === 'review' && hasLoadedGame ? null : (
+          {trainingProfile ? (
             <section className={styles.modeTabs}>
               {(['review', 'train'] satisfies WorkspaceMode[]).map(nextMode => (
                 <button
                   className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
                   key={nextMode}
-                  onClick={() => setMode(nextMode)}
+                  onClick={() => switchWorkspaceMode(nextMode)}
+                  type="button"
                 >
                   {getModeLabel(nextMode)}
                 </button>
               ))}
             </section>
-          )}
+          ) : null}
 
           <div className={`${styles.panelScroll} ${mode === 'review' && hasLoadedGame ? styles.reviewPanelScroll : ''}`}>
             {mode === 'review' ? (
@@ -1805,6 +2014,7 @@ export function ChessAnalysisLab() {
                 moveHistoryLength={moveHistory.length}
                 movePairs={movePairs}
                 onBack={() => {
+                  reviewWorkspaceSnapshotRef.current = null;
                   positionRequestIdRef.current += 1;
                   timelineRequestIdRef.current += 1;
                   setGame(new Chess());
@@ -1861,6 +2071,7 @@ export function ChessAnalysisLab() {
                 reviewMoments={reviewMoments}
                 canSaveReviewCard={Boolean(trainingProfile && selectedDeck?.isOwned && positionAnalysis?.bestMove && !positionLoading)}
                 onSaveReviewCard={() => void saveReviewPositionToDeck()}
+                onGoCreateDeck={openTrainCreateDeck}
                 onSelectSaveDeck={selectSaveDeck}
                 onLoadMoreRecentGames={() => void fetchRecentChessGames(undefined, undefined, true)}
                 selectedDeckId={selectedDeckId}
@@ -1917,6 +2128,7 @@ export function ChessAnalysisLab() {
                   setTimelineError('');
                   setActiveDeckCard(null);
                   setDeckFeedback(null);
+                  setTrainAllSession(false);
                   positionCacheRef.current.clear();
                   positionInFlightRef.current.clear();
                   clearSelection();
@@ -1927,8 +2139,11 @@ export function ChessAnalysisLab() {
                 onNext={advanceDeckCard}
                 onNewDeckTitleChange={setNewDeckTitle}
                 onTrainDeck={deckId => void trainDeckFromLibrary(deckId)}
+                onTrainAll={deckId => void trainAllDeckCards(deckId)}
                 onRenameDeck={(deckId, name) => void renameTrainingDeck(deckId, name)}
                 onDeleteDeck={deckId => void deleteTrainingDeck(deckId)}
+                focusCreateDeck={focusTrainCreateDeck}
+                onCreateDeckFocusHandled={handleCreateDeckFocusHandled}
                 selectedDeckId={selectedDeckId}
                 startCard={loadDeckCard}
               />
@@ -1949,6 +2164,40 @@ export function ChessAnalysisLab() {
       ) : null}
     </main>
   );
+}
+
+function createEmptyWorkspaceSnapshot(): WorkspaceSnapshot {
+  return {
+    initialFen: null,
+    moveHistory: [],
+    historyIndex: 0,
+    variationBaseIndex: null,
+    variationMoves: [],
+    metadata: null,
+    fileName: '',
+    orientation: 'white',
+    showArrow: true,
+    reviewIndex: 0,
+    activeDeckCard: null,
+    deckFeedback: null,
+    deckIndex: 0,
+    trainAllSession: false,
+    positionAnalysis: null,
+    preMoveAnalyses: [],
+    timelineAnalyses: [],
+    serverError: '',
+    timelineError: '',
+  };
+}
+
+function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  return {
+    ...snapshot,
+    moveHistory: [...snapshot.moveHistory],
+    variationMoves: [...snapshot.variationMoves],
+    preMoveAnalyses: [...snapshot.preMoveAnalyses],
+    timelineAnalyses: [...snapshot.timelineAnalyses],
+  };
 }
 
 function getPositionCacheKey(initialFen: string | null, moves: string[]) {

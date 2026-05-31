@@ -69,6 +69,7 @@ export function ReviewPanel({
   canSaveReviewCard,
   deckSummaries,
   onSaveReviewCard,
+  onGoCreateDeck,
   onSelectSaveDeck,
   selectedDeckId,
   setShowArrow,
@@ -112,6 +113,7 @@ export function ReviewPanel({
   canSaveReviewCard: boolean;
   deckSummaries: TrainingDeckSummary[];
   onSaveReviewCard: () => void;
+  onGoCreateDeck: () => void;
   onSelectSaveDeck: (deckId: string) => void;
   selectedDeckId: string | null;
   setShowArrow: (value: boolean) => void;
@@ -148,6 +150,7 @@ export function ReviewPanel({
     canSaveReviewCard,
     deckSummaries,
     onSaveReviewCard,
+    onGoCreateDeck,
     onSelectSaveDeck,
     selectedDeckId,
     setShowArrow,
@@ -171,7 +174,7 @@ export function ReviewPanel({
   return (
     <div className={styles.reviewLoadedPanel}>
       <section className={styles.reviewLoadedTop}>
-        <button className={`${styles.action} ${styles.fullWidthAction}`} onClick={onBack}>
+        <button className={`${styles.action} ${styles.fullWidthAction} ${styles.backAction}`} onClick={onBack}>
           Back
         </button>
       </section>
@@ -204,8 +207,11 @@ export function TrainPanel({
   onNext,
   onDeleteCard,
   onTrainDeck,
+  onTrainAll,
   onRenameDeck,
   onDeleteDeck,
+  focusCreateDeck,
+  onCreateDeckFocusHandled,
   onNewDeckTitleChange,
   selectedDeckId,
   startCard,
@@ -230,8 +236,11 @@ export function TrainPanel({
   onNext: () => void;
   onDeleteCard: () => void;
   onTrainDeck: (deckId: string) => void;
+  onTrainAll: (deckId: string) => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
+  focusCreateDeck: boolean;
+  onCreateDeckFocusHandled: () => void;
   onNewDeckTitleChange: (value: string) => void;
   selectedDeckId: string | null;
   startCard: (card: DeckCard | null) => void;
@@ -244,11 +253,14 @@ export function TrainPanel({
         deckLoadError={deckLoadError}
         deckLoading={deckLoading}
         deckSummaries={deckSummaries}
+        focusCreateDeck={focusCreateDeck}
         newDeckTitle={newDeckTitle}
         onCreateDeck={onCreateDeck}
+        onCreateDeckFocusHandled={onCreateDeckFocusHandled}
         onGenerateRecentDeck={onGenerateRecentDeck}
         onNewDeckTitleChange={onNewDeckTitleChange}
         onTrainDeck={onTrainDeck}
+        onTrainAll={onTrainAll}
         onRenameDeck={onRenameDeck}
         onDeleteDeck={onDeleteDeck}
         selectedDeckId={selectedDeckId}
@@ -259,7 +271,7 @@ export function TrainPanel({
   return (
     <>
       <section className={`${styles.card} ${styles.stateHeaderCard}`}>
-        <button className={styles.action} onClick={onBack}>
+        <button className={`${styles.action} ${styles.backAction}`} onClick={onBack} type="button">
           Back
         </button>
         <div className={styles.stateHeaderMain}>
@@ -441,6 +453,7 @@ export function GameReviewPanel({
   canSaveReviewCard,
   deckSummaries,
   onSaveReviewCard,
+  onGoCreateDeck,
   onSelectSaveDeck,
   selectedDeckId,
   setShowArrow,
@@ -483,6 +496,7 @@ export function GameReviewPanel({
   canSaveReviewCard: boolean;
   deckSummaries: TrainingDeckSummary[];
   onSaveReviewCard: () => void;
+  onGoCreateDeck: () => void;
   onSelectSaveDeck: (deckId: string) => void;
   selectedDeckId: string | null;
   setShowArrow: (value: boolean) => void;
@@ -536,7 +550,12 @@ export function GameReviewPanel({
             <button className={styles.action} onClick={() => onChesscomUsernameChange('')} disabled={!chesscomUsername}>
               Clear
             </button>
-            <button className={`${styles.action} ${styles.primary} ${styles.inlineFormWide}`} onClick={onFetchRecentGames} disabled={!chesscomUsername.trim() || recentGamesLoading}>
+            <button
+              className={`${styles.action} ${styles.inlineFormWide} ${chesscomUsername.trim() && !recentGamesLoading ? styles.confirmAction : ''}`}
+              disabled={!chesscomUsername.trim() || recentGamesLoading}
+              onClick={onFetchRecentGames}
+              type="button"
+            >
               {recentGamesLoading ? 'Loading' : 'Fetch games'}
             </button>
           </div>
@@ -667,6 +686,7 @@ export function GameReviewPanel({
         <ReviewSaveDeckPanel
           canSaveReviewCard={canSaveReviewCard}
           deckSummaries={deckSummaries}
+          onGoCreateDeck={onGoCreateDeck}
           onSaveReviewCard={onSaveReviewCard}
           onSelectSaveDeck={onSelectSaveDeck}
           reviewDeckSaveStatus={reviewDeckSaveStatus}
@@ -682,6 +702,7 @@ export function GameReviewPanel({
 function ReviewSaveDeckPanel({
   canSaveReviewCard,
   deckSummaries,
+  onGoCreateDeck,
   onSaveReviewCard,
   onSelectSaveDeck,
   positionLoading,
@@ -691,6 +712,7 @@ function ReviewSaveDeckPanel({
 }: {
   canSaveReviewCard: boolean;
   deckSummaries: TrainingDeckSummary[];
+  onGoCreateDeck: () => void;
   onSaveReviewCard: () => void;
   onSelectSaveDeck: (deckId: string) => void;
   positionLoading: boolean;
@@ -699,6 +721,7 @@ function ReviewSaveDeckPanel({
   selectedDeckId: string | null;
 }) {
   const ownedDecks = deckSummaries.filter(deck => deck.isOwned);
+  const hasOwnedDeck = ownedDecks.length > 0;
   const activeDeckId = selectedDeckId && ownedDecks.some(deck => deck.id === selectedDeckId)
     ? selectedDeckId
     : ownedDecks[0]?.id ?? '';
@@ -710,10 +733,14 @@ function ReviewSaveDeckPanel({
       : 'Add card';
 
   useEffect(() => {
-    if (activeDeckId && activeDeckId !== selectedDeckId) {
-      onSelectSaveDeck(activeDeckId);
+    if (!hasOwnedDeck || !activeDeckId || activeDeckId === selectedDeckId) {
+      return undefined;
     }
-  }, [activeDeckId, onSelectSaveDeck, selectedDeckId]);
+
+    onSelectSaveDeck(activeDeckId);
+
+    return undefined;
+  }, [activeDeckId, hasOwnedDeck, onSelectSaveDeck, selectedDeckId]);
 
   return (
     <section className={`${styles.card} ${styles.emptyStateCard}`}>
@@ -735,7 +762,7 @@ function ReviewSaveDeckPanel({
         <p className={styles.copy}>No best move is available for this position yet.</p>
       )}
 
-      {ownedDecks.length > 0 ? (
+      {hasOwnedDeck ? (
         <label className={styles.labeledField}>
           <span className={styles.fieldLabel}>Target deck</span>
           <select
@@ -751,7 +778,7 @@ function ReviewSaveDeckPanel({
           </select>
         </label>
       ) : (
-        <p className={styles.copy}>Create a deck in Train before adding cards here.</p>
+        <p className={styles.copy}>Create a personal deck in Train, then come back here to save this position.</p>
       )}
 
       {activeDeck ? (
@@ -760,14 +787,24 @@ function ReviewSaveDeckPanel({
         </p>
       ) : null}
 
-      <button
-        className={`${styles.action} ${styles.primary} ${styles.fullWidthAction} ${reviewDeckSaveStatus === 'Saved' ? styles.saveAdded : ''}`}
-        disabled={!canSaveReviewCard || ownedDecks.length === 0}
-        onClick={onSaveReviewCard}
-        type="button"
-      >
-        {saveButtonLabel}
-      </button>
+      {hasOwnedDeck ? (
+        <button
+          className={`${styles.action} ${styles.primary} ${styles.fullWidthAction} ${reviewDeckSaveStatus === 'Saved' ? styles.saveAdded : ''}`}
+          disabled={!canSaveReviewCard}
+          onClick={onSaveReviewCard}
+          type="button"
+        >
+          {saveButtonLabel}
+        </button>
+      ) : (
+        <button
+          className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`}
+          onClick={onGoCreateDeck}
+          type="button"
+        >
+          Create a deck
+        </button>
+      )}
     </section>
   );
 }
@@ -1140,11 +1177,14 @@ export function LearnPanel({
   deckLoadError,
   deckLoading,
   deckSummaries,
+  focusCreateDeck,
   newDeckTitle,
   onCreateDeck,
+  onCreateDeckFocusHandled,
   onGenerateRecentDeck,
   onNewDeckTitleChange,
   onTrainDeck,
+  onTrainAll,
   onRenameDeck,
   onDeleteDeck,
   selectedDeckId,
@@ -1154,15 +1194,38 @@ export function LearnPanel({
   deckLoadError: string;
   deckLoading: boolean;
   deckSummaries: TrainingDeckSummary[];
+  focusCreateDeck: boolean;
   newDeckTitle: string;
   onCreateDeck: () => void;
+  onCreateDeckFocusHandled: () => void;
   onGenerateRecentDeck: () => void;
   onNewDeckTitleChange: (value: string) => void;
   onTrainDeck: (deckId: string) => void;
+  onTrainAll: (deckId: string) => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
   selectedDeckId: string | null;
 }) {
+  const createDeckInputRef = useRef<HTMLInputElement | null>(null);
+  const createDeckSectionRef = useRef<HTMLElement | null>(null);
+  const selectedDeck = deckSummaries.find(deck => deck.id === selectedDeckId) ?? null;
+  const canTrainAll = Boolean(selectedDeck && selectedDeck.cardCount > 0 && !deckLoading && !deckActionLoading);
+
+  useEffect(() => {
+    if (!focusCreateDeck) {
+      return undefined;
+    }
+
+    createDeckSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    createDeckInputRef.current?.focus();
+    createDeckInputRef.current?.select();
+    const timer = window.setTimeout(() => onCreateDeckFocusHandled(), 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [focusCreateDeck, onCreateDeckFocusHandled]);
+
   return (
     <>
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
@@ -1195,8 +1258,21 @@ export function LearnPanel({
           </div>
         )}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
+        {deckSummaries.length > 0 ? (
+          <button
+            className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`}
+            disabled={!canTrainAll || !selectedDeckId}
+            onClick={() => selectedDeckId && onTrainAll(selectedDeckId)}
+            type="button"
+          >
+            {selectedDeck ? `Train on all · ${selectedDeck.name}` : 'Train on all'}
+          </button>
+        ) : null}
       </section>
-      <section className={`${styles.card} ${styles.emptyStateCard}`}>
+      <section
+        className={`${styles.card} ${styles.emptyStateCard} ${focusCreateDeck ? styles.createDeckSectionFocus : ''}`}
+        ref={createDeckSectionRef}
+      >
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Create deck</h2>
           <span className={styles.statusText}>manual</span>
@@ -1206,15 +1282,21 @@ export function LearnPanel({
             className={styles.inlineInput}
             onChange={event => onNewDeckTitleChange(event.target.value)}
             placeholder="Deck title"
+            ref={createDeckInputRef}
             value={newDeckTitle}
           />
-          <button className={`${styles.action} ${styles.inlineFormWide}`} onClick={onCreateDeck} disabled={deckActionLoading || !newDeckTitle.trim()}>
+          <button
+            className={`${styles.action} ${styles.inlineFormWide} ${newDeckTitle.trim() && !deckActionLoading ? styles.confirmAction : ''}`}
+            disabled={deckActionLoading || !newDeckTitle.trim()}
+            onClick={onCreateDeck}
+            type="button"
+          >
             Create
           </button>
         </div>
       </section>
       <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={onGenerateRecentDeck} disabled={deckActionLoading}>
-        {deckActionLoading ? 'Generating' : 'Generate deck from last 50 games'}
+        {deckActionLoading ? 'Generating' : 'Generate automatic deck your last 50 games'}
       </button>
       {deckActionError ? <p className={styles.error}>{deckActionError}</p> : null}
     </>
