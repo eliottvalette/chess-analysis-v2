@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import { Chess, type Square } from 'chess.js';
 
 import type { AnalysisResult } from '@/lib/analysis-types';
@@ -47,6 +47,7 @@ import {
 import {
   applyDeckAttempt,
   buildMixedTrainingQueue,
+  getDeckCardState,
   getDeckProgressEntry,
   sortCardsForReview,
   summarizeDeckProgress,
@@ -73,6 +74,8 @@ const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
 const CHESSCOM_TIME_CLASS_COOKIE = 'chesscom_time_class';
 const TRAINING_USERNAME_COOKIE = 'training_profile_username';
 const TRAINING_PASSWORD_COOKIE = 'training_profile_password';
+const TRAINING_USERNAME_STORAGE_KEY = 'chess-lab-training-username-v1';
+const TRAINING_PASSWORD_STORAGE_KEY = 'chess-lab-training-password-v1';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
 const LAST_TRAINING_DECK_STORAGE_KEY = 'chess-lab-last-training-deck-v1';
 const RECENT_GAMES_PAGE_SIZE = 10;
@@ -240,6 +243,7 @@ export function ChessAnalysisLab() {
   const [trainingProfileError, setTrainingProfileError] = useState('');
   const [trainingUsername, setTrainingUsername] = useState('');
   const [trainingPassword, setTrainingPassword] = useState('');
+  const trainingCredentialsHydratedRef = useRef(false);
   const [focusTrainCreateDeck, setFocusTrainCreateDeck] = useState(false);
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
@@ -294,9 +298,13 @@ export function ChessAnalysisLab() {
   const boardArrows = activeDeckCard ? dedupeBoardArrows([...deckAnswerArrow, ...deckOpponentArrow]) : bestMoveArrow;
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
-  const availableDeckCards = useMemo(
+  const sortedDeckCards = useMemo(
     () => sortCardsForReview(deckCards, deckProgress),
     [deckCards, deckProgress],
+  );
+  const availableDeckCards = useMemo(
+    () => getStudyQueueCards(sortedDeckCards, deckProgress),
+    [deckProgress, sortedDeckCards],
   );
   const trainStatsCards = trainAllSession ? trainAllQueue : deckCards;
   const deckStats = useMemo(() => summarizeDeckProgress(trainStatsCards, deckProgress), [deckProgress, trainStatsCards]);
@@ -602,6 +610,44 @@ export function ChessAnalysisLab() {
     }
   }, []);
 
+  useLayoutEffect(() => {
+    if (trainingCredentialsHydratedRef.current) {
+      return;
+    }
+
+    trainingCredentialsHydratedRef.current = true;
+    const savedUsername = readStoredTrainingUsername();
+    const savedPassword = readStoredTrainingPassword();
+
+    if (savedUsername) {
+      setTrainingUsername(savedUsername);
+    }
+
+    if (savedPassword) {
+      setTrainingPassword(savedPassword);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (trainingUsername.trim()) {
+      persistTrainingUsername(trainingUsername.trim());
+    }
+  }, [trainingUsername]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (trainingPassword) {
+      persistTrainingPassword(trainingPassword);
+    }
+  }, [trainingPassword]);
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -633,8 +679,8 @@ export function ChessAnalysisLab() {
       setTrainingProfileLoading(true);
       setTrainingProfileError('');
 
-      const savedUsername = readCookie(TRAINING_USERNAME_COOKIE);
-      const savedPassword = readCookie(TRAINING_PASSWORD_COOKIE);
+      const savedUsername = readStoredTrainingUsername();
+      const savedPassword = readStoredTrainingPassword();
 
       if (savedUsername) {
         setTrainingUsername(savedUsername);
@@ -826,7 +872,7 @@ export function ChessAnalysisLab() {
       setDeckIndex(0);
 
       if (options?.autoStart && cards.length > 0) {
-        const nextCard = sortCardsForReview(cards, deckProgressRef.current)[0] ?? null;
+        const nextCard = getStudyQueueCards(sortCardsForReview(cards, deckProgressRef.current), deckProgressRef.current)[0] ?? null;
 
         if (nextCard) {
           beginDeckCardSession(nextCard, lines);
@@ -933,9 +979,11 @@ export function ChessAnalysisLab() {
     const gradedFeedback = finalizeDeckFeedback(activeDeckCard, deckFeedback, resultingEvalCp);
 
     setDeckFeedback(gradedFeedback);
-    setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
+    if (!trainAllSession) {
+      setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
+    }
     void saveTrainingAttempt(activeDeckCard, gradedFeedback);
-  }, [activeDeckCard, deckFeedback, historyIndex, moveHistory.length, positionAnalysis, positionLoading, saveTrainingAttempt]);
+  }, [activeDeckCard, deckFeedback, historyIndex, moveHistory.length, positionAnalysis, positionLoading, saveTrainingAttempt, trainAllSession]);
 
   useEffect(() => {
     setReviewIndex(value => Math.max(0, Math.min(value, Math.max(0, reviewMoments.length - 1))));
@@ -1119,12 +1167,14 @@ export function ChessAnalysisLab() {
         } else {
           const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback, null);
           setDeckFeedback(gradedFeedback);
-          setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
+          if (!trainAllSession) {
+            setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
+          }
           void saveTrainingAttempt(activeDeckCard, gradedFeedback);
         }
       }
     },
-    [activeDeckCard, deckFeedback, hasLoadedGame, historyIndex, moveHistory, playSoundSequence, saveTrainingAttempt, variationBaseIndex, variationMoves],
+    [activeDeckCard, deckFeedback, hasLoadedGame, historyIndex, moveHistory, playSoundSequence, saveTrainingAttempt, trainAllSession, variationBaseIndex, variationMoves],
   );
 
   const tryMove = useCallback(
@@ -1215,7 +1265,7 @@ export function ChessAnalysisLab() {
     }
 
     if (deckId === selectedDeckId && deckCards.length > 0 && !deckLoading) {
-      const nextCard = sortCardsForReview(deckCards, deckProgress)[0] ?? null;
+      const nextCard = getStudyQueueCards(sortCardsForReview(deckCards, deckProgress), deckProgress)[0] ?? null;
 
       if (nextCard) {
         setDeckIndex(0);
@@ -1325,7 +1375,7 @@ export function ChessAnalysisLab() {
       setActiveDeckCard(null);
       setDeckFeedback(null);
 
-      const nextTrainingCard = sortCardsForReview(remainingCards, nextProgress)[0] ?? null;
+      const nextTrainingCard = getStudyQueueCards(sortCardsForReview(remainingCards, nextProgress), nextProgress)[0] ?? null;
 
       if (nextTrainingCard) {
         loadDeckCard(nextTrainingCard);
@@ -1741,8 +1791,7 @@ export function ChessAnalysisLab() {
 
       setTrainingProfile(payload.profile);
       setTrainingUsername(payload.profile.username);
-      writeCookie(TRAINING_USERNAME_COOKIE, payload.profile.username);
-      writeCookie(TRAINING_PASSWORD_COOKIE, trainingPassword);
+      persistTrainingCredentials(payload.profile.username, trainingPassword);
       setTrainingPassword(trainingPassword);
       await hydrateTrainingProgress({ saveMerged: true });
       await loadTrainingDeck(selectedDeckId);
@@ -2380,6 +2429,13 @@ function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckP
   return merged;
 }
 
+function getStudyQueueCards(cards: DeckCard[], progress: DeckProgressMap) {
+  return cards.filter(card => {
+    const state = getDeckCardState(getDeckProgressEntry(progress, card.id));
+    return state === 'new' || state === 'due';
+  });
+}
+
 function buildDeckCardState(card: DeckCard, openingLines: OpeningSeedLine[]) {
   const line = openingLines.find(candidate => candidate.id === card.lineId);
 
@@ -2454,6 +2510,41 @@ function normalizeDeckLoadError(message: string) {
   }
 
   return message;
+}
+
+function readStoredTrainingUsername() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const cookieValue = readCookie(TRAINING_USERNAME_COOKIE);
+  const storageValue = window.localStorage.getItem(TRAINING_USERNAME_STORAGE_KEY);
+  return cookieValue || storageValue || '';
+}
+
+function readStoredTrainingPassword() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const cookieValue = readCookie(TRAINING_PASSWORD_COOKIE);
+  const storageValue = window.localStorage.getItem(TRAINING_PASSWORD_STORAGE_KEY);
+  return cookieValue || storageValue || '';
+}
+
+function persistTrainingUsername(username: string) {
+  writeCookie(TRAINING_USERNAME_COOKIE, username);
+  window.localStorage.setItem(TRAINING_USERNAME_STORAGE_KEY, username);
+}
+
+function persistTrainingPassword(password: string) {
+  writeCookie(TRAINING_PASSWORD_COOKIE, password);
+  window.localStorage.setItem(TRAINING_PASSWORD_STORAGE_KEY, password);
+}
+
+function persistTrainingCredentials(username: string, password: string) {
+  persistTrainingUsername(username);
+  persistTrainingPassword(password);
 }
 
 function readCookie(name: string) {

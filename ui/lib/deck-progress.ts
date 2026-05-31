@@ -1,6 +1,7 @@
 import type { DeckCard } from '@/lib/opening-training';
 
 export type DeckAttemptOutcome = 'correct' | 'miss';
+export type DeckCardState = 'new' | 'learning' | 'due' | 'review' | 'mature' | 'ignored';
 
 export type DeckProgressEntry = {
   seenCount: number;
@@ -20,11 +21,18 @@ export type DeckProgressEntry = {
 export type DeckProgressMap = Record<string, DeckProgressEntry>;
 
 export type DeckProgressSummary = {
-  seen: number;
+  reviews: number;
+  reviewedCards: number;
   correct: number;
   misses: number;
   ignored: number;
   remaining: number;
+  new: number;
+  learning: number;
+  due: number;
+  review: number;
+  mature: number;
+  later: number;
 };
 
 export function getDeckProgressEntry(progress: DeckProgressMap, cardId: string): DeckProgressEntry {
@@ -106,27 +114,55 @@ export function toggleDeckIgnored(progress: DeckProgressMap, cardId: string): De
   };
 }
 
-export function summarizeDeckProgress(cards: DeckCard[], progress: DeckProgressMap): DeckProgressSummary {
-  let seen = 0;
+export function summarizeDeckProgress(cards: DeckCard[], progress: DeckProgressMap, nowIso = new Date().toISOString()): DeckProgressSummary {
+  let reviews = 0;
+  let reviewedCards = 0;
   let correct = 0;
   let misses = 0;
   let ignored = 0;
+  let newCount = 0;
+  let learning = 0;
+  let due = 0;
+  let review = 0;
+  let mature = 0;
 
   for (const card of cards) {
     const entry = getDeckProgressEntry(progress, card.id);
+    const state = getDeckCardState(entry, nowIso);
 
-    seen += entry.seenCount;
+    reviews += entry.seenCount;
+    reviewedCards += entry.seenCount > 0 ? 1 : 0;
     correct += entry.correctCount;
     misses += entry.missCount;
-    ignored += entry.ignored ? 1 : 0;
+
+    if (state === 'ignored') {
+      ignored += 1;
+    } else if (state === 'new') {
+      newCount += 1;
+    } else if (state === 'learning') {
+      learning += 1;
+    } else if (state === 'due') {
+      due += 1;
+    } else if (state === 'mature') {
+      mature += 1;
+    } else {
+      review += 1;
+    }
   }
 
   return {
-    seen,
+    reviews,
+    reviewedCards,
     correct,
     misses,
     ignored,
     remaining: Math.max(0, cards.length - ignored),
+    new: newCount,
+    learning,
+    due,
+    review,
+    mature,
+    later: learning + review + mature,
   };
 }
 
@@ -172,6 +208,40 @@ export function sortCardsForReview(cards: DeckCard[], progress: DeckProgressMap,
 
     return (right.scoreSwingCp ?? 0) - (left.scoreSwingCp ?? 0);
   });
+}
+
+export function getDeckCardState(entry: DeckProgressEntry, nowIso = new Date().toISOString()): DeckCardState {
+  if (entry.ignored) {
+    return 'ignored';
+  }
+
+  if (entry.seenCount === 0) {
+    return 'new';
+  }
+
+  const now = Date.parse(nowIso);
+  const due = Date.parse(entry.dueAt ?? '');
+  const isDue = !Number.isFinite(due) || !Number.isFinite(now) || due <= now;
+
+  if (entry.intervalDays === 0) {
+    return isDue ? 'due' : 'learning';
+  }
+
+  if (isDue) {
+    return 'due';
+  }
+
+  return entry.intervalDays >= 21 ? 'mature' : 'review';
+}
+
+export function getDeckQueueCounts(cards: DeckCard[], progress: DeckProgressMap, nowIso = new Date().toISOString()) {
+  const summary = summarizeDeckProgress(cards, progress, nowIso);
+
+  return {
+    new: summary.new,
+    learning: summary.learning,
+    due: summary.due,
+  };
 }
 
 function getReviewRank(entry: DeckProgressEntry, now: number) {

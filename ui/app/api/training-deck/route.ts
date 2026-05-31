@@ -6,6 +6,7 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { TRAINING_SESSION_COOKIE, hashTrainingSessionToken, parseTrainingSessionCookie } from '@/lib/training-profile';
+import { getDeckCardState, type DeckProgressEntry } from '@/lib/deck-progress';
 import { createAdminClient } from '@/utils/supabase/admin';
 
 const execFileAsync = promisify(execFile);
@@ -453,7 +454,7 @@ async function fetchDeckCounts(supabase: ReturnType<typeof createAdminClient>, d
 async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClient>, profileId: string) {
   const { data } = await supabase
     .from('training_card_progress')
-    .select('card_id,seen_count,ignored,due_at')
+    .select('card_id,seen_count,ignored,due_at,interval_days')
     .eq('profile_id', profileId);
   const result = new Map<string, ProgressRow>();
 
@@ -462,6 +463,7 @@ async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClie
       seenCount: Number(row.seen_count ?? 0),
       ignored: Boolean(row.ignored),
       dueAt: row.due_at ? String(row.due_at) : null,
+      intervalDays: Number(row.interval_days ?? 0),
     });
   }
 
@@ -474,7 +476,6 @@ function summarizeDeck(
   progressByCardId: Map<string, ProgressRow>,
   profileId: string | null,
 ) {
-  const now = Date.now();
   let newCount = 0;
   let learningCount = 0;
   let dueCount = 0;
@@ -482,22 +483,22 @@ function summarizeDeck(
 
   for (const card of cards) {
     const progress = progressByCardId.get(card.id);
+    const state = getDeckCardState(toDeckProgressEntry(progress));
 
-    if (progress?.ignored) {
+    if (state === 'ignored') {
       ignoredCount += 1;
       continue;
     }
 
-    if (!progress || progress.seenCount === 0) {
+    if (state === 'new') {
       newCount += 1;
       continue;
     }
 
-    const due = Date.parse(progress.dueAt ?? '');
-    if (!Number.isFinite(due) || due <= now) {
-      dueCount += 1;
-    } else {
+    if (state === 'learning') {
       learningCount += 1;
+    } else if (state === 'due') {
+      dueCount += 1;
     }
   }
 
@@ -512,6 +513,23 @@ function summarizeDeck(
     dueCount,
     ignoredCount,
     isOwned: Boolean(profileId && deck.owner_profile_id === profileId),
+  };
+}
+
+function toDeckProgressEntry(progress: ProgressRow | undefined): DeckProgressEntry {
+  return {
+    seenCount: progress?.seenCount ?? 0,
+    correctCount: 0,
+    missCount: 0,
+    streak: 0,
+    reviewCount: progress?.seenCount ?? 0,
+    lapseCount: 0,
+    ease: 2.5,
+    intervalDays: progress?.intervalDays ?? 0,
+    ignored: Boolean(progress?.ignored),
+    lastOutcome: null,
+    dueAt: progress?.dueAt ?? null,
+    lastSeenAt: null,
   };
 }
 
@@ -603,6 +621,7 @@ type ProgressRow = {
   seenCount: number;
   ignored: boolean;
   dueAt: string | null;
+  intervalDays: number;
 };
 
 type TrainingProfileCookie = {

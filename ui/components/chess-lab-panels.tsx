@@ -13,7 +13,7 @@ import {
   type TimelineReview,
 } from '@/lib/chess-analysis-client';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
-import type { DeckProgressEntry, DeckProgressSummary } from '@/lib/deck-progress';
+import { getDeckCardState, type DeckCardState, type DeckProgressEntry, type DeckProgressSummary } from '@/lib/deck-progress';
 
 type TrainSessionStats = {
   completed: number;
@@ -298,8 +298,8 @@ export function TrainPanel({
           </span>
         </div>
         <div className={styles.stateHeaderMeta}>
-          <strong>{trainSessionCardCurrent}/{trainSessionCardTotal}</strong>
-          <span>{trainAllSession ? 'all decks' : 'queue'}</span>
+          <strong>{trainAllSession ? `${trainSessionCardCurrent}/${trainSessionCardTotal}` : deckStats.due}</strong>
+          <span>{trainAllSession ? 'cram' : `due · new ${deckStats.new}`}</span>
         </div>
       </section>
       <DeckPanel
@@ -348,14 +348,20 @@ export function TrainingProfilePanel({
         <h2 className={styles.sectionTitle}>Training Profile</h2>
         <span className={styles.statusText}>{loading ? 'syncing' : 'required'}</span>
       </div>
-      <div className={styles.profileForm}>
+      <form
+        className={styles.profileForm}
+        onSubmit={event => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
         <input
           className={`${styles.inlineInput} ${styles.profileFormWide}`}
           value={username}
           onChange={event => setUsername(event.target.value)}
-          autoComplete="off"
+          autoComplete="username"
           autoCorrect="off"
-          name="training_profile_handle"
+          name="training_profile_username"
           placeholder="username"
           spellCheck={false}
         />
@@ -363,13 +369,15 @@ export function TrainingProfilePanel({
           className={`${styles.inlineInput} ${styles.profileFormWide}`}
           value={password}
           onChange={event => setPassword(event.target.value)}
+          autoComplete="current-password"
+          name="training_profile_password"
           placeholder="password"
           type="password"
         />
-        <button className={`${styles.action} ${styles.primary} ${styles.profileFormWide}`} onClick={onSubmit} disabled={loading || username.trim().length < 3 || password.length < 4}>
-          {loading ? 'Opening' : 'Open profile'}
+        <button className={`${styles.action} ${styles.primary} ${styles.profileFormWide}`} disabled={loading || username.trim().length < 3 || password.length < 4} type="submit">
+          {loading ? 'Opening profile' : 'Open profile'}
         </button>
-      </div>
+      </form>
       {error ? <p className={styles.error}>{error}</p> : null}
     </section>
   );
@@ -1004,31 +1012,63 @@ function formatDeckCardLabel(card: DeckCard) {
   return card.kind === 'repertoire_choice' ? 'Fix your mistake' : 'Find the punishment';
 }
 
-function formatProgressChip(progress: DeckProgressEntry | null) {
-  if (!progress || progress.seenCount === 0) {
-    return 'new';
-  }
-
-  const due = Date.parse(progress.dueAt ?? '');
-
-  if (!Number.isFinite(due) || due <= Date.now()) {
-    return `due · ${progress.streak} streak`;
-  }
-
-  return `later · ${progress.intervalDays}d`;
-}
-
 function formatCardProgressDetail(progress: DeckProgressEntry | null) {
   if (!progress || progress.seenCount === 0) {
-    return 'New card';
+    return 'New card · no reviews yet';
   }
 
-  const due = Date.parse(progress.dueAt ?? '');
-  const scheduleLabel = !Number.isFinite(due) || due <= Date.now() ? 'due now' : `in ${progress.intervalDays}d`;
   const lastOutcomeLabel =
     progress.lastOutcome === 'correct' ? 'last hit' : progress.lastOutcome === 'miss' ? 'last miss' : 'seen before';
 
-  return `${progress.seenCount} seen · ${progress.streak} streak · ${scheduleLabel} · ${lastOutcomeLabel}`;
+  return `${progress.reviewCount} reviews · ${progress.streak} streak · ${formatNextReview(progress)} · ${lastOutcomeLabel}`;
+}
+
+function getProgressState(progress: DeckProgressEntry | null): DeckCardState {
+  return progress ? getDeckCardState(progress) : 'new';
+}
+
+function formatStateLabel(state: DeckCardState) {
+  switch (state) {
+    case 'new':
+      return 'New';
+    case 'learning':
+      return 'Learning';
+    case 'due':
+      return 'Due';
+    case 'review':
+      return 'Review';
+    case 'mature':
+      return 'Mature';
+    case 'ignored':
+      return 'Ignored';
+  }
+}
+
+function formatNextReview(progress: DeckProgressEntry | null) {
+  if (!progress || progress.seenCount === 0 || !progress.dueAt) {
+    return 'not scheduled';
+  }
+
+  const due = Date.parse(progress.dueAt);
+  const deltaMs = due - Date.now();
+
+  if (!Number.isFinite(due) || deltaMs <= 0) {
+    return 'due now';
+  }
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (deltaMs < hour) {
+    return `in ${Math.max(1, Math.round(deltaMs / minute))} min`;
+  }
+
+  if (deltaMs < day) {
+    return `in ${Math.max(1, Math.round(deltaMs / hour))} h`;
+  }
+
+  return `in ${Math.max(1, Math.round(deltaMs / day))} d`;
 }
 
 function DeckLibraryItem({
@@ -1296,7 +1336,7 @@ export function LearnPanel({
             onClick={onTrainAll}
             type="button"
           >
-            Train on all decks
+            Cram all decks
           </button>
         ) : null}
       </section>
@@ -1373,8 +1413,10 @@ export function DeckPanel({
 }) {
   const card = activeCard ?? nextCard;
   const cardLoaded = Boolean(activeCard && card && activeCard.id === card.id);
+  const cardState = getProgressState(activeCardProgress);
   const sessionProgressPercent =
     trainSessionCardTotal > 0 ? Math.round((trainSessionCardCurrent / trainSessionCardTotal) * 100) : 0;
+  const srsQueueLabel = `New ${deckStats.new} · Learning ${deckStats.learning} · Due ${deckStats.due}`;
 
   return (
     <>
@@ -1382,23 +1424,26 @@ export function DeckPanel({
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Learning</h2>
           <span className={styles.statusText}>
-            {trainAllSession ? 'all decks' : 'deck'} · {trainSessionCardCurrent}/{trainSessionCardTotal}
+            {trainAllSession ? `Cram · ${trainSessionCardCurrent}/${trainSessionCardTotal}` : srsQueueLabel}
           </span>
         </div>
-        <div className={styles.trainSessionProgress} aria-label="Session progress">
-          <div className={styles.trainSessionProgressFill} style={{ width: `${sessionProgressPercent}%` }} />
-        </div>
+        {trainAllSession ? (
+          <div className={styles.trainSessionProgress} aria-label="Cram progress">
+            <div className={styles.trainSessionProgressFill} style={{ width: `${sessionProgressPercent}%` }} />
+          </div>
+        ) : null}
         <div className={styles.trainSessionSummary}>
-          <span>Session · {trainSessionStats.hits} hit · {trainSessionStats.misses} miss</span>
-          <span>{formatProgressChip(activeCardProgress)}</span>
+          <span>{trainAllSession ? 'Cram mode · SRS schedule unchanged' : `Current session · ${trainSessionStats.hits} hit · ${trainSessionStats.misses} miss`}</span>
+          <span>{formatStateLabel(cardState)}</span>
         </div>
         {card ? (
           <>
             <div className={styles.deckPrompt}>
               <span className={styles.metaLabel}>
-                {formatDeckCardLabel(card)} · {formatProgressChip(activeCardProgress)}
+                {formatDeckCardLabel(card)} · {formatStateLabel(cardState)}
               </span>
               <strong>{formatLearningPrompt(card)}</strong>
+              <p>{formatCardProgressDetail(activeCardProgress)}</p>
             </div>
             {deckFeedback ? (
               <div className={`${styles.feedbackBox} ${deckFeedback.pending ? styles.feedbackPending : deckFeedback.correct ? styles.feedbackGood : styles.feedbackBad}`}>
@@ -1417,6 +1462,9 @@ export function DeckPanel({
                   {deckFeedback.maxEvalLossCp != null ? ` / ${formatCpSwing(deckFeedback.maxEvalLossCp)}` : ''}
                   {deckFeedback.scoreSwingCp != null ? ` · swing ${formatCpSwing(deckFeedback.scoreSwingCp)}` : ''}
                 </span>
+                {!deckFeedback.pending ? (
+                  <span>{trainAllSession ? 'Cram result only · SRS unchanged' : `Next review: ${formatNextReview(activeCardProgress)}`}</span>
+                ) : null}
                 {!deckFeedback.pending && !deckFeedback.correct && deckCounterSan ? <span>counter {deckCounterSan}</span> : null}
               </div>
             ) : (
@@ -1442,32 +1490,40 @@ export function DeckPanel({
           </>
         ) : (
           <>
-            <p className={styles.empty}>{deckLoading ? 'Loading learning cards from Supabase.' : 'No learning cards loaded.'}</p>
+            <p className={styles.empty}>{deckLoading ? 'Loading learning cards from Supabase.' : trainAllSession ? 'No cram cards loaded.' : 'No new or due cards in this deck.'}</p>
             {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
           </>
         )}
       </section>
       <section className={`${styles.card} ${styles.dataCard}`}>
         <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>{trainAllSession ? 'Queue totals' : 'Deck totals'}</h2>
-          <span className={styles.statusText}>{deckStats.remaining} active</span>
+          <h2 className={styles.sectionTitle}>{trainAllSession ? 'Cram source' : 'Card states'}</h2>
+          <span className={styles.statusText}>{deckStats.reviews} reviews</span>
         </div>
         <div className={styles.deckStats}>
           <div>
-            <strong>{deckStats.correct}</strong>
-            <span>hit</span>
+            <strong>{deckStats.new}</strong>
+            <span>new</span>
           </div>
           <div>
-            <strong>{deckStats.misses}</strong>
-            <span>miss</span>
+            <strong>{deckStats.learning}</strong>
+            <span>learning</span>
           </div>
           <div>
-            <strong>{deckStats.seen}</strong>
-            <span>seen</span>
+            <strong>{deckStats.due}</strong>
+            <span>due</span>
           </div>
           <div>
-            <strong>{deckStats.remaining}</strong>
-            <span>left</span>
+            <strong>{deckStats.review}</strong>
+            <span>young</span>
+          </div>
+          <div>
+            <strong>{deckStats.mature}</strong>
+            <span>mature</span>
+          </div>
+          <div>
+            <strong>{deckStats.ignored}</strong>
+            <span>ignored</span>
           </div>
         </div>
       </section>
