@@ -966,26 +966,6 @@ export function ChessAnalysisLab() {
   }, [fetchCachedPositionAnalysis, historyIndex, initialFen, moveHistory]);
 
   useEffect(() => {
-    if (!activeDeckCard || !deckFeedback?.pending || positionLoading || historyIndex !== moveHistory.length) {
-      return;
-    }
-
-    const resultingEvalCp = scoreToCpForSide(positionAnalysis?.whitePerspective, activeDeckCard.side);
-
-    if (resultingEvalCp == null) {
-      return;
-    }
-
-    const gradedFeedback = finalizeDeckFeedback(activeDeckCard, deckFeedback, resultingEvalCp);
-
-    setDeckFeedback(gradedFeedback);
-    if (!trainAllSession) {
-      setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
-    }
-    void saveTrainingAttempt(activeDeckCard, gradedFeedback);
-  }, [activeDeckCard, deckFeedback, historyIndex, moveHistory.length, positionAnalysis, positionLoading, saveTrainingAttempt, trainAllSession]);
-
-  useEffect(() => {
     setReviewIndex(value => Math.max(0, Math.min(value, Math.max(0, reviewMoments.length - 1))));
   }, [reviewMoments.length]);
 
@@ -1161,17 +1141,12 @@ export function ChessAnalysisLab() {
 
       if (activeDeckCard && deckFeedback == null) {
         const nextFeedback = buildPendingDeckFeedback(activeDeckCard, move.uci, move.san);
-
-        if (nextFeedback.pending) {
-          setDeckFeedback(nextFeedback);
-        } else {
-          const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback, null);
-          setDeckFeedback(gradedFeedback);
-          if (!trainAllSession) {
-            setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
-          }
-          void saveTrainingAttempt(activeDeckCard, gradedFeedback);
+        const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback);
+        setDeckFeedback(gradedFeedback);
+        if (!trainAllSession) {
+          setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
         }
+        void saveTrainingAttempt(activeDeckCard, gradedFeedback);
       }
     },
     [activeDeckCard, deckFeedback, hasLoadedGame, historyIndex, moveHistory, playSoundSequence, saveTrainingAttempt, trainAllSession, variationBaseIndex, variationMoves],

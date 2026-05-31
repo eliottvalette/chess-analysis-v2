@@ -1451,10 +1451,8 @@ export function DeckPanel({
                   {deckFeedback.pending
                     ? 'Checking eval'
                     : deckFeedback.correct
-                      ? deckFeedback.exact
-                        ? 'Best move'
-                        : 'Accepted'
-                      : 'Too inaccurate'}
+                      ? 'Best move'
+                      : 'Miss'}
                 </strong>
                 <span>
                   played {deckFeedback.playedSan} · best {deckFeedback.expectedSan}
@@ -1470,9 +1468,7 @@ export function DeckPanel({
             ) : (
               <p className={styles.copy}>
                 {cardLoaded
-                  ? card.validationMode === 'within_eval_loss' && card.maxEvalLossCp != null
-                    ? `Play the move on the board. Any move within ${formatCpSwing(card.maxEvalLossCp)} of best is accepted.`
-                    : 'Play the exact move on the board. The answer is strict.'
+                  ? 'Play the exact best move on the board.'
                   : 'Load the card to put its position on the board.'}
               </p>
             )}

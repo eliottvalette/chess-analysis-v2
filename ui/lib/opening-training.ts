@@ -228,9 +228,9 @@ export function buildPunishCardsFromAnalysis(
       prompt: `Opponent played ${replyMove.san}; punish it`,
       context: position.context,
       sourceType: 'opening_seed',
-      validationMode: 'within_eval_loss',
+      validationMode: 'strict_best',
       referenceEvalCp: Math.round(afterScore),
-      maxEvalLossCp: 35,
+      maxEvalLossCp: 0,
       opponentMoveUci: line.bestMove,
       opponentMoveSan: replyMove.san,
       scoreSwingCp,
@@ -280,41 +280,28 @@ export function scoreToCpForSide(score: PerspectiveScore | null | undefined, sid
 
 export function buildPendingDeckFeedback(card: DeckCard, playedUci: string, playedSan: string): DeckFeedback {
   return {
-    pending: card.validationMode === 'within_eval_loss',
+    pending: false,
     correct: false,
     exact: false,
     expectedSan: card.answerSan,
     playedSan,
     playedUci,
-    validationMode: card.validationMode,
+    validationMode: 'strict_best',
     maxEvalLossCp: card.maxEvalLossCp,
     scoreSwingCp: card.scoreSwingCp,
   };
 }
 
-export function finalizeDeckFeedback(card: DeckCard, feedback: DeckFeedback, resultingEvalCp: number | null): DeckFeedback {
-  if (card.validationMode !== 'within_eval_loss' || card.referenceEvalCp == null || card.maxEvalLossCp == null || resultingEvalCp == null) {
-    const exact = feedback.playedUci === card.answerUci;
-
-    return {
-      ...feedback,
-      pending: false,
-      correct: exact,
-      exact,
-      evalLossCp: exact ? 0 : undefined,
-    };
-  }
-
-  const evalLossCp = Math.max(0, Math.round(card.referenceEvalCp - resultingEvalCp));
+export function finalizeDeckFeedback(card: DeckCard, feedback: DeckFeedback): DeckFeedback {
   const exact = feedback.playedUci === card.answerUci;
-  const correct = evalLossCp <= card.maxEvalLossCp;
 
   return {
     ...feedback,
     pending: false,
-    correct,
+    correct: exact,
     exact,
-    evalLossCp,
+    validationMode: 'strict_best',
+    evalLossCp: exact ? 0 : undefined,
   };
 }
 
