@@ -14,10 +14,23 @@ import {
 } from '@/lib/chess-analysis-client';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
 import type { DeckProgressEntry, DeckProgressSummary } from '@/lib/deck-progress';
-import type { DeckCard, DeckFeedback, OpeningSeedLine } from '@/lib/opening-training';
+import type { DeckCard, DeckFeedback } from '@/lib/opening-training';
 import styles from './chess-analysis-lab.module.css';
 
 export type WorkspaceMode = 'review' | 'train';
+
+export type TrainingDeckSummary = {
+  id: string;
+  name: string;
+  description: string;
+  ownerProfileId: string | null;
+  cardCount: number;
+  newCount: number;
+  learningCount: number;
+  dueCount: number;
+  ignoredCount: number;
+  isOwned: boolean;
+};
 
 export function getModeLabel(mode: WorkspaceMode) {
   switch (mode) {
@@ -49,7 +62,11 @@ export function ReviewPanel({
   recentGamesHasMore,
   recentGamesLoading,
   recentGameTimeClass,
+  reviewDeckName,
+  reviewDeckSaveStatus,
   reviewMoments,
+  canSaveReviewCard,
+  onSaveReviewCard,
   setShowArrow,
   timelineAnalyses,
   timelineAnalysesLength,
@@ -84,7 +101,11 @@ export function ReviewPanel({
   recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
+  reviewDeckName: string;
+  reviewDeckSaveStatus: string;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
+  canSaveReviewCard: boolean;
+  onSaveReviewCard: () => void;
   setShowArrow: (value: boolean) => void;
   timelineAnalyses: AnalysisResult[];
   timelineAnalysesLength: number;
@@ -115,7 +136,11 @@ export function ReviewPanel({
         recentGamesHasMore={recentGamesHasMore}
         recentGamesLoading={recentGamesLoading}
         recentGameTimeClass={recentGameTimeClass}
+        reviewDeckName={reviewDeckName}
+        reviewDeckSaveStatus={reviewDeckSaveStatus}
         reviewMoments={reviewMoments}
+        canSaveReviewCard={canSaveReviewCard}
+        onSaveReviewCard={onSaveReviewCard}
         setShowArrow={setShowArrow}
         timelineAnalyses={timelineAnalyses}
         timelineAnalysesLength={timelineAnalysesLength}
@@ -154,7 +179,11 @@ export function ReviewPanel({
         recentGamesHasMore={recentGamesHasMore}
         recentGamesLoading={recentGamesLoading}
         recentGameTimeClass={recentGameTimeClass}
+        reviewDeckName={reviewDeckName}
+        reviewDeckSaveStatus={reviewDeckSaveStatus}
         reviewMoments={reviewMoments}
+        canSaveReviewCard={canSaveReviewCard}
+        onSaveReviewCard={onSaveReviewCard}
         setShowArrow={setShowArrow}
         timelineAnalyses={timelineAnalyses}
         timelineAnalysesLength={timelineAnalysesLength}
@@ -170,50 +199,68 @@ export function ReviewPanel({
 export function TrainPanel({
   activeCard,
   activeCardProgress,
-  currentFen,
+  deckActionError,
+  deckActionLoading,
   deckCards,
   deckCounterSan,
   deckLoadError,
   deckLoading,
+  deckSummaries,
   deckFeedback,
   deckStats,
+  newDeckTitle,
   nextCard,
   onBack,
+  onCreateDeck,
+  onGenerateRecentDeck,
   onNext,
   onRepeat,
+  onSelectDeck,
+  onNewDeckTitleChange,
   onToggleIgnore,
-  openingLines,
-  positionAnalysis,
+  selectedDeckId,
   startCard,
 }: {
   activeCard: DeckCard | null;
   activeCardProgress: DeckProgressEntry | null;
-  currentFen: string;
+  deckActionError: string;
+  deckActionLoading: boolean;
   deckCards: DeckCard[];
   deckCounterSan: string | null;
   deckLoadError: string;
   deckLoading: boolean;
+  deckSummaries: TrainingDeckSummary[];
   deckFeedback: DeckFeedback | null;
   deckStats: DeckProgressSummary;
+  newDeckTitle: string;
   nextCard: DeckCard | null;
   onBack: () => void;
+  onCreateDeck: () => void;
+  onGenerateRecentDeck: () => void;
   onNext: () => void;
   onRepeat: () => void;
+  onSelectDeck: (deckId: string) => void;
+  onNewDeckTitleChange: (value: string) => void;
   onToggleIgnore: () => void;
-  openingLines: OpeningSeedLine[];
-  positionAnalysis: AnalysisResult | null;
+  selectedDeckId: string | null;
   startCard: (card: DeckCard | null) => void;
 }) {
   if (!activeCard) {
     return (
       <LearnPanel
-        currentFen={currentFen}
+        deckActionError={deckActionError}
+        deckActionLoading={deckActionLoading}
         deckCards={deckCards}
         deckLoadError={deckLoadError}
         deckLoading={deckLoading}
+        deckSummaries={deckSummaries}
+        newDeckTitle={newDeckTitle}
         nextDeckCard={nextCard}
-        openingLines={openingLines}
-        positionAnalysis={positionAnalysis}
+        onCreateDeck={onCreateDeck}
+        onGenerateRecentDeck={onGenerateRecentDeck}
+        onNewDeckTitleChange={onNewDeckTitleChange}
+        onSelectDeck={onSelectDeck}
+        selectedDeckId={selectedDeckId}
         startCard={startCard}
       />
     );
@@ -397,7 +444,11 @@ export function GameReviewPanel({
   recentGamesHasMore,
   recentGamesLoading,
   recentGameTimeClass,
+  reviewDeckName,
+  reviewDeckSaveStatus,
   reviewMoments,
+  canSaveReviewCard,
+  onSaveReviewCard,
   setShowArrow,
   timelineAnalyses,
   timelineAnalysesLength,
@@ -431,7 +482,11 @@ export function GameReviewPanel({
   recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
+  reviewDeckName: string;
+  reviewDeckSaveStatus: string;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
+  canSaveReviewCard: boolean;
+  onSaveReviewCard: () => void;
   setShowArrow: (value: boolean) => void;
   timelineAnalyses: AnalysisResult[];
   timelineAnalysesLength: number;
@@ -562,6 +617,9 @@ export function GameReviewPanel({
             disabled={!coachReview?.bestMoveSan}
           >
             Best
+          </button>
+          <button className={styles.action} onClick={onSaveReviewCard} disabled={!canSaveReviewCard} title={reviewDeckName || 'Choose a training deck first'}>
+            {reviewDeckSaveStatus || 'Save'}
           </button>
           <button
             className={`${styles.action} ${styles.primary}`}
@@ -773,7 +831,7 @@ function formatCardLineTitle(card: DeckCard) {
 }
 
 function formatLearningPrompt(card: DeckCard) {
-  if (card.sourceType === 'recent_game') {
+  if (card.sourceType === 'recent_game' || card.sourceType === 'review') {
     return card.prompt;
   }
 
@@ -807,112 +865,104 @@ function formatProgressChip(progress: DeckProgressEntry | null) {
 }
 
 export function LearnPanel({
-  currentFen,
+  deckActionError,
+  deckActionLoading,
   deckCards,
   deckLoadError,
   deckLoading,
+  deckSummaries,
+  newDeckTitle,
   nextDeckCard,
-  openingLines,
-  positionAnalysis,
+  onCreateDeck,
+  onGenerateRecentDeck,
+  onNewDeckTitleChange,
+  onSelectDeck,
+  selectedDeckId,
   startCard,
 }: {
-  currentFen: string;
+  deckActionError: string;
+  deckActionLoading: boolean;
   deckCards: DeckCard[];
   deckLoadError: string;
   deckLoading: boolean;
+  deckSummaries: TrainingDeckSummary[];
+  newDeckTitle: string;
   nextDeckCard: DeckCard | null;
-  openingLines: OpeningSeedLine[];
-  positionAnalysis: AnalysisResult | null;
+  onCreateDeck: () => void;
+  onGenerateRecentDeck: () => void;
+  onNewDeckTitleChange: (value: string) => void;
+  onSelectDeck: (deckId: string) => void;
+  selectedDeckId: string | null;
   startCard: (card: DeckCard | null) => void;
 }) {
   const hasDeckCards = deckCards.length > 0;
-  const whiteCards = deckCards.filter(card => card.side === 'white').length;
-  const blackCards = deckCards.length - whiteCards;
-  const legitOptions = positionAnalysis?.lines?.slice(0, 3) ?? [];
+  const selectedDeck = deckSummaries.find(deck => deck.id === selectedDeckId) ?? null;
 
   return (
     <>
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
         <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Learning</h2>
-          <span className={styles.statusText}>{deckLoading ? 'loading' : hasDeckCards ? `${deckCards.length} cards` : 'empty'}</span>
+          <h2 className={styles.sectionTitle}>Decks</h2>
+          <span className={styles.statusText}>{deckLoading ? 'loading' : `${deckSummaries.length} decks`}</span>
         </div>
-        {hasDeckCards ? (
-          <>
-            <div className={styles.deckStats}>
-              <div>
-                <strong>{openingLines.length}</strong>
-                <span>lines</span>
-              </div>
-              <div>
-                <strong>{whiteCards}</strong>
-                <span>white</span>
-              </div>
-              <div>
-                <strong>{blackCards}</strong>
-                <span>black</span>
-              </div>
-            </div>
-            <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => startCard(nextDeckCard)} disabled={deckLoading || !nextDeckCard}>
-              {deckLoading ? 'Loading' : 'Start learning'}
-            </button>
-          </>
-        ) : (
+        {deckSummaries.length === 0 ? (
           <p className={styles.copy}>
             {deckLoading
-              ? 'Loading deck.'
+              ? 'Loading decks.'
               : deckLoadError
-                ? 'Learning setup is broken. Recreate the canonical Supabase schema and seed cards.'
-                : 'No learning cards have been seeded yet.'}
+                ? 'Learning setup is not available.'
+                : 'Create a deck, then add cards from Review.'}
           </p>
+        ) : (
+          <div className={styles.deckLibrary}>
+            {deckSummaries.map(deck => (
+              <button
+                className={`${styles.deckLibraryItem} ${deck.id === selectedDeckId ? styles.activeDeckLibraryItem : ''}`}
+                key={deck.id}
+                onClick={() => onSelectDeck(deck.id)}
+                type="button"
+              >
+                <span className={styles.deckLibraryHead}>
+                  <strong>{deck.name}</strong>
+                  <span>{deck.cardCount} cards</span>
+                </span>
+                <span className={styles.deckLibraryMeta}>
+                  <span>{deck.newCount} new</span>
+                  <span>{deck.learningCount} learning</span>
+                  <span>{deck.dueCount} due</span>
+                </span>
+              </button>
+            ))}
+          </div>
         )}
+        {selectedDeck ? (
+          <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => startCard(nextDeckCard)} disabled={deckLoading || !hasDeckCards || !nextDeckCard}>
+            {hasDeckCards ? `Train ${selectedDeck.name}` : 'No cards yet'}
+          </button>
+        ) : null}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
       </section>
-      <section className={`${styles.card} ${styles.engineCard}`}>
+      <section className={`${styles.card} ${styles.emptyStateCard}`}>
         <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Legit options</h2>
-          <span className={styles.statusText}>{legitOptions.length ? 'not graded' : 'waiting'}</span>
+          <h2 className={styles.sectionTitle}>Create deck</h2>
+          <span className={styles.statusText}>manual</span>
         </div>
-        <div className={styles.engineLines}>
-          {legitOptions.length > 0 ? (
-            legitOptions.map(line => (
-              <div className={styles.engineLine} key={line.multipv}>
-                <div className={styles.engineLineHead}>
-                  <span className={styles.engineRank}>#{line.multipv}</span>
-                  <strong>{line.bestMove ? formatBestMove(currentFen, line.bestMove) : '--'}</strong>
-                  <span>{formatLineScore(line)}</span>
-                </div>
-                <p className={styles.enginePv}>{formatPvLine(currentFen, line.pv)}</p>
-              </div>
-            ))
-          ) : (
-            <p className={styles.empty}>Analyze a position to see acceptable candidate moves.</p>
-          )}
+        <div className={styles.inlineForm}>
+          <input
+            className={styles.inlineInput}
+            onChange={event => onNewDeckTitleChange(event.target.value)}
+            placeholder="Deck title"
+            value={newDeckTitle}
+          />
+          <button className={`${styles.action} ${styles.inlineFormWide}`} onClick={onCreateDeck} disabled={deckActionLoading || !newDeckTitle.trim()}>
+            Create
+          </button>
         </div>
       </section>
-      {hasDeckCards ? (
-        <section className={`${styles.card} ${styles.openingListCard}`}>
-          <div className={styles.panelHeader}>
-            <h2 className={styles.sectionTitle}>Lines</h2>
-            <span className={styles.statusText}>eval-graded deck</span>
-          </div>
-          <div className={styles.openingList}>
-            {openingLines.map(line => {
-              const lineCards = deckCards.filter(card => card.lineId === line.id);
-              const firstCard = lineCards[0] ?? null;
-
-              return (
-                <button className={styles.openingButton} key={line.id} onClick={() => startCard(firstCard)} disabled={!firstCard}>
-                  <span>
-                    {line.eco} · {line.name}
-                  </span>
-                  <strong>{lineCards.length}</strong>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
+      <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={onGenerateRecentDeck} disabled={deckActionLoading}>
+        {deckActionLoading ? 'Generating' : 'Generate deck from last 50 games'}
+      </button>
+      {deckActionError ? <p className={styles.error}>{deckActionError}</p> : null}
     </>
   );
 }

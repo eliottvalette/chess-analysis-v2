@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCanonicalResetSql, getPgConfig } from './migrate.mjs';
+import { buildCanonicalResetSql, getPgConfig, readMigrationFiles } from './migrate.mjs';
 
 const baseEnv = {
   NEXT_PUBLIC_SUPABASE_URL: 'https://rdehwurjccisorhyqonc.supabase.co',
@@ -56,4 +56,12 @@ test('buildCanonicalResetSql drops deck tables before applying the schema', () =
   assert.match(sql, /drop table if exists public\.user_card_attempts cascade;/);
   assert.match(sql, /drop table if exists public\.decks cascade;/);
   assert.match(sql, /create table public\.decks \(\);/);
+});
+
+test('readMigrationFiles loads SQL migrations in lexical order', () => {
+  const migrations = readMigrationFiles('supabase/migrations');
+
+  assert.ok(migrations.length >= 2);
+  assert.equal(migrations[0].path, 'supabase/migrations/0001_learning_decks.sql');
+  assert.equal(migrations[1].path, 'supabase/migrations/0002_review_decks.sql');
 });

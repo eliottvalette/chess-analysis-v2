@@ -1,36 +1,53 @@
+import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { promisify } from 'node:util';
+
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { TRAINING_SESSION_COOKIE, hashTrainingSessionToken, parseTrainingSessionCookie } from '@/lib/training-profile';
 import { createAdminClient } from '@/utils/supabase/admin';
 
+const execFileAsync = promisify(execFile);
 const DECK_CARD_SELECT =
   'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp';
+const DECK_SELECT = 'id,name,description,version,is_active,owner_profile_id,created_at,updated_at';
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = createAdminClient();
   const profile = await getTrainingProfileFromCookie();
+  const selectedDeckId = new URL(request.url).searchParams.get('deckId');
 
-  const { data: decks, error: deckError } = await fetchActiveDecks(supabase, profile?.id ?? null);
+  const { data: decks, error: deckError } = await fetchAccessibleDecks(supabase, profile?.id ?? null);
   if (deckError) {
     return NextResponse.json({ error: deckError.message }, { status: 500 });
   }
 
-  const activeDeck = profile
-    ? ((decks ?? []).find(deck => deck.owner_profile_id === profile.id) ?? decks?.[0] ?? null)
-    : (decks?.[0] ?? null);
+  const accessibleDecks = decks ?? [];
+  const accessibleIds = accessibleDecks.map(deck => String(deck.id));
+  const selectedDeck =
+    (selectedDeckId && accessibleDecks.find(deck => deck.id === selectedDeckId)) ||
+    (profile ? accessibleDecks.find(deck => deck.owner_profile_id === profile.id) : null) ||
+    accessibleDecks[0] ||
+    null;
 
-  if (!activeDeck) {
-    return NextResponse.json({ deck: null, lines: [], cards: [] });
+  const [deckCounts, progressByCardId] = await Promise.all([
+    fetchDeckCounts(supabase, accessibleIds),
+    profile ? fetchProgressByCardId(supabase, profile.id) : Promise.resolve(new Map<string, ProgressRow>()),
+  ]);
+  const summaries = accessibleDecks.map(deck => summarizeDeck(deck, deckCounts.get(deck.id) ?? [], progressByCardId, profile?.id ?? null));
+
+  if (!selectedDeck) {
+    return NextResponse.json({ decks: summaries, deck: null, lines: [], cards: [] });
   }
 
   const [{ data: lines, error: linesError }, { data: cards, error: cardsError }] = await Promise.all([
-    supabase.from('opening_lines').select('id,name,eco,side,moves').eq('deck_id', activeDeck.id).order('id'),
+    supabase.from('opening_lines').select('id,name,eco,side,moves').eq('deck_id', selectedDeck.id).order('id'),
     supabase
       .from('deck_cards')
       .select(DECK_CARD_SELECT)
-      .eq('deck_id', activeDeck.id)
-      .lte('ply', 24)
+      .eq('deck_id', selectedDeck.id)
+      .lte('ply', 80)
       .order('score_swing_cp', { ascending: false, nullsFirst: false }),
   ]);
 
@@ -43,42 +60,286 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    deck: { id: activeDeck.id, ownerProfileId: activeDeck.owner_profile_id ?? null },
+    decks: summaries,
+    deck: summarizeDeck(selectedDeck, deckCounts.get(selectedDeck.id) ?? [], progressByCardId, profile?.id ?? null),
     lines: lines ?? [],
     cards: cards ?? [],
   });
 }
 
-async function fetchActiveDecks(supabase: ReturnType<typeof createAdminClient>, profileId: string | null) {
-  const deckQuery = supabase
+export async function POST(request: Request) {
+  const profile = await getTrainingProfileFromCookie();
+
+  if (!profile) {
+    return NextResponse.json({ error: 'No training profile.' }, { status: 401 });
+  }
+
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const action = String(body.action ?? '');
+
+  if (action === 'create') {
+    return createDeck(profile, body);
+  }
+
+  if (action === 'generate_recent') {
+    return generateRecentDeck(profile, body);
+  }
+
+  if (action === 'add_card') {
+    return addReviewCard(profile, body);
+  }
+
+  return NextResponse.json({ error: 'Unknown deck action.' }, { status: 400 });
+}
+
+async function createDeck(profile: TrainingProfileCookie, body: Record<string, unknown>) {
+  const name = clampText(String(body.name ?? ''), 80);
+
+  if (!name) {
+    return NextResponse.json({ error: 'Deck title is required.' }, { status: 400 });
+  }
+
+  const id = `custom-${profile.id.slice(0, 8)}-${slugify(name)}-${Date.now()}`;
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from('decks')
+    .insert({
+      id,
+      name,
+      description: 'Manual review deck.',
+      version: 1,
+      is_active: true,
+      owner_profile_id: profile.id,
+    })
+    .select(DECK_SELECT)
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ deck: summarizeDeck(data, [], new Map(), profile.id) });
+}
+
+async function generateRecentDeck(profile: TrainingProfileCookie, body: Record<string, unknown>) {
+  const username = clampText(String(body.username ?? profile.username), 40).toLowerCase();
+  const timeClass = normalizeTimeClass(body.timeClass);
+  const count = Math.max(1, Math.min(100, Number.parseInt(String(body.count ?? 50), 10) || 50));
+
+  if (!username) {
+    return NextResponse.json({ error: 'Chess.com username is required.' }, { status: 400 });
+  }
+
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      [
+        'scripts/chesscom/build-recent-blitz-deck.mjs',
+        '--username',
+        username,
+        '--profile',
+        profile.username,
+        '--count',
+        String(count),
+        '--time-class',
+        timeClass,
+        '--write-supabase',
+        '--concurrency',
+        '4',
+      ],
+      {
+        cwd: process.cwd(),
+        timeout: 12 * 60 * 1000,
+        maxBuffer: 1024 * 1024 * 4,
+      },
+    );
+
+    return NextResponse.json({ deckId: `recent-blitz-trainer-v1-${profile.username}`, generated: parseJson(stdout), logs: stderr });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Deck generation failed.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+async function addReviewCard(profile: TrainingProfileCookie, body: Record<string, unknown>) {
+  const deckId = String(body.deckId ?? '');
+  const card = sanitizeReviewCard(body.card);
+
+  if (!deckId) {
+    return NextResponse.json({ error: 'Choose a deck first.' }, { status: 400 });
+  }
+
+  if (!card) {
+    return NextResponse.json({ error: 'No analyzable position to save.' }, { status: 400 });
+  }
+
+  const supabase = createAdminClient();
+  const { data: deck, error: deckError } = await supabase
     .from('decks')
     .select('id,owner_profile_id')
-    .eq('is_active', true)
-    .order('version', { ascending: false })
-    .limit(10);
+    .eq('id', deckId)
+    .maybeSingle();
 
-  const result = profileId
-    ? await deckQuery.or(`owner_profile_id.eq.${profileId},owner_profile_id.is.null`)
-    : await deckQuery.is('owner_profile_id', null);
+  if (deckError) {
+    return NextResponse.json({ error: deckError.message }, { status: 500 });
+  }
 
-  if (!result.error || !result.error.message.includes('owner_profile_id')) {
+  if (!deck || deck.owner_profile_id !== profile.id) {
+    return NextResponse.json({ error: 'Review cards can only be added to your own decks.' }, { status: 403 });
+  }
+
+  const id = `review-${createShortHash(`${deckId}:${card.fen}:${card.answerUci}`)}`;
+  const { error } = await supabase.from('deck_cards').upsert(
+    {
+      id,
+      deck_id: deckId,
+      line_id: null,
+      kind: 'punish_mistake',
+      line_name: card.lineName,
+      eco: card.eco,
+      side: card.side,
+      ply: card.ply,
+      fen: card.fen,
+      answer_uci: card.answerUci,
+      answer_san: card.answerSan,
+      prompt: card.prompt,
+      context: card.context,
+      source_type: 'review',
+      validation_mode: card.referenceEvalCp == null ? 'strict_best' : 'within_eval_loss',
+      reference_eval_cp: card.referenceEvalCp,
+      max_eval_loss_cp: card.referenceEvalCp == null ? 0 : 35,
+      opponent_move_uci: null,
+      opponent_move_san: null,
+      score_swing_cp: null,
+    },
+    { onConflict: 'id' },
+  );
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ cardId: id });
+}
+
+async function fetchAccessibleDecks(supabase: ReturnType<typeof createAdminClient>, profileId: string | null) {
+  const query = supabase.from('decks').select(DECK_SELECT).eq('is_active', true).order('created_at', { ascending: false });
+
+  return profileId ? query.or(`owner_profile_id.eq.${profileId},owner_profile_id.is.null`) : query.is('owner_profile_id', null);
+}
+
+async function fetchDeckCounts(supabase: ReturnType<typeof createAdminClient>, deckIds: string[]) {
+  const result = new Map<string, Array<{ id: string }>>();
+
+  if (deckIds.length === 0) {
     return result;
   }
 
-  const fallback = await supabase
-    .from('decks')
-    .select('id')
-    .eq('is_active', true)
-    .order('version', { ascending: false })
-    .limit(1);
+  const { data } = await supabase.from('deck_cards').select('id,deck_id').in('deck_id', deckIds);
+
+  for (const row of data ?? []) {
+    const deckId = String(row.deck_id);
+    const cards = result.get(deckId) ?? [];
+    cards.push({ id: String(row.id) });
+    result.set(deckId, cards);
+  }
+
+  return result;
+}
+
+async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClient>, profileId: string) {
+  const { data } = await supabase
+    .from('training_card_progress')
+    .select('card_id,seen_count,ignored,due_at')
+    .eq('profile_id', profileId);
+  const result = new Map<string, ProgressRow>();
+
+  for (const row of data ?? []) {
+    result.set(String(row.card_id), {
+      seenCount: Number(row.seen_count ?? 0),
+      ignored: Boolean(row.ignored),
+      dueAt: row.due_at ? String(row.due_at) : null,
+    });
+  }
+
+  return result;
+}
+
+function summarizeDeck(
+  deck: Record<string, unknown>,
+  cards: Array<{ id: string }>,
+  progressByCardId: Map<string, ProgressRow>,
+  profileId: string | null,
+) {
+  const now = Date.now();
+  let newCount = 0;
+  let learningCount = 0;
+  let dueCount = 0;
+  let ignoredCount = 0;
+
+  for (const card of cards) {
+    const progress = progressByCardId.get(card.id);
+
+    if (progress?.ignored) {
+      ignoredCount += 1;
+      continue;
+    }
+
+    if (!progress || progress.seenCount === 0) {
+      newCount += 1;
+      continue;
+    }
+
+    const due = Date.parse(progress.dueAt ?? '');
+    if (!Number.isFinite(due) || due <= now) {
+      dueCount += 1;
+    } else {
+      learningCount += 1;
+    }
+  }
 
   return {
-    data: (fallback.data ?? []).map(deck => ({ ...deck, owner_profile_id: null })),
-    error: fallback.error,
+    id: String(deck.id),
+    name: String(deck.name ?? deck.id),
+    description: deck.description ? String(deck.description) : '',
+    ownerProfileId: deck.owner_profile_id ? String(deck.owner_profile_id) : null,
+    cardCount: cards.length,
+    newCount,
+    learningCount,
+    dueCount,
+    ignoredCount,
+    isOwned: Boolean(profileId && deck.owner_profile_id === profileId),
   };
 }
 
-async function getTrainingProfileFromCookie() {
+function sanitizeReviewCard(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const card = value as Record<string, unknown>;
+  const side = card.side === 'black' ? 'black' : card.side === 'white' ? 'white' : null;
+  const answerUci = String(card.answerUci ?? '');
+
+  if (!side || !answerUci || answerUci.length < 4) {
+    return null;
+  }
+
+  return {
+    lineName: clampText(String(card.lineName ?? 'Review position'), 120) || 'Review position',
+    eco: clampText(String(card.eco ?? 'GAME'), 12) || 'GAME',
+    side,
+    ply: clampInt(card.ply, 0, 500),
+    fen: clampText(String(card.fen ?? ''), 120),
+    answerUci: clampText(answerUci, 8),
+    answerSan: clampText(String(card.answerSan ?? answerUci), 40) || answerUci,
+    prompt: clampText(String(card.prompt ?? ''), 180) || `${side === 'white' ? 'White' : 'Black'} to move: find the best response.`,
+    context: clampText(String(card.context ?? 'Review position'), 500) || 'Review position',
+    referenceEvalCp: Number.isFinite(Number(card.referenceEvalCp)) ? Math.trunc(Number(card.referenceEvalCp)) : null,
+  };
+}
+
+async function getTrainingProfileFromCookie(): Promise<TrainingProfileCookie | null> {
   const cookieStore = await cookies();
   const parsed = parseTrainingSessionCookie(cookieStore.get(TRAINING_SESSION_COOKIE)?.value);
 
@@ -89,7 +350,7 @@ async function getTrainingProfileFromCookie() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('training_profiles')
-    .select('id,session_token_hash')
+    .select('id,username,session_token_hash')
     .eq('id', parsed.profileId)
     .maybeSingle();
 
@@ -97,5 +358,52 @@ async function getTrainingProfileFromCookie() {
     return null;
   }
 
-  return hashTrainingSessionToken(parsed.token) === data.session_token_hash ? data : null;
+  return hashTrainingSessionToken(parsed.token) === data.session_token_hash
+    ? { id: String(data.id), username: String(data.username), session_token_hash: String(data.session_token_hash) }
+    : null;
 }
+
+function clampText(value: string, maxLength: number) {
+  return value.trim().slice(0, maxLength);
+}
+
+function clampInt(value: unknown, min: number, max: number) {
+  const number = Number(value);
+  return Math.max(min, Math.min(max, Number.isFinite(number) ? Math.trunc(number) : min));
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 36) || 'deck';
+}
+
+function createShortHash(value: string) {
+  return createHash('sha256').update(value).digest('hex').slice(0, 20);
+}
+
+function normalizeTimeClass(value: unknown) {
+  return value === 'bullet' || value === 'rapid' ? value : 'blitz';
+}
+
+function parseJson(value: string) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+type ProgressRow = {
+  seenCount: number;
+  ignored: boolean;
+  dueAt: string | null;
+};
+
+type TrainingProfileCookie = {
+  id: string;
+  username: string;
+  session_token_hash: string;
+};

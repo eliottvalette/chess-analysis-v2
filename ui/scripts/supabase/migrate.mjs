@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import pg from 'pg';
@@ -18,7 +18,8 @@ drop table if exists public.decks cascade;
 `;
 
 export async function main() {
-  const sql = buildCanonicalResetSql(readFileSync('supabase/migrations/0001_learning_decks.sql', 'utf8'));
+  const migrations = readMigrationFiles('supabase/migrations');
+  const sql = buildCanonicalResetSql(migrations.map(migration => migration.sql).join('\n\n'));
   const client = new Client(getPgConfig(loadLocalEnv()));
 
   await client.connect();
@@ -29,11 +30,24 @@ export async function main() {
     await client.end();
   }
 
-  console.log('canonical deck schema recreated from: supabase/migrations/0001_learning_decks.sql');
+  console.log(`canonical deck schema recreated from: ${migrations.map(migration => migration.path).join(', ')}`);
 }
 
 export function buildCanonicalResetSql(schemaSql) {
   return `${RESET_DECK_SCHEMA_SQL}\n${schemaSql}`;
+}
+
+export function readMigrationFiles(directory) {
+  return readdirSync(directory)
+    .filter(fileName => fileName.endsWith('.sql'))
+    .sort()
+    .map(fileName => {
+      const path = `${directory}/${fileName}`;
+      return {
+        path,
+        sql: readFileSync(path, 'utf8'),
+      };
+    });
 }
 
 export function getPgConfig(env) {

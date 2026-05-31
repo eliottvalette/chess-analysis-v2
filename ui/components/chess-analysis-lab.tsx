@@ -11,6 +11,7 @@ import {
   TrainPanel,
   TrainingProfilePanel,
   getModeLabel,
+  type TrainingDeckSummary,
   type WorkspaceMode,
 } from '@/components/chess-lab-panels';
 import {
@@ -71,6 +72,7 @@ const LAST_MOVE_STYLE = {
 const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
 const CHESSCOM_TIME_CLASS_COOKIE = 'chesscom_time_class';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
+const LAST_TRAINING_DECK_STORAGE_KEY = 'chess-lab-last-training-deck-v1';
 const RECENT_GAMES_PAGE_SIZE = 10;
 
 function getReviewMoveStyle(category: ReviewCategory | null | undefined): CSSProperties {
@@ -90,9 +92,63 @@ function getReviewMoveStyle(category: ReviewCategory | null | undefined): CSSPro
   };
 }
 
+function mapTrainingDeckCard(card: TrainingDeckCardRow): DeckCard {
+  return {
+    id: String(card.id),
+    kind: card.kind === 'repertoire_choice' ? 'repertoire_choice' : 'punish_mistake',
+    lineId: card.line_id ? String(card.line_id) : '',
+    lineName: String(card.line_name),
+    eco: String(card.eco),
+    side: card.side === 'black' ? 'black' : 'white',
+    ply: Number(card.ply),
+    fen: String(card.fen),
+    answerUci: String(card.answer_uci),
+    answerSan: String(card.answer_san),
+    prompt: String(card.prompt),
+    context: String(card.context),
+    sourceType: card.source_type === 'recent_game' || card.source_type === 'review' ? card.source_type : 'opening_seed',
+    validationMode: card.validation_mode === 'within_eval_loss' ? 'within_eval_loss' : 'strict_best',
+    referenceEvalCp: typeof card.reference_eval_cp === 'number' ? card.reference_eval_cp : undefined,
+    maxEvalLossCp: typeof card.max_eval_loss_cp === 'number' ? card.max_eval_loss_cp : undefined,
+    opponentMoveUci: card.opponent_move_uci ? String(card.opponent_move_uci) : undefined,
+    opponentMoveSan: card.opponent_move_san ? String(card.opponent_move_san) : undefined,
+    scoreSwingCp: typeof card.score_swing_cp === 'number' ? card.score_swing_cp : undefined,
+  };
+}
+
 type TrainingProfile = {
   id: string;
   username: string;
+};
+
+type TrainingDeckPayload = {
+  decks?: TrainingDeckSummary[];
+  deck?: TrainingDeckSummary | null;
+  lines?: Array<{ id: string; name: string; eco: string; side: string; moves: string[] | null }>;
+  cards?: TrainingDeckCardRow[];
+  error?: string;
+};
+
+type TrainingDeckCardRow = {
+  id: string;
+  kind: string;
+  line_id: string | null;
+  line_name: string;
+  eco: string;
+  side: string;
+  ply: number;
+  fen: string;
+  answer_uci: string;
+  answer_san: string;
+  prompt: string;
+  context: string;
+  source_type?: string | null;
+  validation_mode?: string | null;
+  reference_eval_cp?: number | null;
+  max_eval_loss_cp?: number | null;
+  opponent_move_uci?: string | null;
+  opponent_move_san?: string | null;
+  score_swing_cp?: number | null;
 };
 
 export function ChessAnalysisLab() {
@@ -126,8 +182,14 @@ export function ChessAnalysisLab() {
   const [deckFeedback, setDeckFeedback] = useState<DeckFeedback | null>(null);
   const [openingLines, setOpeningLines] = useState<OpeningSeedLine[]>([]);
   const [deckCards, setDeckCards] = useState<DeckCard[]>([]);
+  const [deckSummaries, setDeckSummaries] = useState<TrainingDeckSummary[]>([]);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [deckLoading, setDeckLoading] = useState(true);
   const [deckLoadError, setDeckLoadError] = useState('');
+  const [deckActionLoading, setDeckActionLoading] = useState(false);
+  const [deckActionError, setDeckActionError] = useState('');
+  const [newDeckTitle, setNewDeckTitle] = useState('');
+  const [reviewDeckSaveStatus, setReviewDeckSaveStatus] = useState('');
   const [deckProgress, setDeckProgress] = useState<DeckProgressMap>({});
   const [chesscomUsername, setChesscomUsername] = useState('');
   const [recentGameTimeClass, setRecentGameTimeClass] = useState<'bullet' | 'blitz' | 'rapid'>('blitz');
@@ -137,7 +199,7 @@ export function ChessAnalysisLab() {
   const [recentChessGamesNextOffset, setRecentChessGamesNextOffset] = useState(0);
   const [recentChessGamesError, setRecentChessGamesError] = useState('');
   const [trainingProfile, setTrainingProfile] = useState<TrainingProfile | null>(null);
-  const [trainingProfileLoading, setTrainingProfileLoading] = useState(false);
+  const [trainingProfileLoading, setTrainingProfileLoading] = useState(true);
   const [trainingProfileError, setTrainingProfileError] = useState('');
   const [trainingUsername, setTrainingUsername] = useState('');
   const [trainingPassword, setTrainingPassword] = useState('');
@@ -195,6 +257,10 @@ export function ChessAnalysisLab() {
   const deckStats = useMemo(() => summarizeDeckProgress(deckCards, deckProgress), [deckCards, deckProgress]);
   const nextDeckCard = availableDeckCards[deckIndex % Math.max(1, availableDeckCards.length)] ?? null;
   const viewedDeckCard = activeDeckCard ?? nextDeckCard;
+  const selectedDeck = useMemo(
+    () => deckSummaries.find(deck => deck.id === selectedDeckId) ?? null,
+    [deckSummaries, selectedDeckId],
+  );
   const activeDeckProgress = useMemo(
     () => (viewedDeckCard ? getDeckProgressEntry(deckProgress, viewedDeckCard.id) : null),
     [deckProgress, viewedDeckCard],
@@ -407,6 +473,7 @@ export function ChessAnalysisLab() {
     try {
       await fetch('/api/training-progress', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ progress }),
       });
@@ -419,6 +486,7 @@ export function ChessAnalysisLab() {
     try {
       await fetch('/api/training-progress', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           attempt: {
@@ -441,7 +509,7 @@ export function ChessAnalysisLab() {
   const hydrateTrainingProgress = useCallback(
     async (options: { saveMerged: boolean }) => {
       try {
-        const response = await fetch('/api/training-progress');
+        const response = await fetch('/api/training-progress', { credentials: 'same-origin' });
         const payload = (await response.json()) as { progress?: DeckProgressMap };
         const serverProgress = response.ok && payload.progress ? payload.progress : {};
         let mergedProgress: DeckProgressMap | null = null;
@@ -494,11 +562,17 @@ export function ChessAnalysisLab() {
     let cancelled = false;
 
     async function loadTrainingProfile() {
+      setTrainingProfileLoading(true);
+      setTrainingProfileError('');
+
       try {
-        const response = await fetch('/api/training-profile');
+        const response = await fetch('/api/training-profile', { credentials: 'same-origin' });
         const payload = (await response.json()) as { profile?: TrainingProfile | null };
 
         if (cancelled || !payload.profile) {
+          if (!cancelled) {
+            setTrainingProfile(null);
+          }
           progressHydratedRef.current = true;
           return;
         }
@@ -508,6 +582,10 @@ export function ChessAnalysisLab() {
         await hydrateTrainingProgress({ saveMerged: false });
       } catch {
         progressHydratedRef.current = true;
+      } finally {
+        if (!cancelled) {
+          setTrainingProfileLoading(false);
+        }
       }
     }
 
@@ -567,113 +645,57 @@ export function ChessAnalysisLab() {
     soundPlayersRef.current = players;
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadTrainingDeck = useCallback(async (deckId = selectedDeckId) => {
+    setDeckLoading(true);
+    setDeckLoadError('');
 
-    async function loadDeck() {
-      setDeckLoading(true);
-      setDeckLoadError('');
+    try {
+      const query = deckId ? `?deckId=${encodeURIComponent(deckId)}` : '';
+      const response = await fetch(`/api/training-deck${query}`, { credentials: 'same-origin' });
+      const payload = (await response.json()) as TrainingDeckPayload;
 
-      try {
-        const response = await fetch('/api/training-deck');
-        const payload = (await response.json()) as {
-          deck?: { id: string; ownerProfileId: string | null } | null;
-          lines?: Array<{ id: string; name: string; eco: string; side: string; moves: string[] | null }>;
-          cards?: Array<{
-            id: string;
-            kind: string;
-            line_id: string | null;
-            line_name: string;
-            eco: string;
-            side: string;
-            ply: number;
-            fen: string;
-            answer_uci: string;
-            answer_san: string;
-            prompt: string;
-            context: string;
-            source_type?: string | null;
-            validation_mode?: string | null;
-            reference_eval_cp?: number | null;
-            max_eval_loss_cp?: number | null;
-            opponent_move_uci?: string | null;
-            opponent_move_san?: string | null;
-            score_swing_cp?: number | null;
-          }>;
-          error?: string;
-        };
-
-        if (!response.ok) {
-          throw new Error(payload.error ?? `Training deck fetch failed: HTTP ${response.status}`);
-        }
-
-        if (!payload.deck) {
-          if (!cancelled) {
-            setOpeningLines([]);
-            setDeckCards([]);
-          }
-          return;
-        }
-
-        if (cancelled) {
-          return;
-        }
-
-        setOpeningLines(
-          (payload.lines ?? []).map(line => ({
-            id: String(line.id),
-            name: String(line.name),
-            eco: String(line.eco),
-            side: line.side === 'black' ? 'black' : 'white',
-            moves: Array.isArray(line.moves) ? line.moves.map(move => String(move)) : [],
-          })),
-        );
-        setDeckCards(
-          (
-            payload.cards ?? []
-          ).map(card => ({
-            id: String(card.id),
-            kind: card.kind === 'repertoire_choice' ? 'repertoire_choice' : 'punish_mistake',
-            lineId: card.line_id ? String(card.line_id) : '',
-            lineName: String(card.line_name),
-            eco: String(card.eco),
-            side: card.side === 'black' ? 'black' : 'white',
-            ply: Number(card.ply),
-            fen: String(card.fen),
-            answerUci: String(card.answer_uci),
-            answerSan: String(card.answer_san),
-            prompt: String(card.prompt),
-            context: String(card.context),
-            sourceType: card.source_type === 'recent_game' ? 'recent_game' : 'opening_seed',
-            validationMode: card.validation_mode === 'within_eval_loss' ? 'within_eval_loss' : 'strict_best',
-            referenceEvalCp: typeof card.reference_eval_cp === 'number' ? card.reference_eval_cp : undefined,
-            maxEvalLossCp: typeof card.max_eval_loss_cp === 'number' ? card.max_eval_loss_cp : undefined,
-            opponentMoveUci: card.opponent_move_uci ? String(card.opponent_move_uci) : undefined,
-            opponentMoveSan: card.opponent_move_san ? String(card.opponent_move_san) : undefined,
-            scoreSwingCp: typeof card.score_swing_cp === 'number' ? card.score_swing_cp : undefined,
-            }),
-          ),
-        );
-        setDeckIndex(0);
-      } catch (error) {
-        if (!cancelled) {
-          setOpeningLines([]);
-          setDeckCards([]);
-          setDeckLoadError(normalizeDeckLoadError(error instanceof Error ? error.message : 'Unable to load Supabase deck.'));
-        }
-      } finally {
-        if (!cancelled) {
-          setDeckLoading(false);
-        }
+      if (!response.ok) {
+        throw new Error(payload.error ?? `Training deck fetch failed: HTTP ${response.status}`);
       }
+
+      setDeckSummaries(payload.decks ?? []);
+
+      if (!payload.deck) {
+        setOpeningLines([]);
+        setDeckCards([]);
+        setSelectedDeckId(null);
+        return;
+      }
+
+      setSelectedDeckId(payload.deck.id);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, payload.deck.id);
+      }
+      setOpeningLines(
+        (payload.lines ?? []).map(line => ({
+          id: String(line.id),
+          name: String(line.name),
+          eco: String(line.eco),
+          side: line.side === 'black' ? 'black' : 'white',
+          moves: Array.isArray(line.moves) ? line.moves.map(move => String(move)) : [],
+        })),
+      );
+      setDeckCards((payload.cards ?? []).map(mapTrainingDeckCard));
+      setDeckIndex(0);
+    } catch (error) {
+      setOpeningLines([]);
+      setDeckCards([]);
+      setDeckSummaries([]);
+      setDeckLoadError(normalizeDeckLoadError(error instanceof Error ? error.message : 'Unable to load Supabase deck.'));
+    } finally {
+      setDeckLoading(false);
     }
+  }, [selectedDeckId]);
 
-    void loadDeck();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  useEffect(() => {
+    const storedDeckId = typeof window === 'undefined' ? null : window.localStorage.getItem(LAST_TRAINING_DECK_STORAGE_KEY);
+    void loadTrainingDeck(storedDeckId || selectedDeckId);
+  }, [loadTrainingDeck, selectedDeckId, trainingProfile?.id]);
 
   useEffect(() => {
     const requestId = ++positionRequestIdRef.current;
@@ -1308,6 +1330,7 @@ export function ChessAnalysisLab() {
     try {
       const response = await fetch('/api/training-profile', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ username: trainingUsername, password: trainingPassword }),
       });
@@ -1321,10 +1344,126 @@ export function ChessAnalysisLab() {
       setTrainingUsername(payload.profile.username);
       setTrainingPassword('');
       await hydrateTrainingProgress({ saveMerged: true });
+      await loadTrainingDeck(selectedDeckId);
     } catch (error) {
       setTrainingProfileError(error instanceof Error ? error.message : 'Unable to open training profile.');
     } finally {
       setTrainingProfileLoading(false);
+    }
+  }
+
+  async function createTrainingDeck() {
+    setDeckActionLoading(true);
+    setDeckActionError('');
+
+    try {
+      const response = await fetch('/api/training-deck', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'create', name: newDeckTitle }),
+      });
+      const payload = (await response.json()) as { deck?: TrainingDeckSummary; error?: string };
+
+      if (!response.ok || !payload.deck) {
+        throw new Error(payload.error ?? 'Unable to create deck.');
+      }
+
+      setNewDeckTitle('');
+      setSelectedDeckId(payload.deck.id);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, payload.deck.id);
+      }
+      await loadTrainingDeck(payload.deck.id);
+    } catch (error) {
+      setDeckActionError(error instanceof Error ? error.message : 'Unable to create deck.');
+    } finally {
+      setDeckActionLoading(false);
+    }
+  }
+
+  async function generateRecentTrainingDeck() {
+    setDeckActionLoading(true);
+    setDeckActionError('');
+
+    try {
+      const response = await fetch('/api/training-deck', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'generate_recent',
+          username: chesscomUsername || trainingProfile?.username || trainingUsername,
+          count: 50,
+          timeClass: recentGameTimeClass,
+        }),
+      });
+      const payload = (await response.json()) as { deckId?: string; error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Unable to generate deck.');
+      }
+
+      if (payload.deckId) {
+        setSelectedDeckId(payload.deckId);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, payload.deckId);
+        }
+      }
+      await loadTrainingDeck(payload.deckId ?? selectedDeckId);
+    } catch (error) {
+      setDeckActionError(error instanceof Error ? error.message : 'Unable to generate deck.');
+    } finally {
+      setDeckActionLoading(false);
+    }
+  }
+
+  async function saveReviewPositionToDeck() {
+    setReviewDeckSaveStatus('Saving');
+    setDeckActionError('');
+
+    try {
+      const bestMove = positionAnalysis?.bestMove;
+      const side = game.turn() === 'b' ? 'black' : 'white';
+      const referenceEvalCp = scoreToCpForSide(positionAnalysis?.whitePerspective, side);
+
+      if (!selectedDeckId || !bestMove) {
+        throw new Error('Choose a deck and wait for analysis before saving.');
+      }
+
+      const response = await fetch('/api/training-deck', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add_card',
+          deckId: selectedDeckId,
+          card: {
+            lineName: `${whiteReviewName} vs ${blackReviewName}`,
+            eco: metadata?.eco ?? 'GAME',
+            side,
+            ply: historyIndex,
+            fen: currentFen,
+            answerUci: bestMove,
+            answerSan: formatBestMove(currentFen, bestMove),
+            prompt: `${side === 'white' ? 'White' : 'Black'} to move: find the best response.`,
+            context: currentMoves.length > 0 ? currentMoves.map(move => move.san).join(' ') : 'Starting position',
+            referenceEvalCp,
+          },
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Unable to save card.');
+      }
+
+      setReviewDeckSaveStatus('Saved');
+      await loadTrainingDeck(selectedDeckId);
+      window.setTimeout(() => setReviewDeckSaveStatus(''), 1200);
+    } catch (error) {
+      setReviewDeckSaveStatus('');
+      setDeckActionError(error instanceof Error ? error.message : 'Unable to save card.');
     }
   }
 
@@ -1544,8 +1683,12 @@ export function ChessAnalysisLab() {
                 recentGamesHasMore={recentChessGamesHasMore}
                 recentGamesLoading={recentChessGamesLoading}
                 recentGameTimeClass={recentGameTimeClass}
+                reviewDeckName={selectedDeck?.name ?? ''}
+                reviewDeckSaveStatus={reviewDeckSaveStatus}
                 onLoadMoreRecentGames={() => void fetchRecentChessGames(undefined, undefined, true)}
                 reviewMoments={reviewMoments}
+                canSaveReviewCard={Boolean(trainingProfile && selectedDeck?.isOwned && positionAnalysis?.bestMove && !positionLoading)}
+                onSaveReviewCard={() => void saveReviewPositionToDeck()}
                 setShowArrow={setShowArrow}
                 timelineAnalyses={timelineAnalyses}
                 timelineAnalysesLength={timelineAnalyses.length}
@@ -1568,13 +1711,16 @@ export function ChessAnalysisLab() {
               <TrainPanel
                 activeCard={activeDeckCard}
                 activeCardProgress={activeDeckProgress}
-                currentFen={currentFen}
+                deckActionError={deckActionError}
+                deckActionLoading={deckActionLoading}
                 deckCards={deckCards}
                 deckCounterSan={deckOpponentBestSan}
                 deckLoadError={deckLoadError}
                 deckLoading={deckLoading}
+                deckSummaries={deckSummaries}
                 deckFeedback={deckFeedback}
                 deckStats={deckStats}
+                newDeckTitle={newDeckTitle}
                 nextCard={nextDeckCard}
                 onBack={() => {
                   positionRequestIdRef.current += 1;
@@ -1599,11 +1745,22 @@ export function ChessAnalysisLab() {
                   positionInFlightRef.current.clear();
                   clearSelection();
                 }}
+                onCreateDeck={() => void createTrainingDeck()}
+                onGenerateRecentDeck={() => void generateRecentTrainingDeck()}
                 onNext={advanceDeckCard}
+                onNewDeckTitleChange={setNewDeckTitle}
                 onRepeat={repeatDeckCard}
+                onSelectDeck={deckId => {
+                  setSelectedDeckId(deckId);
+                  setActiveDeckCard(null);
+                  setDeckFeedback(null);
+                  if (typeof window !== 'undefined') {
+                    window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
+                  }
+                  void loadTrainingDeck(deckId);
+                }}
                 onToggleIgnore={toggleActiveDeckCardIgnored}
-                openingLines={openingLines}
-                positionAnalysis={positionAnalysis}
+                selectedDeckId={selectedDeckId}
                 startCard={loadDeckCard}
               />
             )}

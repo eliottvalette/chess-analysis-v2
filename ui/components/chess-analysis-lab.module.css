@@ -958,7 +958,7 @@
 
 .reviewCoachActions {
   display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: auto;
 }
@@ -1279,6 +1279,69 @@
   gap: 8px;
   overflow: auto;
   padding-right: 3px;
+}
+
+.deckLibrary {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deckLibraryItem {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(9, 14, 23, 0.38);
+  color: var(--text-muted);
+  padding: 11px 12px;
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.deckLibraryItem:hover {
+  border-color: rgba(214, 226, 244, 0.28);
+  background: rgba(4, 8, 15, 0.58);
+  color: var(--text);
+}
+
+.activeDeckLibraryItem {
+  border-color: rgba(198, 215, 255, 0.58);
+  background: rgba(46, 58, 82, 0.54);
+  color: var(--text);
+}
+
+.deckLibraryHead,
+.deckLibraryMeta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.deckLibraryHead strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deckLibraryHead span,
+.deckLibraryMeta span {
+  color: var(--text-soft);
+  font-size: 11px;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .openingButton {

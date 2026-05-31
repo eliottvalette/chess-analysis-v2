@@ -4,7 +4,7 @@ import type { AnalysisLine, AnalysisResult, PerspectiveScore } from '@/lib/analy
 
 export type TrainingSide = 'white' | 'black';
 export type DeckCardKind = 'punish_mistake' | 'repertoire_choice';
-export type DeckCardSourceType = 'opening_seed' | 'recent_game';
+export type DeckCardSourceType = 'opening_seed' | 'recent_game' | 'review';
 export type DeckValidationMode = 'strict_best' | 'within_eval_loss';
 
 export type OpeningSeedLine = {

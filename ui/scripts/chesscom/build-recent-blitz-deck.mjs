@@ -105,7 +105,7 @@ async function main() {
       name: ownerProfileId ? `Recent Blitz Trainer · ${ownerUsername}` : 'Recent Blitz Trainer',
       description: `Personalized fix and punish cards built from recent public ${options.timeClass} games for ${username}.`,
       version: 1,
-      is_active: options.setActive,
+      is_active: true,
     };
     const deckCards = cards.map(card => ({ ...card, deck_id: deck.id }));
     const deckLines = openingLines.map(line => ({ ...line, deck_id: deck.id }));
@@ -123,6 +123,8 @@ async function main() {
 
     await upsertDeck(supabase, deck);
     logProgress(`upserted deck ${deck.id}`);
+    await replaceDeckContents(supabase, deck.id);
+    logProgress(`cleared previous contents for ${deck.id}`);
     await upsert(supabase, 'opening_lines', deckLines, 'id');
     logProgress(`upserted ${deckLines.length} opening lines`);
     await upsert(supabase, 'deck_cards', deckCards, 'id');
@@ -530,6 +532,20 @@ async function upsertDeck(supabase, deck) {
 
   if (fallback.error) {
     throw new Error(`decks: ${fallback.error.message}`);
+  }
+}
+
+async function replaceDeckContents(supabase, deckId) {
+  const cardDelete = await supabase.from('deck_cards').delete().eq('deck_id', deckId);
+
+  if (cardDelete.error) {
+    throw new Error(`deck_cards delete: ${cardDelete.error.message}`);
+  }
+
+  const lineDelete = await supabase.from('opening_lines').delete().eq('deck_id', deckId);
+
+  if (lineDelete.error) {
+    throw new Error(`opening_lines delete: ${lineDelete.error.message}`);
   }
 }
 
