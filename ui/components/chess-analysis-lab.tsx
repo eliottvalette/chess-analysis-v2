@@ -49,7 +49,6 @@ import {
   getDeckProgressEntry,
   sortCardsForReview,
   summarizeDeckProgress,
-  toggleDeckIgnored,
   type DeckProgressMap,
 } from '@/lib/deck-progress';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
@@ -251,7 +250,7 @@ export function ChessAnalysisLab() {
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
   const availableDeckCards = useMemo(
-    () => sortCardsForReview(deckCards.filter(card => !getDeckProgressEntry(deckProgress, card.id).ignored), deckProgress),
+    () => sortCardsForReview(deckCards, deckProgress),
     [deckCards, deckProgress],
   );
   const deckStats = useMemo(() => summarizeDeckProgress(deckCards, deckProgress), [deckCards, deckProgress]);
@@ -645,7 +644,31 @@ export function ChessAnalysisLab() {
     soundPlayersRef.current = players;
   }, []);
 
-  const loadTrainingDeck = useCallback(async (deckId = selectedDeckId) => {
+  const beginDeckCardSession = useCallback((card: DeckCard, lines: OpeningSeedLine[]) => {
+    const deckState = buildDeckCardState(card, lines);
+
+    setInitialFen(deckState.initialFen);
+    setMoveHistory(deckState.moveHistory);
+    setHistoryIndex(deckState.historyIndex);
+    clearVariation();
+    setGame(deckState.game);
+    setMetadata(null);
+    setFileName('');
+    setPreMoveAnalyses([]);
+    timelineRefineRequestIdRef.current += 1;
+    setMode('train');
+    setActiveDeckCard(card);
+    setDeckFeedback(null);
+    setOrientation(card.side);
+    setShowArrow(false);
+    setPositionAnalysis(null);
+    setTimelineAnalyses([]);
+    setTimelineError('');
+    clearSelection();
+    playSound('game-start');
+  }, [playSound]);
+
+  const loadTrainingDeck = useCallback(async (deckId = selectedDeckId, options?: { autoStart?: boolean }) => {
     setDeckLoading(true);
     setDeckLoadError('');
 
@@ -671,17 +694,25 @@ export function ChessAnalysisLab() {
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, payload.deck.id);
       }
-      setOpeningLines(
-        (payload.lines ?? []).map(line => ({
-          id: String(line.id),
-          name: String(line.name),
-          eco: String(line.eco),
-          side: line.side === 'black' ? 'black' : 'white',
-          moves: Array.isArray(line.moves) ? line.moves.map(move => String(move)) : [],
-        })),
-      );
-      setDeckCards((payload.cards ?? []).map(mapTrainingDeckCard));
+      const lines = (payload.lines ?? []).map(line => ({
+        id: String(line.id),
+        name: String(line.name),
+        eco: String(line.eco),
+        side: (line.side === 'black' ? 'black' : 'white') as OpeningSeedLine['side'],
+        moves: Array.isArray(line.moves) ? line.moves.map(move => String(move)) : [],
+      }));
+      const cards = (payload.cards ?? []).map(mapTrainingDeckCard);
+      setOpeningLines(lines);
+      setDeckCards(cards);
       setDeckIndex(0);
+
+      if (options?.autoStart && cards.length > 0) {
+        const nextCard = sortCardsForReview(cards, deckProgress)[0] ?? null;
+
+        if (nextCard) {
+          beginDeckCardSession(nextCard, lines);
+        }
+      }
     } catch (error) {
       setOpeningLines([]);
       setDeckCards([]);
@@ -690,7 +721,7 @@ export function ChessAnalysisLab() {
     } finally {
       setDeckLoading(false);
     }
-  }, [selectedDeckId]);
+  }, [beginDeckCardSession, deckProgress, selectedDeckId]);
 
   useEffect(() => {
     const storedDeckId = typeof window === 'undefined' ? null : window.localStorage.getItem(LAST_TRAINING_DECK_STORAGE_KEY);
@@ -915,28 +946,39 @@ export function ChessAnalysisLab() {
       return;
     }
 
-    const deckState = buildDeckCardState(card, openingLines);
+    beginDeckCardSession(card, openingLines);
+  }, [beginDeckCardSession, openingLines]);
 
-    setInitialFen(deckState.initialFen);
-    setMoveHistory(deckState.moveHistory);
-    setHistoryIndex(deckState.historyIndex);
-    clearVariation();
-    setGame(deckState.game);
-    setMetadata(null);
-    setFileName('');
-    setPreMoveAnalyses([]);
-    timelineRefineRequestIdRef.current += 1;
-    setMode('train');
-    setActiveDeckCard(card);
+  const trainDeckFromLibrary = useCallback(async (deckId: string) => {
+    setActiveDeckCard(null);
     setDeckFeedback(null);
-    setOrientation(card.side);
-    setShowArrow(false);
-    setPositionAnalysis(null);
-    setTimelineAnalyses([]);
-    setTimelineError('');
-    clearSelection();
-    playSound('game-start');
-  }, [openingLines, playSound]);
+    setSelectedDeckId(deckId);
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
+    }
+
+    if (deckId === selectedDeckId && deckCards.length > 0 && !deckLoading) {
+      const nextCard = sortCardsForReview(deckCards, deckProgress)[0] ?? null;
+
+      if (nextCard) {
+        setDeckIndex(0);
+        beginDeckCardSession(nextCard, openingLines);
+      }
+
+      return;
+    }
+
+    await loadTrainingDeck(deckId, { autoStart: true });
+  }, [beginDeckCardSession, deckCards, deckLoading, deckProgress, loadTrainingDeck, openingLines, selectedDeckId]);
+
+  function selectSaveDeck(deckId: string) {
+    setSelectedDeckId(deckId);
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
+    }
+  }
 
   const advanceDeckCard = useCallback(() => {
     if (availableDeckCards.length === 0) {
@@ -951,19 +993,82 @@ export function ChessAnalysisLab() {
     loadDeckCard(availableDeckCards[nextIndex]);
   }, [activeDeckCard, availableDeckCards, deckIndex, loadDeckCard, nextDeckCard]);
 
-  const repeatDeckCard = useCallback(() => {
-    loadDeckCard(activeDeckCard ?? nextDeckCard);
-  }, [activeDeckCard, loadDeckCard, nextDeckCard]);
-
-  function toggleActiveDeckCardIgnored() {
+  const deleteActiveDeckCard = useCallback(async () => {
     const card = activeDeckCard ?? nextDeckCard;
 
-    if (!card) {
+    if (!card || !selectedDeckId) {
       return;
     }
 
-    setDeckProgress(progress => toggleDeckIgnored(progress, card.id));
-  }
+    if (!selectedDeck?.isOwned) {
+      setDeckActionError('You can only delete cards from your own decks.');
+      return;
+    }
+
+    setDeckActionLoading(true);
+    setDeckActionError('');
+
+    try {
+      const response = await fetch('/api/training-deck', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete_card',
+          deckId: selectedDeckId,
+          cardId: card.id,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? 'Unable to delete card.');
+      }
+
+      const remainingCards = deckCards.filter(entry => entry.id !== card.id);
+      const nextProgress = { ...deckProgress };
+      delete nextProgress[card.id];
+
+      setDeckCards(remainingCards);
+      setDeckProgress(nextProgress);
+      setActiveDeckCard(null);
+      setDeckFeedback(null);
+
+      const nextTrainingCard = sortCardsForReview(remainingCards, nextProgress)[0] ?? null;
+
+      if (nextTrainingCard) {
+        loadDeckCard(nextTrainingCard);
+      } else {
+        positionRequestIdRef.current += 1;
+        setGame(new Chess());
+        setInitialFen(null);
+        setMoveHistory([]);
+        setHistoryIndex(0);
+        clearVariation();
+        setMetadata(null);
+        setFileName('');
+        setPositionAnalysis(null);
+        setPreMoveAnalyses([]);
+        setTimelineAnalyses([]);
+        clearSelection();
+      }
+
+      await loadTrainingDeck(selectedDeckId);
+    } catch (error) {
+      setDeckActionError(error instanceof Error ? error.message : 'Unable to delete card.');
+    } finally {
+      setDeckActionLoading(false);
+    }
+  }, [
+    activeDeckCard,
+    deckCards,
+    deckProgress,
+    loadDeckCard,
+    loadTrainingDeck,
+    nextDeckCard,
+    selectedDeck?.isOwned,
+    selectedDeckId,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1683,12 +1788,20 @@ export function ChessAnalysisLab() {
                 recentGamesHasMore={recentChessGamesHasMore}
                 recentGamesLoading={recentChessGamesLoading}
                 recentGameTimeClass={recentGameTimeClass}
-                reviewDeckName={selectedDeck?.name ?? ''}
+                deckSummaries={deckSummaries}
                 reviewDeckSaveStatus={reviewDeckSaveStatus}
-                onLoadMoreRecentGames={() => void fetchRecentChessGames(undefined, undefined, true)}
+                reviewSaveMoveSan={
+                  positionAnalysis?.bestMove
+                    ? formatBestMove(currentFen, positionAnalysis.bestMove)
+                    : null
+                }
+                positionLoading={positionLoading}
                 reviewMoments={reviewMoments}
                 canSaveReviewCard={Boolean(trainingProfile && selectedDeck?.isOwned && positionAnalysis?.bestMove && !positionLoading)}
                 onSaveReviewCard={() => void saveReviewPositionToDeck()}
+                onSelectSaveDeck={selectSaveDeck}
+                onLoadMoreRecentGames={() => void fetchRecentChessGames(undefined, undefined, true)}
+                selectedDeckId={selectedDeckId}
                 setShowArrow={setShowArrow}
                 timelineAnalyses={timelineAnalyses}
                 timelineAnalysesLength={timelineAnalyses.length}
@@ -1720,6 +1833,7 @@ export function ChessAnalysisLab() {
                 deckSummaries={deckSummaries}
                 deckFeedback={deckFeedback}
                 deckStats={deckStats}
+                canDeleteCard={Boolean(selectedDeck?.isOwned)}
                 newDeckTitle={newDeckTitle}
                 nextCard={nextDeckCard}
                 onBack={() => {
@@ -1747,19 +1861,10 @@ export function ChessAnalysisLab() {
                 }}
                 onCreateDeck={() => void createTrainingDeck()}
                 onGenerateRecentDeck={() => void generateRecentTrainingDeck()}
+                onDeleteCard={() => void deleteActiveDeckCard()}
                 onNext={advanceDeckCard}
                 onNewDeckTitleChange={setNewDeckTitle}
-                onRepeat={repeatDeckCard}
-                onSelectDeck={deckId => {
-                  setSelectedDeckId(deckId);
-                  setActiveDeckCard(null);
-                  setDeckFeedback(null);
-                  if (typeof window !== 'undefined') {
-                    window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
-                  }
-                  void loadTrainingDeck(deckId);
-                }}
-                onToggleIgnore={toggleActiveDeckCardIgnored}
+                onTrainDeck={deckId => void trainDeckFromLibrary(deckId)}
                 selectedDeckId={selectedDeckId}
                 startCard={loadDeckCard}
               />

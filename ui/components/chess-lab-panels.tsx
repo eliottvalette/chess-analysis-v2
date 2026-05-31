@@ -62,11 +62,15 @@ export function ReviewPanel({
   recentGamesHasMore,
   recentGamesLoading,
   recentGameTimeClass,
-  reviewDeckName,
   reviewDeckSaveStatus,
   reviewMoments,
+  reviewSaveMoveSan,
+  positionLoading,
   canSaveReviewCard,
+  deckSummaries,
   onSaveReviewCard,
+  onSelectSaveDeck,
+  selectedDeckId,
   setShowArrow,
   timelineAnalyses,
   timelineAnalysesLength,
@@ -101,11 +105,15 @@ export function ReviewPanel({
   recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
-  reviewDeckName: string;
   reviewDeckSaveStatus: string;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
+  reviewSaveMoveSan: string | null;
+  positionLoading: boolean;
   canSaveReviewCard: boolean;
+  deckSummaries: TrainingDeckSummary[];
   onSaveReviewCard: () => void;
+  onSelectSaveDeck: (deckId: string) => void;
+  selectedDeckId: string | null;
   setShowArrow: (value: boolean) => void;
   timelineAnalyses: AnalysisResult[];
   timelineAnalysesLength: number;
@@ -114,40 +122,48 @@ export function ReviewPanel({
   timelineReviews: TimelineReview[];
   whiteReviewName: string;
 }) {
+  const reviewPanelProps = {
+    activeReviewMoment,
+    blackReviewName,
+    chesscomUsername,
+    goToReviewMoment,
+    historyIndex,
+    jumpToIndex,
+    loadRecentGame,
+    movePairs,
+    moveHistoryLength,
+    onChesscomUsernameChange,
+    onRecentGameTimeClassChange,
+    onFetchRecentGames,
+    onLoadMoreRecentGames,
+    recentGames,
+    recentGamesError,
+    recentGamesHasMore,
+    recentGamesLoading,
+    recentGameTimeClass,
+    reviewDeckSaveStatus,
+    reviewMoments,
+    reviewSaveMoveSan,
+    positionLoading,
+    canSaveReviewCard,
+    deckSummaries,
+    onSaveReviewCard,
+    onSelectSaveDeck,
+    selectedDeckId,
+    setShowArrow,
+    timelineAnalyses,
+    timelineAnalysesLength,
+    timelineError,
+    timelineLoading,
+    timelineReviews,
+    whiteReviewName,
+  };
+
   if (!hasLoadedGame) {
     return (
       <GameReviewPanel
-        activeReviewMoment={activeReviewMoment}
-        blackReviewName={blackReviewName}
-        chesscomUsername={chesscomUsername}
-        goToReviewMoment={goToReviewMoment}
+        {...reviewPanelProps}
         hasLoadedGame={false}
-        historyIndex={historyIndex}
-        jumpToIndex={jumpToIndex}
-        loadRecentGame={loadRecentGame}
-        movePairs={movePairs}
-        moveHistoryLength={moveHistoryLength}
-        onChesscomUsernameChange={onChesscomUsernameChange}
-        onRecentGameTimeClassChange={onRecentGameTimeClassChange}
-        onFetchRecentGames={onFetchRecentGames}
-        onLoadMoreRecentGames={onLoadMoreRecentGames}
-        recentGames={recentGames}
-        recentGamesError={recentGamesError}
-        recentGamesHasMore={recentGamesHasMore}
-        recentGamesLoading={recentGamesLoading}
-        recentGameTimeClass={recentGameTimeClass}
-        reviewDeckName={reviewDeckName}
-        reviewDeckSaveStatus={reviewDeckSaveStatus}
-        reviewMoments={reviewMoments}
-        canSaveReviewCard={canSaveReviewCard}
-        onSaveReviewCard={onSaveReviewCard}
-        setShowArrow={setShowArrow}
-        timelineAnalyses={timelineAnalyses}
-        timelineAnalysesLength={timelineAnalysesLength}
-        timelineError={timelineError}
-        timelineLoading={timelineLoading}
-        timelineReviews={timelineReviews}
-        whiteReviewName={whiteReviewName}
       />
     );
   }
@@ -160,37 +176,8 @@ export function ReviewPanel({
         </button>
       </section>
       <GameReviewPanel
-        activeReviewMoment={activeReviewMoment}
-        blackReviewName={blackReviewName}
-        chesscomUsername={chesscomUsername}
-        goToReviewMoment={goToReviewMoment}
+        {...reviewPanelProps}
         hasLoadedGame={true}
-        historyIndex={historyIndex}
-        jumpToIndex={jumpToIndex}
-        loadRecentGame={loadRecentGame}
-        movePairs={movePairs}
-        moveHistoryLength={moveHistoryLength}
-        onChesscomUsernameChange={onChesscomUsernameChange}
-        onRecentGameTimeClassChange={onRecentGameTimeClassChange}
-        onFetchRecentGames={onFetchRecentGames}
-        onLoadMoreRecentGames={onLoadMoreRecentGames}
-        recentGames={recentGames}
-        recentGamesError={recentGamesError}
-        recentGamesHasMore={recentGamesHasMore}
-        recentGamesLoading={recentGamesLoading}
-        recentGameTimeClass={recentGameTimeClass}
-        reviewDeckName={reviewDeckName}
-        reviewDeckSaveStatus={reviewDeckSaveStatus}
-        reviewMoments={reviewMoments}
-        canSaveReviewCard={canSaveReviewCard}
-        onSaveReviewCard={onSaveReviewCard}
-        setShowArrow={setShowArrow}
-        timelineAnalyses={timelineAnalyses}
-        timelineAnalysesLength={timelineAnalysesLength}
-        timelineError={timelineError}
-        timelineLoading={timelineLoading}
-        timelineReviews={timelineReviews}
-        whiteReviewName={whiteReviewName}
       />
     </div>
   );
@@ -208,16 +195,16 @@ export function TrainPanel({
   deckSummaries,
   deckFeedback,
   deckStats,
+  canDeleteCard,
   newDeckTitle,
   nextCard,
   onBack,
   onCreateDeck,
   onGenerateRecentDeck,
   onNext,
-  onRepeat,
-  onSelectDeck,
+  onDeleteCard,
+  onTrainDeck,
   onNewDeckTitleChange,
-  onToggleIgnore,
   selectedDeckId,
   startCard,
 }: {
@@ -232,16 +219,16 @@ export function TrainPanel({
   deckSummaries: TrainingDeckSummary[];
   deckFeedback: DeckFeedback | null;
   deckStats: DeckProgressSummary;
+  canDeleteCard: boolean;
   newDeckTitle: string;
   nextCard: DeckCard | null;
   onBack: () => void;
   onCreateDeck: () => void;
   onGenerateRecentDeck: () => void;
   onNext: () => void;
-  onRepeat: () => void;
-  onSelectDeck: (deckId: string) => void;
+  onDeleteCard: () => void;
+  onTrainDeck: (deckId: string) => void;
   onNewDeckTitleChange: (value: string) => void;
-  onToggleIgnore: () => void;
   selectedDeckId: string | null;
   startCard: (card: DeckCard | null) => void;
 }) {
@@ -250,18 +237,15 @@ export function TrainPanel({
       <LearnPanel
         deckActionError={deckActionError}
         deckActionLoading={deckActionLoading}
-        deckCards={deckCards}
         deckLoadError={deckLoadError}
         deckLoading={deckLoading}
         deckSummaries={deckSummaries}
         newDeckTitle={newDeckTitle}
-        nextDeckCard={nextCard}
         onCreateDeck={onCreateDeck}
         onGenerateRecentDeck={onGenerateRecentDeck}
         onNewDeckTitleChange={onNewDeckTitleChange}
-        onSelectDeck={onSelectDeck}
+        onTrainDeck={onTrainDeck}
         selectedDeckId={selectedDeckId}
-        startCard={startCard}
       />
     );
   }
@@ -278,7 +262,6 @@ export function TrainPanel({
           </strong>
           <span className={styles.support}>
             {formatCardLineTitle(activeCard)} · {activeCard.side}
-            {activeCardProgress?.ignored ? ' · ignored' : ''}
           </span>
         </div>
         <div className={styles.stateHeaderMeta}>
@@ -295,10 +278,11 @@ export function TrainPanel({
         deckLoading={deckLoading}
         deckFeedback={deckFeedback}
         deckStats={deckStats}
+        canDeleteCard={canDeleteCard}
+        deckActionLoading={deckActionLoading}
         nextCard={nextCard}
+        onDeleteCard={onDeleteCard}
         onNext={onNext}
-        onRepeat={onRepeat}
-        onToggleIgnore={onToggleIgnore}
         startCard={startCard}
       />
     </>
@@ -444,11 +428,15 @@ export function GameReviewPanel({
   recentGamesHasMore,
   recentGamesLoading,
   recentGameTimeClass,
-  reviewDeckName,
   reviewDeckSaveStatus,
   reviewMoments,
+  reviewSaveMoveSan,
+  positionLoading,
   canSaveReviewCard,
+  deckSummaries,
   onSaveReviewCard,
+  onSelectSaveDeck,
+  selectedDeckId,
   setShowArrow,
   timelineAnalyses,
   timelineAnalysesLength,
@@ -482,11 +470,15 @@ export function GameReviewPanel({
   recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
   recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
-  reviewDeckName: string;
   reviewDeckSaveStatus: string;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
+  reviewSaveMoveSan: string | null;
+  positionLoading: boolean;
   canSaveReviewCard: boolean;
+  deckSummaries: TrainingDeckSummary[];
   onSaveReviewCard: () => void;
+  onSelectSaveDeck: (deckId: string) => void;
+  selectedDeckId: string | null;
   setShowArrow: (value: boolean) => void;
   timelineAnalyses: AnalysisResult[];
   timelineAnalysesLength: number;
@@ -607,7 +599,7 @@ export function GameReviewPanel({
         <p className={styles.coachText}>{coachReview ? compactCoachText(coachReview) : 'Load moments by analyzing the game.'}</p>
         <div className={styles.reviewCoachActions}>
           <button
-            className={styles.action}
+            className={`${styles.action} ${styles.actionBest}`}
             onClick={() => {
               setShowArrow(true);
               if (coachReview) {
@@ -615,16 +607,15 @@ export function GameReviewPanel({
               }
             }}
             disabled={!coachReview?.bestMoveSan}
+            type="button"
           >
-            Best
-          </button>
-          <button className={styles.action} onClick={onSaveReviewCard} disabled={!canSaveReviewCard} title={reviewDeckName || 'Choose a training deck first'}>
-            {reviewDeckSaveStatus || 'Save'}
+            Show Best
           </button>
           <button
             className={`${styles.action} ${styles.primary}`}
             onClick={() => goToReviewMoment(nextMomentIndex >= 0 ? nextMomentIndex : reviewMoments.length)}
             disabled={!hasNextReviewStep}
+            type="button"
           >
             Next
           </button>
@@ -665,6 +656,112 @@ export function GameReviewPanel({
         timelineLoading={timelineLoading}
         timelineReviews={timelineReviews}
       />
+
+      {hasLoadedGame ? (
+        <ReviewSaveDeckPanel
+          canSaveReviewCard={canSaveReviewCard}
+          deckSummaries={deckSummaries}
+          onSaveReviewCard={onSaveReviewCard}
+          onSelectSaveDeck={onSelectSaveDeck}
+          reviewDeckSaveStatus={reviewDeckSaveStatus}
+          reviewSaveMoveSan={reviewSaveMoveSan}
+          positionLoading={positionLoading}
+          selectedDeckId={selectedDeckId}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function ReviewSaveDeckPanel({
+  canSaveReviewCard,
+  deckSummaries,
+  onSaveReviewCard,
+  onSelectSaveDeck,
+  positionLoading,
+  reviewDeckSaveStatus,
+  reviewSaveMoveSan,
+  selectedDeckId,
+}: {
+  canSaveReviewCard: boolean;
+  deckSummaries: TrainingDeckSummary[];
+  onSaveReviewCard: () => void;
+  onSelectSaveDeck: (deckId: string) => void;
+  positionLoading: boolean;
+  reviewDeckSaveStatus: string;
+  reviewSaveMoveSan: string | null;
+  selectedDeckId: string | null;
+}) {
+  const ownedDecks = deckSummaries.filter(deck => deck.isOwned);
+  const activeDeckId = selectedDeckId && ownedDecks.some(deck => deck.id === selectedDeckId)
+    ? selectedDeckId
+    : ownedDecks[0]?.id ?? '';
+  const activeDeck = ownedDecks.find(deck => deck.id === activeDeckId) ?? null;
+  const saveButtonLabel = reviewDeckSaveStatus === 'Saving'
+    ? 'Adding'
+    : reviewDeckSaveStatus === 'Saved'
+      ? 'Added'
+      : 'Add card';
+
+  useEffect(() => {
+    if (activeDeckId && activeDeckId !== selectedDeckId) {
+      onSelectSaveDeck(activeDeckId);
+    }
+  }, [activeDeckId, onSelectSaveDeck, selectedDeckId]);
+
+  return (
+    <section className={`${styles.card} ${styles.emptyStateCard}`}>
+      <div className={styles.panelHeader}>
+        <h2 className={styles.sectionTitle}>Add to deck</h2>
+        <span className={styles.statusText}>
+          {positionLoading ? 'analyzing' : reviewSaveMoveSan ?? 'waiting'}
+        </span>
+      </div>
+
+      {positionLoading ? (
+        <p className={styles.copy}>Engine is finding the best move for this position.</p>
+      ) : reviewSaveMoveSan ? (
+        <p className={styles.copy}>
+          Create a training card where the answer is{' '}
+          <span className={styles.saveMoveAnswer}>{reviewSaveMoveSan}</span>.
+        </p>
+      ) : (
+        <p className={styles.copy}>No best move is available for this position yet.</p>
+      )}
+
+      {ownedDecks.length > 0 ? (
+        <label className={styles.labeledField}>
+          <span className={styles.fieldLabel}>Target deck</span>
+          <select
+            className={`${styles.inlineInput} ${styles.deckSelect}`}
+            onChange={(event: ChangeEvent<HTMLSelectElement>) => onSelectSaveDeck(event.target.value)}
+            value={activeDeckId}
+          >
+            {ownedDecks.map(deck => (
+              <option key={deck.id} value={deck.id}>
+                {deck.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <p className={styles.copy}>Create a deck in Train before adding cards here.</p>
+      )}
+
+      {activeDeck ? (
+        <p className={styles.support}>
+          Goes into <strong>{activeDeck.name}</strong> · {activeDeck.cardCount} cards
+        </p>
+      ) : null}
+
+      <button
+        className={`${styles.action} ${styles.primary} ${styles.fullWidthAction} ${reviewDeckSaveStatus === 'Saved' ? styles.saveAdded : ''}`}
+        disabled={!canSaveReviewCard || ownedDecks.length === 0}
+        onClick={onSaveReviewCard}
+        type="button"
+      >
+        {saveButtonLabel}
+      </button>
     </section>
   );
 }
@@ -851,10 +948,6 @@ function formatProgressChip(progress: DeckProgressEntry | null) {
     return 'new';
   }
 
-  if (progress.ignored) {
-    return 'ignored';
-  }
-
   const due = Date.parse(progress.dueAt ?? '');
 
   if (!Number.isFinite(due) || due <= Date.now()) {
@@ -867,37 +960,28 @@ function formatProgressChip(progress: DeckProgressEntry | null) {
 export function LearnPanel({
   deckActionError,
   deckActionLoading,
-  deckCards,
   deckLoadError,
   deckLoading,
   deckSummaries,
   newDeckTitle,
-  nextDeckCard,
   onCreateDeck,
   onGenerateRecentDeck,
   onNewDeckTitleChange,
-  onSelectDeck,
+  onTrainDeck,
   selectedDeckId,
-  startCard,
 }: {
   deckActionError: string;
   deckActionLoading: boolean;
-  deckCards: DeckCard[];
   deckLoadError: string;
   deckLoading: boolean;
   deckSummaries: TrainingDeckSummary[];
   newDeckTitle: string;
-  nextDeckCard: DeckCard | null;
   onCreateDeck: () => void;
   onGenerateRecentDeck: () => void;
   onNewDeckTitleChange: (value: string) => void;
-  onSelectDeck: (deckId: string) => void;
+  onTrainDeck: (deckId: string) => void;
   selectedDeckId: string | null;
-  startCard: (card: DeckCard | null) => void;
 }) {
-  const hasDeckCards = deckCards.length > 0;
-  const selectedDeck = deckSummaries.find(deck => deck.id === selectedDeckId) ?? null;
-
   return (
     <>
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
@@ -918,8 +1002,9 @@ export function LearnPanel({
             {deckSummaries.map(deck => (
               <button
                 className={`${styles.deckLibraryItem} ${deck.id === selectedDeckId ? styles.activeDeckLibraryItem : ''}`}
+                disabled={deckLoading || deckActionLoading || deck.cardCount === 0}
                 key={deck.id}
-                onClick={() => onSelectDeck(deck.id)}
+                onClick={() => onTrainDeck(deck.id)}
                 type="button"
               >
                 <span className={styles.deckLibraryHead}>
@@ -935,11 +1020,6 @@ export function LearnPanel({
             ))}
           </div>
         )}
-        {selectedDeck ? (
-          <button className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`} onClick={() => startCard(nextDeckCard)} disabled={deckLoading || !hasDeckCards || !nextDeckCard}>
-            {hasDeckCards ? `Train ${selectedDeck.name}` : 'No cards yet'}
-          </button>
-        ) : null}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
       </section>
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
@@ -976,10 +1056,11 @@ export function DeckPanel({
   deckLoading,
   deckFeedback,
   deckStats,
+  canDeleteCard,
+  deckActionLoading,
   nextCard,
   onNext,
-  onRepeat,
-  onToggleIgnore,
+  onDeleteCard,
   startCard,
 }: {
   activeCard: DeckCard | null;
@@ -990,15 +1071,15 @@ export function DeckPanel({
   deckLoading: boolean;
   deckFeedback: DeckFeedback | null;
   deckStats: DeckProgressSummary;
+  canDeleteCard: boolean;
+  deckActionLoading: boolean;
   nextCard: DeckCard | null;
   onNext: () => void;
-  onRepeat: () => void;
-  onToggleIgnore: () => void;
+  onDeleteCard: () => void;
   startCard: (card: DeckCard | null) => void;
 }) {
   const card = activeCard ?? nextCard;
   const cardLoaded = Boolean(activeCard && card && activeCard.id === card.id);
-  const cardIgnored = activeCardProgress?.ignored ?? false;
 
   return (
     <>
@@ -1044,16 +1125,13 @@ export function DeckPanel({
               </p>
             )}
             <div className={styles.deckActions}>
-              <button className={`${styles.action} ${styles.primary}`} onClick={() => startCard(card)} disabled={cardLoaded && !deckFeedback}>
+              <button className={`${styles.action} ${styles.primary}`} onClick={() => startCard(card)} disabled={cardLoaded && !deckFeedback} type="button">
                 {cardLoaded ? 'Loaded' : 'Load'}
               </button>
-              <button className={styles.action} onClick={onRepeat} disabled={!activeCard}>
-                Repeat
+              <button className={`${styles.action} ${styles.deleteAction}`} disabled={!card || !canDeleteCard || deckActionLoading} onClick={onDeleteCard} type="button">
+                Delete
               </button>
-              <button className={styles.action} onClick={onToggleIgnore} disabled={!card}>
-                {cardIgnored ? 'Unignore' : 'Ignore'}
-              </button>
-              <button className={styles.action} onClick={onNext}>
+              <button className={styles.action} onClick={onNext} type="button">
                 Next
               </button>
             </div>
@@ -1080,8 +1158,8 @@ export function DeckPanel({
             <span>seen</span>
           </div>
           <div>
-            <strong>{deckStats.ignored}</strong>
-            <span>ignored</span>
+            <strong>{deckStats.remaining}</strong>
+            <span>left</span>
           </div>
         </div>
       </section>

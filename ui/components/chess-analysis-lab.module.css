@@ -958,13 +958,84 @@
 
 .reviewCoachActions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-top: auto;
 }
 
 .reviewCoachActions .action {
   min-height: 36px;
+}
+
+.actionBest {
+  border: 1px solid rgba(184, 247, 161, 0.52);
+  background: rgba(184, 247, 161, 0.12);
+  color: #d8f5cc;
+}
+
+.actionBest:hover:not(:disabled) {
+  border-color: rgba(184, 247, 161, 0.72);
+  background: rgba(184, 247, 161, 0.18);
+}
+
+.actionBest:disabled {
+  opacity: 0.42;
+}
+
+.labeledField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.deckSelect {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, rgba(214, 226, 244, 0.72) 50%), linear-gradient(135deg, rgba(214, 226, 244, 0.72) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) calc(50% + 2px),
+    calc(100% - 12px) calc(50% + 2px);
+  background-size:
+    6px 6px,
+    6px 6px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  padding-right: 34px;
+}
+
+.deckSelect:focus {
+  outline: none;
+  border-color: rgba(198, 215, 255, 0.42);
+  box-shadow: inset 0 0 0 1px rgba(198, 215, 255, 0.12);
+}
+
+.saveMoveAnswer {
+  display: inline-block;
+  border: 1px solid rgba(184, 247, 161, 0.42);
+  border-radius: 6px;
+  background: rgba(184, 247, 161, 0.1);
+  color: #d8f5cc;
+  font-weight: 760;
+  padding: 1px 7px;
+}
+
+.saveAdded {
+  border-color: rgba(138, 227, 193, 0.38);
+  background: rgba(56, 148, 115, 0.14);
+  color: #d8f5cc;
+}
+
+.support strong {
+  color: var(--text);
+  font-weight: 760;
 }
 
 .reviewMoveTable {
@@ -1555,8 +1626,20 @@
 
 .deckActions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+}
+
+.deleteAction {
+  border-color: rgba(255, 120, 120, 0.34);
+  background: rgba(120, 28, 28, 0.18);
+  color: #ffc8c6;
+}
+
+.deleteAction:hover:not(:disabled) {
+  border-color: rgba(255, 120, 120, 0.52);
+  background: rgba(120, 28, 28, 0.28);
+  color: #ffe0df;
 }
 
 .deckActions .action {

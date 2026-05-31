@@ -89,6 +89,10 @@ export async function POST(request: Request) {
     return addReviewCard(profile, body);
   }
 
+  if (action === 'delete_card') {
+    return deleteDeckCard(profile, body);
+  }
+
   return NextResponse.json({ error: 'Unknown deck action.' }, { status: 400 });
 }
 
@@ -220,6 +224,63 @@ async function addReviewCard(profile: TrainingProfileCookie, body: Record<string
   }
 
   return NextResponse.json({ cardId: id });
+}
+
+async function deleteDeckCard(profile: TrainingProfileCookie, body: Record<string, unknown>) {
+  const deckId = String(body.deckId ?? '');
+  const cardId = String(body.cardId ?? '');
+
+  if (!deckId || !cardId) {
+    return NextResponse.json({ error: 'Deck and card are required.' }, { status: 400 });
+  }
+
+  const supabase = createAdminClient();
+  const { data: deck, error: deckError } = await supabase
+    .from('decks')
+    .select('id,owner_profile_id')
+    .eq('id', deckId)
+    .maybeSingle();
+
+  if (deckError) {
+    return NextResponse.json({ error: deckError.message }, { status: 500 });
+  }
+
+  if (!deck || deck.owner_profile_id !== profile.id) {
+    return NextResponse.json({ error: 'Cards can only be deleted from your own decks.' }, { status: 403 });
+  }
+
+  const { data: card, error: cardError } = await supabase
+    .from('deck_cards')
+    .select('id')
+    .eq('id', cardId)
+    .eq('deck_id', deckId)
+    .maybeSingle();
+
+  if (cardError) {
+    return NextResponse.json({ error: cardError.message }, { status: 500 });
+  }
+
+  if (!card) {
+    return NextResponse.json({ error: 'Card not found in this deck.' }, { status: 404 });
+  }
+
+  const { error: progressError } = await supabase
+    .from('training_card_progress')
+    .delete()
+    .eq('profile_id', profile.id)
+    .eq('card_id', cardId);
+
+  if (progressError) {
+    return NextResponse.json({ error: progressError.message }, { status: 500 });
+  }
+
+  const { error: deleteError } = await supabase.from('deck_cards').delete().eq('id', cardId).eq('deck_id', deckId);
+
+  if (deleteError) {
+    return NextResponse.json({ error: deleteError.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ cardId });
 }
 
 async function fetchAccessibleDecks(supabase: ReturnType<typeof createAdminClient>, profileId: string | null) {
