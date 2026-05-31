@@ -524,6 +524,7 @@ function toDeckProgressEntry(progress: ProgressRow | undefined): DeckProgressEnt
     streak: 0,
     reviewCount: progress?.seenCount ?? 0,
     lapseCount: 0,
+    learningStep: 0,
     ease: 2.5,
     intervalDays: progress?.intervalDays ?? 0,
     ignored: Boolean(progress?.ignored),
