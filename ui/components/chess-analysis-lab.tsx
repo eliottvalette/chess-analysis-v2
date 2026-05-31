@@ -1985,20 +1985,18 @@ export function ChessAnalysisLab() {
         </section>
 
         <aside className={`${styles.panel} ${styles.contextPanel}`}>
-          {trainingProfile ? (
-            <section className={styles.modeTabs}>
-              {(['review', 'train'] satisfies WorkspaceMode[]).map(nextMode => (
-                <button
-                  className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
-                  key={nextMode}
-                  onClick={() => switchWorkspaceMode(nextMode)}
-                  type="button"
-                >
-                  {getModeLabel(nextMode)}
-                </button>
-              ))}
-            </section>
-          ) : null}
+          <section className={styles.modeTabs}>
+            {(['review', 'train'] satisfies WorkspaceMode[]).map(nextMode => (
+              <button
+                className={`${styles.modeTab} ${mode === nextMode ? styles.activeModeTab : ''}`}
+                key={nextMode}
+                onClick={() => switchWorkspaceMode(nextMode)}
+                type="button"
+              >
+                {getModeLabel(nextMode)}
+              </button>
+            ))}
+          </section>
 
           <div className={`${styles.panelScroll} ${mode === 'review' && hasLoadedGame ? styles.reviewPanelScroll : ''}`}>
             {mode === 'review' ? (
