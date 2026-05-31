@@ -14,6 +14,12 @@ import {
 } from '@/lib/chess-analysis-client';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
 import type { DeckProgressEntry, DeckProgressSummary } from '@/lib/deck-progress';
+
+type TrainSessionStats = {
+  completed: number;
+  hits: number;
+  misses: number;
+};
 import type { DeckCard, DeckFeedback } from '@/lib/opening-training';
 import styles from './chess-analysis-lab.module.css';
 
@@ -191,7 +197,6 @@ export function TrainPanel({
   activeCardProgress,
   deckActionError,
   deckActionLoading,
-  deckCards,
   deckCounterSan,
   deckLoadError,
   deckLoading,
@@ -215,12 +220,15 @@ export function TrainPanel({
   onNewDeckTitleChange,
   selectedDeckId,
   startCard,
+  trainAllSession,
+  trainSessionCardCurrent,
+  trainSessionCardTotal,
+  trainSessionStats,
 }: {
   activeCard: DeckCard | null;
   activeCardProgress: DeckProgressEntry | null;
   deckActionError: string;
   deckActionLoading: boolean;
-  deckCards: DeckCard[];
   deckCounterSan: string | null;
   deckLoadError: string;
   deckLoading: boolean;
@@ -244,6 +252,10 @@ export function TrainPanel({
   onNewDeckTitleChange: (value: string) => void;
   selectedDeckId: string | null;
   startCard: (card: DeckCard | null) => void;
+  trainAllSession: boolean;
+  trainSessionCardCurrent: number;
+  trainSessionCardTotal: number;
+  trainSessionStats: TrainSessionStats;
 }) {
   if (!activeCard) {
     return (
@@ -281,17 +293,19 @@ export function TrainPanel({
           <span className={styles.support}>
             {formatCardLineTitle(activeCard)} · {activeCard.side}
           </span>
+          <span className={styles.support}>
+            {formatCardProgressDetail(activeCardProgress)}
+          </span>
         </div>
         <div className={styles.stateHeaderMeta}>
-          <strong>{deckStats.seen}</strong>
-          <span>seen</span>
+          <strong>{trainSessionCardCurrent}/{trainSessionCardTotal}</strong>
+          <span>{trainAllSession ? 'all decks' : 'queue'}</span>
         </div>
       </section>
       <DeckPanel
         activeCard={activeCard}
         activeCardProgress={activeCardProgress}
         deckCounterSan={deckCounterSan}
-        deckCards={deckCards}
         deckLoadError={deckLoadError}
         deckLoading={deckLoading}
         deckFeedback={deckFeedback}
@@ -302,6 +316,10 @@ export function TrainPanel({
         onDeleteCard={onDeleteCard}
         onNext={onNext}
         startCard={startCard}
+        trainAllSession={trainAllSession}
+        trainSessionCardCurrent={trainSessionCardCurrent}
+        trainSessionCardTotal={trainSessionCardTotal}
+        trainSessionStats={trainSessionStats}
       />
     </>
   );
@@ -1000,6 +1018,19 @@ function formatProgressChip(progress: DeckProgressEntry | null) {
   return `later · ${progress.intervalDays}d`;
 }
 
+function formatCardProgressDetail(progress: DeckProgressEntry | null) {
+  if (!progress || progress.seenCount === 0) {
+    return 'New card';
+  }
+
+  const due = Date.parse(progress.dueAt ?? '');
+  const scheduleLabel = !Number.isFinite(due) || due <= Date.now() ? 'due now' : `in ${progress.intervalDays}d`;
+  const lastOutcomeLabel =
+    progress.lastOutcome === 'correct' ? 'last hit' : progress.lastOutcome === 'miss' ? 'last miss' : 'seen before';
+
+  return `${progress.seenCount} seen · ${progress.streak} streak · ${scheduleLabel} · ${lastOutcomeLabel}`;
+}
+
 function DeckLibraryItem({
   deck,
   deckActionLoading,
@@ -1307,7 +1338,6 @@ export function DeckPanel({
   activeCard,
   activeCardProgress,
   deckCounterSan,
-  deckCards,
   deckLoadError,
   deckLoading,
   deckFeedback,
@@ -1318,11 +1348,14 @@ export function DeckPanel({
   onNext,
   onDeleteCard,
   startCard,
+  trainAllSession,
+  trainSessionCardCurrent,
+  trainSessionCardTotal,
+  trainSessionStats,
 }: {
   activeCard: DeckCard | null;
   activeCardProgress: DeckProgressEntry | null;
   deckCounterSan: string | null;
-  deckCards: DeckCard[];
   deckLoadError: string;
   deckLoading: boolean;
   deckFeedback: DeckFeedback | null;
@@ -1333,16 +1366,31 @@ export function DeckPanel({
   onNext: () => void;
   onDeleteCard: () => void;
   startCard: (card: DeckCard | null) => void;
+  trainAllSession: boolean;
+  trainSessionCardCurrent: number;
+  trainSessionCardTotal: number;
+  trainSessionStats: TrainSessionStats;
 }) {
   const card = activeCard ?? nextCard;
   const cardLoaded = Boolean(activeCard && card && activeCard.id === card.id);
+  const sessionProgressPercent =
+    trainSessionCardTotal > 0 ? Math.round((trainSessionCardCurrent / trainSessionCardTotal) * 100) : 0;
 
   return (
     <>
       <section className={`${styles.card} ${styles.deckCard}`}>
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Learning</h2>
-          <span className={styles.statusText}>{cardLoaded ? 'active' : deckLoading ? 'loading' : `${deckCards.length} cards`}</span>
+          <span className={styles.statusText}>
+            {trainAllSession ? 'all decks' : 'deck'} · {trainSessionCardCurrent}/{trainSessionCardTotal}
+          </span>
+        </div>
+        <div className={styles.trainSessionProgress} aria-label="Session progress">
+          <div className={styles.trainSessionProgressFill} style={{ width: `${sessionProgressPercent}%` }} />
+        </div>
+        <div className={styles.trainSessionSummary}>
+          <span>Session · {trainSessionStats.hits} hit · {trainSessionStats.misses} miss</span>
+          <span>{formatProgressChip(activeCardProgress)}</span>
         </div>
         {card ? (
           <>
@@ -1400,6 +1448,10 @@ export function DeckPanel({
         )}
       </section>
       <section className={`${styles.card} ${styles.dataCard}`}>
+        <div className={styles.panelHeader}>
+          <h2 className={styles.sectionTitle}>{trainAllSession ? 'Queue totals' : 'Deck totals'}</h2>
+          <span className={styles.statusText}>{deckStats.remaining} active</span>
+        </div>
         <div className={styles.deckStats}>
           <div>
             <strong>{deckStats.correct}</strong>

@@ -71,6 +71,8 @@ const LAST_MOVE_STYLE = {
 } satisfies CSSProperties;
 const CHESSCOM_USERNAME_COOKIE = 'chesscom_username';
 const CHESSCOM_TIME_CLASS_COOKIE = 'chesscom_time_class';
+const TRAINING_USERNAME_COOKIE = 'training_profile_username';
+const TRAINING_PASSWORD_COOKIE = 'training_profile_password';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
 const LAST_TRAINING_DECK_STORAGE_KEY = 'chess-lab-last-training-deck-v1';
 const RECENT_GAMES_PAGE_SIZE = 10;
@@ -151,6 +153,12 @@ type TrainingDeckCardRow = {
   score_swing_cp?: number | null;
 };
 
+type TrainSessionStats = {
+  completed: number;
+  hits: number;
+  misses: number;
+};
+
 type WorkspaceSnapshot = {
   initialFen: string | null;
   moveHistory: StoredMove[];
@@ -166,6 +174,9 @@ type WorkspaceSnapshot = {
   deckFeedback: DeckFeedback | null;
   deckIndex: number;
   trainAllSession: boolean;
+  trainAllQueue: DeckCard[];
+  trainSessionIndex: number;
+  trainSessionStats: TrainSessionStats;
   positionAnalysis: AnalysisResult | null;
   preMoveAnalyses: AnalysisResult[];
   timelineAnalyses: AnalysisResult[];
@@ -201,6 +212,9 @@ export function ChessAnalysisLab() {
   const [boardWidth, setBoardWidth] = useState(640);
   const [deckIndex, setDeckIndex] = useState(0);
   const [trainAllSession, setTrainAllSession] = useState(false);
+  const [trainAllQueue, setTrainAllQueue] = useState<DeckCard[]>([]);
+  const [trainSessionIndex, setTrainSessionIndex] = useState(0);
+  const [trainSessionStats, setTrainSessionStats] = useState<TrainSessionStats>({ completed: 0, hits: 0, misses: 0 });
   const [activeDeckCard, setActiveDeckCard] = useState<DeckCard | null>(null);
   const [deckFeedback, setDeckFeedback] = useState<DeckFeedback | null>(null);
   const [openingLines, setOpeningLines] = useState<OpeningSeedLine[]>([]);
@@ -235,6 +249,8 @@ export function ChessAnalysisLab() {
   const timelineRefineRequestIdRef = useRef(0);
   const reviewPlaybackRequestIdRef = useRef(0);
   const suppressSpaceKeyUpRef = useRef(false);
+  const deckProgressRef = useRef(deckProgress);
+  const deckFeedbackRef = useRef(deckFeedback);
   const soundPlayersRef = useRef<Partial<Record<ChessSoundKey, HTMLAudioElement>>>({});
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
@@ -282,7 +298,15 @@ export function ChessAnalysisLab() {
     () => sortCardsForReview(deckCards, deckProgress),
     [deckCards, deckProgress],
   );
-  const deckStats = useMemo(() => summarizeDeckProgress(deckCards, deckProgress), [deckCards, deckProgress]);
+  const trainStatsCards = trainAllSession ? trainAllQueue : deckCards;
+  const deckStats = useMemo(() => summarizeDeckProgress(trainStatsCards, deckProgress), [deckProgress, trainStatsCards]);
+  const trainSessionCardTotal = trainAllSession ? trainAllQueue.length : availableDeckCards.length;
+  const trainSessionCardCurrent = trainAllSession
+    ? trainSessionIndex + 1
+    : Math.max(
+        1,
+        (activeDeckCard ? availableDeckCards.findIndex(card => card.id === activeDeckCard.id) : deckIndex) + 1,
+      );
   const nextDeckCard = availableDeckCards[deckIndex % Math.max(1, availableDeckCards.length)] ?? null;
   const viewedDeckCard = activeDeckCard ?? nextDeckCard;
   const selectedDeck = useMemo(
@@ -589,28 +613,74 @@ export function ChessAnalysisLab() {
   useEffect(() => {
     let cancelled = false;
 
+    async function restoreTrainingProfile(username: string, password: string) {
+      const response = await fetch('/api/training-profile', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const payload = (await response.json()) as { profile?: TrainingProfile | null; error?: string };
+
+      if (!response.ok || !payload.profile) {
+        throw new Error(payload.error ?? 'Unable to restore training profile.');
+      }
+
+      return payload.profile;
+    }
+
     async function loadTrainingProfile() {
       setTrainingProfileLoading(true);
       setTrainingProfileError('');
+
+      const savedUsername = readCookie(TRAINING_USERNAME_COOKIE);
+      const savedPassword = readCookie(TRAINING_PASSWORD_COOKIE);
+
+      if (savedUsername) {
+        setTrainingUsername(savedUsername);
+      }
+
+      if (savedPassword) {
+        setTrainingPassword(savedPassword);
+      }
 
       try {
         const response = await fetch('/api/training-profile', { credentials: 'same-origin' });
         const payload = (await response.json()) as { profile?: TrainingProfile | null };
 
-        if (cancelled || !payload.profile) {
-          if (!cancelled) {
-            setTrainingProfile(null);
-          }
-          progressHydratedRef.current = true;
+        if (cancelled) {
           return;
         }
 
-        setTrainingProfile(payload.profile);
-        setTrainingUsername(payload.profile.username);
-        await hydrateTrainingProgress({ saveMerged: false });
-      } catch {
-        progressHydratedRef.current = true;
+        if (payload.profile) {
+          setTrainingProfile(payload.profile);
+          setTrainingUsername(payload.profile.username);
+          await hydrateTrainingProgress({ saveMerged: false });
+          return;
+        }
+
+        if (savedUsername && savedPassword) {
+          const profile = await restoreTrainingProfile(savedUsername, savedPassword);
+
+          if (cancelled) {
+            return;
+          }
+
+          setTrainingProfile(profile);
+          setTrainingUsername(profile.username);
+          await hydrateTrainingProgress({ saveMerged: false });
+          return;
+        }
+
+        setTrainingProfile(null);
+      } catch (error) {
+        if (!cancelled) {
+          setTrainingProfile(null);
+          setTrainingProfileError(error instanceof Error ? error.message : 'Unable to load training profile.');
+        }
       } finally {
+        progressHydratedRef.current = true;
+
         if (!cancelled) {
           setTrainingProfileLoading(false);
         }
@@ -724,9 +794,12 @@ export function ChessAnalysisLab() {
       const cards = (payload.cards ?? []).map(mapTrainingDeckCard);
 
       if (options?.allDecks) {
-        const mixedCards = buildMixedTrainingQueue(cards, deckProgress);
+        const mixedCards = buildMixedTrainingQueue(cards, deckProgressRef.current);
+        setTrainAllQueue(mixedCards);
+        setTrainSessionIndex(0);
+        setTrainSessionStats(createEmptyTrainSessionStats());
         setOpeningLines(lines);
-        setDeckCards(mixedCards);
+        setDeckCards(cards);
         setDeckIndex(0);
 
         if (options.autoStart && mixedCards.length > 0) {
@@ -753,7 +826,7 @@ export function ChessAnalysisLab() {
       setDeckIndex(0);
 
       if (options?.autoStart && cards.length > 0) {
-        const nextCard = sortCardsForReview(cards, deckProgress)[0] ?? null;
+        const nextCard = sortCardsForReview(cards, deckProgressRef.current)[0] ?? null;
 
         if (nextCard) {
           beginDeckCardSession(nextCard, lines);
@@ -767,12 +840,25 @@ export function ChessAnalysisLab() {
     } finally {
       setDeckLoading(false);
     }
-  }, [beginDeckCardSession, deckProgress, selectedDeckId]);
+  }, [beginDeckCardSession, selectedDeckId]);
+
+  useEffect(() => {
+    deckProgressRef.current = deckProgress;
+  }, [deckProgress]);
+
+  useEffect(() => {
+    deckFeedbackRef.current = deckFeedback;
+  }, [deckFeedback]);
 
   useEffect(() => {
     const storedDeckId = typeof window === 'undefined' ? null : window.localStorage.getItem(LAST_TRAINING_DECK_STORAGE_KEY);
+
+    if (trainAllSession) {
+      return;
+    }
+
     void loadTrainingDeck(storedDeckId || selectedDeckId);
-  }, [loadTrainingDeck, selectedDeckId, trainingProfile?.id]);
+  }, [loadTrainingDeck, selectedDeckId, trainingProfile?.id, trainAllSession]);
 
   useEffect(() => {
     const requestId = ++positionRequestIdRef.current;
@@ -886,6 +972,9 @@ export function ChessAnalysisLab() {
     setDeckFeedback(snapshot.deckFeedback);
     setDeckIndex(snapshot.deckIndex);
     setTrainAllSession(snapshot.trainAllSession);
+    setTrainAllQueue([...(snapshot.trainAllQueue ?? [])]);
+    setTrainSessionIndex(snapshot.trainSessionIndex ?? 0);
+    setTrainSessionStats({ ...(snapshot.trainSessionStats ?? createEmptyTrainSessionStats()) });
     setPositionAnalysis(snapshot.positionAnalysis);
     setPreMoveAnalyses(snapshot.preMoveAnalyses);
     setTimelineAnalyses(snapshot.timelineAnalyses);
@@ -1085,6 +1174,9 @@ export function ChessAnalysisLab() {
       (typeof window !== 'undefined' ? window.localStorage.getItem(LAST_TRAINING_DECK_STORAGE_KEY) : null);
 
     setTrainAllSession(false);
+    setTrainAllQueue([]);
+    setTrainSessionIndex(0);
+    setTrainSessionStats(createEmptyTrainSessionStats());
     setActiveDeckCard(null);
     setDeckFeedback(null);
     positionRequestIdRef.current += 1;
@@ -1111,6 +1203,9 @@ export function ChessAnalysisLab() {
 
   const trainDeckFromLibrary = useCallback(async (deckId: string) => {
     setTrainAllSession(false);
+    setTrainAllQueue([]);
+    setTrainSessionIndex(0);
+    setTrainSessionStats(createEmptyTrainSessionStats());
     setActiveDeckCard(null);
     setDeckFeedback(null);
     setSelectedDeckId(deckId);
@@ -1149,7 +1244,33 @@ export function ChessAnalysisLab() {
   }
 
   const advanceDeckCard = useCallback(() => {
-    const sessionCards = trainAllSession ? deckCards : availableDeckCards;
+    const feedback = deckFeedbackRef.current;
+
+    if (feedback && !feedback.pending) {
+      setTrainSessionStats(previous => ({
+        completed: previous.completed + 1,
+        hits: previous.hits + (feedback.correct ? 1 : 0),
+        misses: previous.misses + (feedback.correct ? 0 : 1),
+      }));
+    }
+
+    if (trainAllSession) {
+      if (trainAllQueue.length === 0) {
+        return;
+      }
+
+      if (trainSessionIndex >= trainAllQueue.length - 1) {
+        finishDeckTrainingSession();
+        return;
+      }
+
+      const nextIndex = trainSessionIndex + 1;
+      setTrainSessionIndex(nextIndex);
+      loadDeckCard(trainAllQueue[nextIndex]);
+      return;
+    }
+
+    const sessionCards = availableDeckCards;
 
     if (sessionCards.length === 0) {
       return;
@@ -1157,24 +1278,11 @@ export function ChessAnalysisLab() {
 
     const currentCardId = activeDeckCard?.id ?? null;
     const currentIndex = currentCardId ? sessionCards.findIndex(card => card.id === currentCardId) : -1;
-
-    if (trainAllSession && currentIndex >= 0) {
-      if (currentIndex >= sessionCards.length - 1) {
-        finishDeckTrainingSession();
-        return;
-      }
-
-      const nextIndex = currentIndex + 1;
-      setDeckIndex(nextIndex);
-      loadDeckCard(sessionCards[nextIndex]);
-      return;
-    }
-
     const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % sessionCards.length : deckIndex % sessionCards.length;
 
     setDeckIndex(nextIndex);
     loadDeckCard(sessionCards[nextIndex]);
-  }, [activeDeckCard, availableDeckCards, deckCards, deckIndex, finishDeckTrainingSession, loadDeckCard, trainAllSession]);
+  }, [activeDeckCard, availableDeckCards, deckIndex, finishDeckTrainingSession, loadDeckCard, trainAllQueue, trainAllSession, trainSessionIndex]);
 
   const deleteActiveDeckCard = useCallback(async () => {
     const card = activeDeckCard ?? nextDeckCard;
@@ -1633,7 +1741,9 @@ export function ChessAnalysisLab() {
 
       setTrainingProfile(payload.profile);
       setTrainingUsername(payload.profile.username);
-      setTrainingPassword('');
+      writeCookie(TRAINING_USERNAME_COOKIE, payload.profile.username);
+      writeCookie(TRAINING_PASSWORD_COOKIE, trainingPassword);
+      setTrainingPassword(trainingPassword);
       await hydrateTrainingProgress({ saveMerged: true });
       await loadTrainingDeck(selectedDeckId);
     } catch (error) {
@@ -1867,6 +1977,9 @@ export function ChessAnalysisLab() {
     deckFeedback,
     deckIndex,
     trainAllSession,
+    trainAllQueue,
+    trainSessionIndex,
+    trainSessionStats,
     positionAnalysis,
     preMoveAnalyses,
     timelineAnalyses,
@@ -2101,13 +2214,16 @@ export function ChessAnalysisLab() {
                 activeCardProgress={activeDeckProgress}
                 deckActionError={deckActionError}
                 deckActionLoading={deckActionLoading}
-                deckCards={deckCards}
                 deckCounterSan={deckOpponentBestSan}
                 deckLoadError={deckLoadError}
                 deckLoading={deckLoading}
                 deckSummaries={deckSummaries}
                 deckFeedback={deckFeedback}
                 deckStats={deckStats}
+                trainAllSession={trainAllSession}
+                trainSessionCardCurrent={trainSessionCardCurrent}
+                trainSessionCardTotal={trainSessionCardTotal}
+                trainSessionStats={trainSessionStats}
                 canDeleteCard={Boolean(selectedDeck?.isOwned)}
                 newDeckTitle={newDeckTitle}
                 nextCard={nextDeckCard}
@@ -2135,6 +2251,9 @@ export function ChessAnalysisLab() {
                   setActiveDeckCard(null);
                   setDeckFeedback(null);
                   setTrainAllSession(false);
+                  setTrainAllQueue([]);
+                  setTrainSessionIndex(0);
+                  setTrainSessionStats(createEmptyTrainSessionStats());
                   positionCacheRef.current.clear();
                   positionInFlightRef.current.clear();
                   clearSelection();
@@ -2176,6 +2295,14 @@ export function ChessAnalysisLab() {
   );
 }
 
+function createEmptyTrainSessionStats(): TrainSessionStats {
+  return {
+    completed: 0,
+    hits: 0,
+    misses: 0,
+  };
+}
+
 function createEmptyWorkspaceSnapshot(): WorkspaceSnapshot {
   return {
     initialFen: null,
@@ -2192,6 +2319,9 @@ function createEmptyWorkspaceSnapshot(): WorkspaceSnapshot {
     deckFeedback: null,
     deckIndex: 0,
     trainAllSession: false,
+    trainAllQueue: [],
+    trainSessionIndex: 0,
+    trainSessionStats: createEmptyTrainSessionStats(),
     positionAnalysis: null,
     preMoveAnalyses: [],
     timelineAnalyses: [],
@@ -2207,6 +2337,8 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnaps
     variationMoves: [...snapshot.variationMoves],
     preMoveAnalyses: [...snapshot.preMoveAnalyses],
     timelineAnalyses: [...snapshot.timelineAnalyses],
+    trainAllQueue: [...snapshot.trainAllQueue],
+    trainSessionStats: { ...snapshot.trainSessionStats },
   };
 }
 

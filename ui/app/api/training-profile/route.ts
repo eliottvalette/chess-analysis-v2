@@ -75,8 +75,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: sessionError.message }, { status: 500 });
   }
 
-  const cookieStore = await cookies();
-  cookieStore.set(TRAINING_SESSION_COOKIE, `${profile.id}.${token}`, {
+  const response = NextResponse.json({ profile: { id: profile.id, username: profile.username } });
+  response.cookies.set(TRAINING_SESSION_COOKIE, `${profile.id}.${token}`, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
     maxAge: COOKIE_MAX_AGE,
   });
 
-  return NextResponse.json({ profile: { id: profile.id, username: profile.username } });
+  return response;
 }
 
 export async function DELETE() {
