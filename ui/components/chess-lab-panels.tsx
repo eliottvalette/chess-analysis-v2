@@ -212,14 +212,12 @@ export function TrainPanel({
   onNext,
   onDeleteCard,
   onTrainDeck,
-  onSelectDeck,
   onTrainAll,
   onRenameDeck,
   onDeleteDeck,
   focusCreateDeck,
   onCreateDeckFocusHandled,
   onNewDeckTitleChange,
-  selectedDeckId,
   trainAllSession,
   trainSessionCardCurrent,
   trainSessionCardTotal,
@@ -244,14 +242,12 @@ export function TrainPanel({
   onNext: () => void;
   onDeleteCard: () => void;
   onTrainDeck: (deckId: string) => void;
-  onSelectDeck: (deckId: string) => void;
   onTrainAll: () => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
   focusCreateDeck: boolean;
   onCreateDeckFocusHandled: () => void;
   onNewDeckTitleChange: (value: string) => void;
-  selectedDeckId: string | null;
   trainAllSession: boolean;
   trainSessionCardCurrent: number;
   trainSessionCardTotal: number;
@@ -272,11 +268,9 @@ export function TrainPanel({
         onGenerateRecentDeck={onGenerateRecentDeck}
         onNewDeckTitleChange={onNewDeckTitleChange}
         onTrainDeck={onTrainDeck}
-        onSelectDeck={onSelectDeck}
         onTrainAll={onTrainAll}
         onRenameDeck={onRenameDeck}
         onDeleteDeck={onDeleteDeck}
-        selectedDeckId={selectedDeckId}
       />
     );
   }
@@ -1075,25 +1069,23 @@ function DeckLibraryItem({
   deck,
   deckActionLoading,
   deckLoading,
-  isSelected,
   onDeleteDeck,
   onRenameDeck,
-  onSelectDeck,
+  onTrainDeck,
 }: {
   deck: TrainingDeckSummary;
   deckActionLoading: boolean;
   deckLoading: boolean;
-  isSelected: boolean;
   onDeleteDeck: (deckId: string) => void;
   onRenameDeck: (deckId: string, name: string) => void;
-  onSelectDeck: (deckId: string) => void;
+  onTrainDeck: (deckId: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
-  const selectDisabled = deckLoading || deckActionLoading;
+  const trainDisabled = deckLoading || deckActionLoading || deck.cardCount === 0;
 
   useEffect(() => {
     if (!menuOpen) {
@@ -1158,12 +1150,11 @@ function DeckLibraryItem({
   }
 
   return (
-    <div className={`${styles.deckLibraryItemWrap} ${isSelected ? styles.activeDeckLibraryItemWrap : ''}`}>
+    <div className={styles.deckLibraryItemWrap}>
       <button
-        aria-current={isSelected ? 'true' : undefined}
-        className={`${styles.deckLibraryItem} ${isSelected ? styles.activeDeckLibraryItem : ''}`}
-        disabled={selectDisabled}
-        onClick={() => onSelectDeck(deck.id)}
+        className={styles.deckLibraryItem}
+        disabled={trainDisabled}
+        onClick={() => onTrainDeck(deck.id)}
         type="button"
       >
         <span className={styles.deckLibraryHead}>
@@ -1256,11 +1247,9 @@ export function LearnPanel({
   onGenerateRecentDeck,
   onNewDeckTitleChange,
   onTrainDeck,
-  onSelectDeck,
   onTrainAll,
   onRenameDeck,
   onDeleteDeck,
-  selectedDeckId,
 }: {
   deckActionError: string;
   deckActionLoading: boolean;
@@ -1274,23 +1263,14 @@ export function LearnPanel({
   onGenerateRecentDeck: () => void;
   onNewDeckTitleChange: (value: string) => void;
   onTrainDeck: (deckId: string) => void;
-  onSelectDeck: (deckId: string) => void;
   onTrainAll: () => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
-  selectedDeckId: string | null;
 }) {
   const createDeckInputRef = useRef<HTMLInputElement | null>(null);
   const createDeckSectionRef = useRef<HTMLElement | null>(null);
   const totalCardCount = deckSummaries.reduce((total, deck) => total + deck.cardCount, 0);
   const canTrainAll = totalCardCount > 0 && !deckLoading && !deckActionLoading;
-  const selectedDeck = deckSummaries.find(deck => deck.id === selectedDeckId) ?? null;
-  const canStudySelected = Boolean(
-    selectedDeck &&
-    selectedDeck.cardCount > 0 &&
-    !deckLoading &&
-    !deckActionLoading,
-  );
 
   useEffect(() => {
     if (!focusCreateDeck) {
@@ -1329,35 +1309,24 @@ export function LearnPanel({
                 deck={deck}
                 deckActionLoading={deckActionLoading}
                 deckLoading={deckLoading}
-                isSelected={deck.id === selectedDeckId}
                 key={deck.id}
                 onDeleteDeck={onDeleteDeck}
                 onRenameDeck={onRenameDeck}
-                onSelectDeck={onSelectDeck}
+                onTrainDeck={onTrainDeck}
               />
             ))}
           </div>
         )}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
         {deckSummaries.length > 0 ? (
-          <div className={styles.deckLibraryActions}>
-            <button
-              className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`}
-              disabled={!canStudySelected}
-              onClick={() => selectedDeck && onTrainDeck(selectedDeck.id)}
-              type="button"
-            >
-              {selectedDeck ? `Study ${selectedDeck.name}` : 'Study deck'}
-            </button>
-            <button
-              className={`${styles.action} ${styles.fullWidthAction}`}
-              disabled={!canTrainAll}
-              onClick={onTrainAll}
-              type="button"
-            >
-              Cram all decks
-            </button>
-          </div>
+          <button
+            className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`}
+            disabled={!canTrainAll}
+            onClick={onTrainAll}
+            type="button"
+          >
+            Cram all decks
+          </button>
         ) : null}
       </section>
       <section
