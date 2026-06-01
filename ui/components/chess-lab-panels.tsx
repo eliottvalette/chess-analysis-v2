@@ -219,7 +219,6 @@ export function TrainPanel({
   onCreateDeckFocusHandled,
   onNewDeckTitleChange,
   selectedDeckId,
-  startCard,
   trainAllSession,
   trainSessionCardCurrent,
   trainSessionCardTotal,
@@ -251,7 +250,6 @@ export function TrainPanel({
   onCreateDeckFocusHandled: () => void;
   onNewDeckTitleChange: (value: string) => void;
   selectedDeckId: string | null;
-  startCard: (card: DeckCard | null) => void;
   trainAllSession: boolean;
   trainSessionCardCurrent: number;
   trainSessionCardTotal: number;
@@ -315,7 +313,6 @@ export function TrainPanel({
         nextCard={nextCard}
         onDeleteCard={onDeleteCard}
         onNext={onNext}
-        startCard={startCard}
         trainAllSession={trainAllSession}
         trainSessionCardCurrent={trainSessionCardCurrent}
         trainSessionCardTotal={trainSessionCardTotal}
@@ -1387,7 +1384,6 @@ export function DeckPanel({
   nextCard,
   onNext,
   onDeleteCard,
-  startCard,
   trainAllSession,
   trainSessionCardCurrent,
   trainSessionCardTotal,
@@ -1405,14 +1401,12 @@ export function DeckPanel({
   nextCard: DeckCard | null;
   onNext: () => void;
   onDeleteCard: () => void;
-  startCard: (card: DeckCard | null) => void;
   trainAllSession: boolean;
   trainSessionCardCurrent: number;
   trainSessionCardTotal: number;
   trainSessionStats: TrainSessionStats;
 }) {
   const card = activeCard ?? nextCard;
-  const cardLoaded = Boolean(activeCard && card && activeCard.id === card.id);
   const cardState = getProgressState(activeCardProgress);
   const sessionProgressPercent =
     trainSessionCardTotal > 0 ? Math.round((trainSessionCardCurrent / trainSessionCardTotal) * 100) : 0;
@@ -1466,20 +1460,13 @@ export function DeckPanel({
                 {!deckFeedback.pending && !deckFeedback.correct && deckCounterSan ? <span>counter {deckCounterSan}</span> : null}
               </div>
             ) : (
-              <p className={styles.copy}>
-                {cardLoaded
-                  ? 'Play the exact best move on the board.'
-                  : 'Load the card to put its position on the board.'}
-              </p>
+              <p className={styles.copy}>Play the exact best move on the board.</p>
             )}
             <div className={styles.deckActions}>
-              <button className={`${styles.action} ${styles.primary}`} onClick={() => startCard(card)} disabled={cardLoaded && !deckFeedback} type="button">
-                {cardLoaded ? 'Loaded' : 'Load'}
-              </button>
               <button className={`${styles.action} ${styles.deleteAction}`} disabled={!card || !canDeleteCard || deckActionLoading} onClick={onDeleteCard} type="button">
                 Delete
               </button>
-              <button className={styles.action} onClick={onNext} type="button">
+              <button className={`${styles.action} ${styles.primary}`} onClick={onNext} type="button">
                 Next
               </button>
             </div>
@@ -1490,38 +1477,6 @@ export function DeckPanel({
             {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
           </>
         )}
-      </section>
-      <section className={`${styles.card} ${styles.dataCard}`}>
-        <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>{trainAllSession ? 'Cram source' : 'Card states'}</h2>
-          <span className={styles.statusText}>{deckStats.reviews} reviews</span>
-        </div>
-        <div className={styles.deckStats}>
-          <div>
-            <strong>{deckStats.new}</strong>
-            <span>new</span>
-          </div>
-          <div>
-            <strong>{deckStats.learning}</strong>
-            <span>learning</span>
-          </div>
-          <div>
-            <strong>{deckStats.due}</strong>
-            <span>due</span>
-          </div>
-          <div>
-            <strong>{deckStats.review}</strong>
-            <span>young</span>
-          </div>
-          <div>
-            <strong>{deckStats.mature}</strong>
-            <span>mature</span>
-          </div>
-          <div>
-            <strong>{deckStats.ignored}</strong>
-            <span>ignored</span>
-          </div>
-        </div>
       </section>
     </>
   );

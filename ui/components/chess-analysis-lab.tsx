@@ -2298,7 +2298,6 @@ export function ChessAnalysisLab() {
                 focusCreateDeck={focusTrainCreateDeck}
                 onCreateDeckFocusHandled={handleCreateDeckFocusHandled}
                 selectedDeckId={selectedDeckId}
-                startCard={loadDeckCard}
               />
             )}
           </div>
