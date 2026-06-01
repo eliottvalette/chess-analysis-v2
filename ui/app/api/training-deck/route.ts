@@ -454,7 +454,7 @@ async function fetchDeckCounts(supabase: ReturnType<typeof createAdminClient>, d
 async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClient>, profileId: string) {
   const { data } = await supabase
     .from('training_card_progress')
-    .select('card_id,seen_count,ignored,due_at,interval_days')
+    .select('card_id,seen_count,ignored,due_at,interval_days,learning_step')
     .eq('profile_id', profileId);
   const result = new Map<string, ProgressRow>();
 
@@ -464,6 +464,7 @@ async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClie
       ignored: Boolean(row.ignored),
       dueAt: row.due_at ? String(row.due_at) : null,
       intervalDays: Number(row.interval_days ?? 0),
+      learningStep: Number(row.learning_step ?? 0),
     });
   }
 
@@ -524,7 +525,7 @@ function toDeckProgressEntry(progress: ProgressRow | undefined): DeckProgressEnt
     streak: 0,
     reviewCount: progress?.seenCount ?? 0,
     lapseCount: 0,
-    learningStep: 0,
+    learningStep: progress?.learningStep ?? 0,
     ease: 2.5,
     intervalDays: progress?.intervalDays ?? 0,
     ignored: Boolean(progress?.ignored),
@@ -623,6 +624,7 @@ type ProgressRow = {
   ignored: boolean;
   dueAt: string | null;
   intervalDays: number;
+  learningStep: number;
 };
 
 type TrainingProfileCookie = {

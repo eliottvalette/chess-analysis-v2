@@ -15,7 +15,7 @@ export async function GET() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('training_card_progress')
-    .select('card_id,seen_count,correct_count,miss_count,streak,review_count,lapse_count,ease,interval_days,ignored,last_outcome,due_at,last_seen_at')
+    .select('card_id,seen_count,correct_count,miss_count,streak,review_count,lapse_count,learning_step,ease,interval_days,ignored,last_outcome,due_at,last_seen_at')
     .eq('profile_id', profile.id);
 
   if (error) {
@@ -32,7 +32,7 @@ export async function GET() {
       streak: Number(row.streak ?? 0),
       reviewCount: Number(row.review_count ?? 0),
       lapseCount: Number(row.lapse_count ?? 0),
-      learningStep: 0,
+      learningStep: Number(row.learning_step ?? 0),
       ease: Number(row.ease ?? 2.5),
       intervalDays: Number(row.interval_days ?? 0),
       ignored: Boolean(row.ignored),
@@ -64,6 +64,7 @@ export async function POST(request: Request) {
     streak: entry.streak,
     review_count: entry.reviewCount,
     lapse_count: entry.lapseCount,
+    learning_step: entry.learningStep,
     ease: entry.ease,
     interval_days: entry.intervalDays,
     ignored: entry.ignored,
