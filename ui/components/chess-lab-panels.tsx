@@ -205,7 +205,8 @@ export function TrainPanel({
   deckActionLoading,
   deckCounterSan,
   deckLoadError,
-  deckLoading,
+  deckBusy,
+  deckLibraryLoading,
   deckSummaries,
   deckFeedback,
   deckPlaybackBusy,
@@ -238,7 +239,8 @@ export function TrainPanel({
   deckActionLoading: boolean;
   deckCounterSan: string | null;
   deckLoadError: string;
-  deckLoading: boolean;
+  deckBusy: boolean;
+  deckLibraryLoading: boolean;
   deckSummaries: TrainingDeckSummary[];
   deckFeedback: DeckFeedback | null;
   deckPlaybackBusy: boolean;
@@ -271,7 +273,8 @@ export function TrainPanel({
         deckActionError={deckActionError}
         deckActionLoading={deckActionLoading}
         deckLoadError={deckLoadError}
-        deckLoading={deckLoading}
+        deckBusy={deckBusy}
+        deckLibraryLoading={deckLibraryLoading}
         deckSummaries={deckSummaries}
         focusCreateDeck={focusCreateDeck}
         newDeckTitle={newDeckTitle}
@@ -316,7 +319,7 @@ export function TrainPanel({
         activeCardProgress={activeCardProgress}
         deckCounterSan={deckCounterSan}
         deckLoadError={deckLoadError}
-        deckLoading={deckLoading}
+        deckLoading={deckBusy}
         deckFeedback={deckFeedback}
         deckPlaybackBusy={deckPlaybackBusy}
         deckStats={deckStats}
@@ -1109,7 +1112,7 @@ function formatNextReview(progress: DeckProgressEntry | null) {
 function DeckLibraryItem({
   deck,
   deckActionLoading,
-  deckLoading,
+  deckBusy,
   isSelected,
   onDeleteDeck,
   onRenameDeck,
@@ -1117,7 +1120,7 @@ function DeckLibraryItem({
 }: {
   deck: TrainingDeckSummary;
   deckActionLoading: boolean;
-  deckLoading: boolean;
+  deckBusy: boolean;
   isSelected: boolean;
   onDeleteDeck: (deckId: string) => void;
   onRenameDeck: (deckId: string, name: string) => void;
@@ -1128,7 +1131,7 @@ function DeckLibraryItem({
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
-  const selectDisabled = deckLoading || deckActionLoading;
+  const selectDisabled = deckBusy || deckActionLoading;
 
   useEffect(() => {
     if (!menuOpen) {
@@ -1242,7 +1245,7 @@ function DeckLibraryItem({
             aria-haspopup="menu"
             aria-label={`Deck options for ${deck.name}`}
             className={styles.deckLibraryMenuButton}
-            disabled={deckLoading || deckActionLoading}
+            disabled={deckBusy || deckActionLoading}
             onClick={event => {
               event.stopPropagation();
               setMenuOpen(open => !open);
@@ -1281,8 +1284,9 @@ function DeckMoreIcon() {
 export function LearnPanel({
   deckActionError,
   deckActionLoading,
+  deckBusy,
+  deckLibraryLoading,
   deckLoadError,
-  deckLoading,
   deckSummaries,
   focusCreateDeck,
   newDeckTitle,
@@ -1299,8 +1303,9 @@ export function LearnPanel({
 }: {
   deckActionError: string;
   deckActionLoading: boolean;
+  deckBusy: boolean;
+  deckLibraryLoading: boolean;
   deckLoadError: string;
-  deckLoading: boolean;
   deckSummaries: TrainingDeckSummary[];
   focusCreateDeck: boolean;
   newDeckTitle: string;
@@ -1318,12 +1323,12 @@ export function LearnPanel({
   const createDeckInputRef = useRef<HTMLInputElement | null>(null);
   const createDeckSectionRef = useRef<HTMLElement | null>(null);
   const totalCardCount = deckSummaries.reduce((total, deck) => total + deck.cardCount, 0);
-  const canTrainAll = totalCardCount > 0 && !deckLoading && !deckActionLoading;
+  const canTrainAll = totalCardCount > 0 && !deckBusy && !deckActionLoading;
   const selectedDeck = deckSummaries.find(deck => deck.id === selectedDeckId) ?? null;
   const canStudySelected = Boolean(
     selectedDeck &&
     selectedDeck.cardCount > 0 &&
-    !deckLoading &&
+    !deckBusy &&
     !deckActionLoading,
   );
 
@@ -1347,11 +1352,11 @@ export function LearnPanel({
       <section className={`${styles.card} ${styles.emptyStateCard}`}>
         <div className={styles.panelHeader}>
           <h2 className={styles.sectionTitle}>Decks</h2>
-          <span className={styles.statusText}>{deckLoading ? 'loading' : `${deckSummaries.length} decks`}</span>
+          <span className={styles.statusText}>{deckLibraryLoading ? 'loading' : `${deckSummaries.length} decks`}</span>
         </div>
         {deckSummaries.length === 0 ? (
           <p className={styles.copy}>
-            {deckLoading
+            {deckLibraryLoading
               ? 'Loading decks.'
               : deckLoadError
                 ? 'Learning setup is not available.'
@@ -1363,7 +1368,7 @@ export function LearnPanel({
               <DeckLibraryItem
                 deck={deck}
                 deckActionLoading={deckActionLoading}
-                deckLoading={deckLoading}
+                deckBusy={deckBusy}
                 isSelected={deck.id === selectedDeckId}
                 key={deck.id}
                 onDeleteDeck={onDeleteDeck}

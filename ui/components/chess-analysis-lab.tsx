@@ -233,7 +233,8 @@ export function ChessAnalysisLab() {
   const [deckCards, setDeckCards] = useState<DeckCard[]>([]);
   const [deckSummaries, setDeckSummaries] = useState<TrainingDeckSummary[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
-  const [deckLoading, setDeckLoading] = useState(true);
+  const [deckLibraryLoading, setDeckLibraryLoading] = useState(false);
+  const [deckCardsLoading, setDeckCardsLoading] = useState(false);
   const [deckLoadError, setDeckLoadError] = useState('');
   const [deckActionLoading, setDeckActionLoading] = useState(false);
   const [deckActionError, setDeckActionError] = useState('');
@@ -275,6 +276,10 @@ export function ChessAnalysisLab() {
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
   const progressHydratedRef = useRef(false);
   const progressSyncTimerRef = useRef<number | null>(null);
+  const selectedDeckIdRef = useRef<string | null>(null);
+  const loadTrainingDeckRef = useRef<(deckId?: string | null, options?: { autoStart?: boolean; allDecks?: boolean; libraryLoading?: boolean }) => Promise<void>>(async () => undefined);
+  const lastDeckLibraryProfileIdRef = useRef<string | null>(null);
+  const deckLoadRequestIdRef = useRef(0);
   const reviewWorkspaceSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
   const trainWorkspaceSnapshotRef = useRef<WorkspaceSnapshot | null>(null);
   const workspaceStateRef = useRef<WorkspaceSnapshot>(createEmptyWorkspaceSnapshot());
@@ -933,12 +938,21 @@ export function ChessAnalysisLab() {
     }
   }, [beginDeckCardSession, playDeckReplayToIndex]);
 
-  const loadTrainingDeck = useCallback(async (deckId = selectedDeckId, options?: { autoStart?: boolean; allDecks?: boolean }) => {
-    setDeckLoading(true);
+  const loadTrainingDeck = useCallback(async (deckId?: string | null, options?: { autoStart?: boolean; allDecks?: boolean; libraryLoading?: boolean }) => {
+    const resolvedDeckId = deckId ?? selectedDeckIdRef.current;
+    const libraryLoading = options?.libraryLoading !== false;
+    const requestId = ++deckLoadRequestIdRef.current;
+
+    if (libraryLoading) {
+      setDeckLibraryLoading(true);
+    } else {
+      setDeckCardsLoading(true);
+    }
+
     setDeckLoadError('');
 
     try {
-      const query = options?.allDecks ? '?scope=all' : deckId ? `?deckId=${encodeURIComponent(deckId)}` : '';
+      const query = options?.allDecks ? '?scope=all' : resolvedDeckId ? `?deckId=${encodeURIComponent(resolvedDeckId)}` : '';
       const response = await fetch(`/api/training-deck${query}`, { credentials: 'same-origin' });
       const payload = (await response.json()) as TrainingDeckPayload;
 
@@ -999,12 +1013,26 @@ export function ChessAnalysisLab() {
     } catch (error) {
       setOpeningLines([]);
       setDeckCards([]);
-      setDeckSummaries([]);
+
+      if (libraryLoading) {
+        setDeckSummaries([]);
+      }
+
       setDeckLoadError(normalizeDeckLoadError(error instanceof Error ? error.message : 'Unable to load Supabase deck.'));
     } finally {
-      setDeckLoading(false);
+      if (requestId !== deckLoadRequestIdRef.current) {
+        return;
+      }
+
+      if (libraryLoading) {
+        setDeckLibraryLoading(false);
+      } else {
+        setDeckCardsLoading(false);
+      }
     }
-  }, [selectedDeckId, startDeckCardWithReplay]);
+  }, [startDeckCardWithReplay]);
+
+  loadTrainingDeckRef.current = loadTrainingDeck;
 
   useEffect(() => {
     deckProgressRef.current = deckProgress;
@@ -1015,14 +1043,27 @@ export function ChessAnalysisLab() {
   }, [deckFeedback]);
 
   useEffect(() => {
-    const storedDeckId = typeof window === 'undefined' ? null : window.localStorage.getItem(LAST_TRAINING_DECK_STORAGE_KEY);
+    selectedDeckIdRef.current = selectedDeckId;
+  }, [selectedDeckId]);
 
-    if (trainAllSession) {
+  useEffect(() => {
+    if (!trainingProfile?.id || trainingProfileBootstrapping || trainAllSession) {
+      if (!trainingProfile?.id) {
+        lastDeckLibraryProfileIdRef.current = null;
+      }
+
       return;
     }
 
-    void loadTrainingDeck(storedDeckId || selectedDeckId);
-  }, [loadTrainingDeck, selectedDeckId, trainingProfile?.id, trainAllSession]);
+    if (lastDeckLibraryProfileIdRef.current === trainingProfile.id) {
+      return;
+    }
+
+    lastDeckLibraryProfileIdRef.current = trainingProfile.id;
+    const storedDeckId = typeof window === 'undefined' ? null : window.localStorage.getItem(LAST_TRAINING_DECK_STORAGE_KEY);
+
+    void loadTrainingDeckRef.current(storedDeckId, { libraryLoading: true });
+  }, [trainingProfile?.id, trainingProfileBootstrapping, trainAllSession]);
 
   useEffect(() => {
     const requestId = ++positionRequestIdRef.current;
@@ -1348,9 +1389,11 @@ export function ChessAnalysisLab() {
     clearSelection();
 
     if (wasTrainAllSession) {
-      void loadTrainingDeck(restoreDeckId, { autoStart: false });
+      void loadTrainingDeck(restoreDeckId, { autoStart: false, libraryLoading: false });
     }
   }, [loadTrainingDeck, selectedDeckId, trainAllSession]);
+
+  const deckBusy = deckLibraryLoading || deckCardsLoading;
 
   const selectTrainingDeck = useCallback(async (deckId: string) => {
     setTrainAllSession(false);
@@ -1361,12 +1404,12 @@ export function ChessAnalysisLab() {
       window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
     }
 
-    if (deckId === selectedDeckId && deckCards.length > 0 && !deckLoading) {
+    if (deckId === selectedDeckId && deckCards.length > 0 && !deckBusy) {
       return;
     }
 
-    await loadTrainingDeck(deckId, { autoStart: false });
-  }, [deckCards.length, deckLoading, loadTrainingDeck, selectedDeckId]);
+    await loadTrainingDeck(deckId, { autoStart: false, libraryLoading: false });
+  }, [deckBusy, deckCards.length, loadTrainingDeck, selectedDeckId]);
 
   const trainDeckFromLibrary = useCallback(async (deckId: string) => {
     setTrainAllSession(false);
@@ -1381,7 +1424,7 @@ export function ChessAnalysisLab() {
       window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
     }
 
-    if (deckId === selectedDeckId && deckCards.length > 0 && !deckLoading) {
+    if (deckId === selectedDeckId && deckCards.length > 0 && !deckBusy) {
       const nextCard = getDeckStudyQueue(deckCards, deckProgress)[0] ?? null;
 
       if (nextCard) {
@@ -1392,8 +1435,8 @@ export function ChessAnalysisLab() {
       return;
     }
 
-    await loadTrainingDeck(deckId, { autoStart: true });
-  }, [deckCards, deckLoading, deckProgress, loadTrainingDeck, openingLines, selectedDeckId, startDeckCardWithReplay]);
+    await loadTrainingDeck(deckId, { autoStart: true, libraryLoading: false });
+  }, [deckBusy, deckCards, deckProgress, loadTrainingDeck, openingLines, selectedDeckId, startDeckCardWithReplay]);
 
   const trainAllDecks = useCallback(async () => {
     setTrainAllSession(true);
@@ -2403,7 +2446,8 @@ export function ChessAnalysisLab() {
                 deckActionLoading={deckActionLoading}
                 deckCounterSan={deckOpponentBestSan}
                 deckLoadError={deckLoadError}
-                deckLoading={deckLoading}
+                deckBusy={deckBusy}
+                deckLibraryLoading={deckLibraryLoading}
                 deckSummaries={deckSummaries}
                 deckFeedback={deckFeedback}
                 deckPlaybackBusy={deckPlaybackBusy}
@@ -2447,7 +2491,7 @@ export function ChessAnalysisLab() {
                   clearSelection();
 
                   if (wasTrainAllSession) {
-                    void loadTrainingDeck(restoreDeckId, { autoStart: false });
+                    void loadTrainingDeck(restoreDeckId, { autoStart: false, libraryLoading: false });
                   }
                 }}
                 onCreateDeck={() => void createTrainingDeck()}
