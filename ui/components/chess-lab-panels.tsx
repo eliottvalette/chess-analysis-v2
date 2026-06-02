@@ -220,13 +220,14 @@ export function TrainPanel({
   onNext,
   onDeleteCard,
   onTrainDeck,
-  onSelectDeck,
   onTrainAll,
   onRenameDeck,
   onDeleteDeck,
+  onSaveReplayFromStartChange,
   focusCreateDeck,
   onCreateDeckFocusHandled,
   onNewDeckTitleChange,
+  saveReplayFromStart,
   selectedDeckId,
   trainAllSession,
   trainSessionCardCurrent,
@@ -254,13 +255,14 @@ export function TrainPanel({
   onNext: () => void;
   onDeleteCard: () => void;
   onTrainDeck: (deckId: string) => void;
-  onSelectDeck: (deckId: string) => void;
   onTrainAll: () => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
+  onSaveReplayFromStartChange: (value: boolean) => void;
   focusCreateDeck: boolean;
   onCreateDeckFocusHandled: () => void;
   onNewDeckTitleChange: (value: string) => void;
+  saveReplayFromStart: boolean;
   selectedDeckId: string | null;
   trainAllSession: boolean;
   trainSessionCardCurrent: number;
@@ -282,9 +284,10 @@ export function TrainPanel({
         onCreateDeckFocusHandled={onCreateDeckFocusHandled}
         onGenerateRecentDeck={onGenerateRecentDeck}
         onNewDeckTitleChange={onNewDeckTitleChange}
+        onSaveReplayFromStartChange={onSaveReplayFromStartChange}
         onTrainDeck={onTrainDeck}
-        onSelectDeck={onSelectDeck}
         onTrainAll={onTrainAll}
+        saveReplayFromStart={saveReplayFromStart}
         onRenameDeck={onRenameDeck}
         onDeleteDeck={onDeleteDeck}
         selectedDeckId={selectedDeckId}
@@ -1116,7 +1119,7 @@ function DeckLibraryItem({
   isSelected,
   onDeleteDeck,
   onRenameDeck,
-  onSelectDeck,
+  onTrainDeck,
 }: {
   deck: TrainingDeckSummary;
   deckActionLoading: boolean;
@@ -1124,14 +1127,14 @@ function DeckLibraryItem({
   isSelected: boolean;
   onDeleteDeck: (deckId: string) => void;
   onRenameDeck: (deckId: string, name: string) => void;
-  onSelectDeck: (deckId: string) => void;
+  onTrainDeck: (deckId: string) => void;
 }) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
-  const selectDisabled = deckBusy || deckActionLoading;
+  const selectDisabled = deckBusy || deckActionLoading || deck.cardCount === 0;
 
   useEffect(() => {
     if (!menuOpen) {
@@ -1201,7 +1204,7 @@ function DeckLibraryItem({
         aria-current={isSelected ? 'true' : undefined}
         className={`${styles.deckLibraryItem} ${isSelected ? styles.activeDeckLibraryItem : ''}`}
         disabled={selectDisabled}
-        onClick={() => onSelectDeck(deck.id)}
+        onClick={() => onTrainDeck(deck.id)}
         type="button"
       >
         <span className={styles.deckLibraryHead}>
@@ -1294,11 +1297,12 @@ export function LearnPanel({
   onCreateDeckFocusHandled,
   onGenerateRecentDeck,
   onNewDeckTitleChange,
+  onSaveReplayFromStartChange,
   onTrainDeck,
-  onSelectDeck,
   onTrainAll,
   onRenameDeck,
   onDeleteDeck,
+  saveReplayFromStart,
   selectedDeckId,
 }: {
   deckActionError: string;
@@ -1313,24 +1317,18 @@ export function LearnPanel({
   onCreateDeckFocusHandled: () => void;
   onGenerateRecentDeck: () => void;
   onNewDeckTitleChange: (value: string) => void;
+  onSaveReplayFromStartChange: (value: boolean) => void;
   onTrainDeck: (deckId: string) => void;
-  onSelectDeck: (deckId: string) => void;
   onTrainAll: () => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
+  saveReplayFromStart: boolean;
   selectedDeckId: string | null;
 }) {
   const createDeckInputRef = useRef<HTMLInputElement | null>(null);
   const createDeckSectionRef = useRef<HTMLElement | null>(null);
   const totalCardCount = deckSummaries.reduce((total, deck) => total + deck.cardCount, 0);
   const canTrainAll = totalCardCount > 0 && !deckBusy && !deckActionLoading;
-  const selectedDeck = deckSummaries.find(deck => deck.id === selectedDeckId) ?? null;
-  const canStudySelected = Boolean(
-    selectedDeck &&
-    selectedDeck.cardCount > 0 &&
-    !deckBusy &&
-    !deckActionLoading,
-  );
 
   useEffect(() => {
     if (!focusCreateDeck) {
@@ -1373,31 +1371,29 @@ export function LearnPanel({
                 key={deck.id}
                 onDeleteDeck={onDeleteDeck}
                 onRenameDeck={onRenameDeck}
-                onSelectDeck={onSelectDeck}
+                onTrainDeck={onTrainDeck}
               />
             ))}
           </div>
         )}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
+        <label className={styles.replayToggle}>
+          <input
+            checked={saveReplayFromStart}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => onSaveReplayFromStartChange(event.target.checked)}
+            type="checkbox"
+          />
+          <span>Replay full game before the position (200 ms per move)</span>
+        </label>
         {deckSummaries.length > 0 ? (
-          <div className={styles.deckLibraryActions}>
-            <button
-              className={`${styles.action} ${styles.primary} ${styles.fullWidthAction}`}
-              disabled={!canStudySelected}
-              onClick={() => selectedDeck && onTrainDeck(selectedDeck.id)}
-              type="button"
-            >
-              {selectedDeck ? `Study ${selectedDeck.name}` : 'Study deck'}
-            </button>
-            <button
-              className={`${styles.action} ${styles.fullWidthAction}`}
-              disabled={!canTrainAll}
-              onClick={onTrainAll}
-              type="button"
-            >
-              Cram all decks
-            </button>
-          </div>
+          <button
+            className={`${styles.action} ${styles.fullWidthAction}`}
+            disabled={!canTrainAll}
+            onClick={onTrainAll}
+            type="button"
+          >
+            Cram all decks
+          </button>
         ) : null}
       </section>
       <section

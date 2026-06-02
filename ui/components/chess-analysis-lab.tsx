@@ -1395,22 +1395,6 @@ export function ChessAnalysisLab() {
 
   const deckBusy = deckLibraryLoading || deckCardsLoading;
 
-  const selectTrainingDeck = useCallback(async (deckId: string) => {
-    setTrainAllSession(false);
-    setTrainAllQueue([]);
-    setSelectedDeckId(deckId);
-
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
-    }
-
-    if (deckId === selectedDeckId && deckCards.length > 0 && !deckBusy) {
-      return;
-    }
-
-    await loadTrainingDeck(deckId, { autoStart: false, libraryLoading: false });
-  }, [deckBusy, deckCards.length, loadTrainingDeck, selectedDeckId]);
-
   const trainDeckFromLibrary = useCallback(async (deckId: string) => {
     setTrainAllSession(false);
     setTrainAllQueue([]);
@@ -2499,9 +2483,10 @@ export function ChessAnalysisLab() {
                 onDeleteCard={() => void deleteActiveDeckCard()}
                 onNext={advanceDeckCard}
                 onNewDeckTitleChange={setNewDeckTitle}
+                onSaveReplayFromStartChange={setSaveReplayFromStart}
                 onTrainDeck={deckId => void trainDeckFromLibrary(deckId)}
-                onSelectDeck={deckId => void selectTrainingDeck(deckId)}
                 onTrainAll={() => void trainAllDecks()}
+                saveReplayFromStart={saveReplayFromStart}
                 onRenameDeck={(deckId, name) => void renameTrainingDeck(deckId, name)}
                 onDeleteDeck={deckId => void deleteTrainingDeck(deckId)}
                 focusCreateDeck={focusTrainCreateDeck}
