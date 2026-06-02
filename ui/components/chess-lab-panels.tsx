@@ -845,14 +845,7 @@ function ReviewSaveDeckPanel({
         </p>
       ) : null}
 
-      <label className={styles.replayToggle}>
-        <input
-          checked={saveReplayFromStart}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => onSaveReplayFromStartChange(event.target.checked)}
-          type="checkbox"
-        />
-        <span>Replay full game before the position (200 ms per move)</span>
-      </label>
+      <SaveFullGameToggle checked={saveReplayFromStart} onChange={onSaveReplayFromStartChange} />
 
       {hasOwnedDeck ? (
         <button
@@ -1274,6 +1267,29 @@ function DeckLibraryItem({
   );
 }
 
+function SaveFullGameToggle({
+  checked,
+  onChange,
+}: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className={styles.settingRow}>
+      <span className={styles.settingRowLabel}>Save Full Game</span>
+      <span className={styles.settingSwitch}>
+        <input
+          checked={checked}
+          className={styles.settingSwitchInput}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.checked)}
+          type="checkbox"
+        />
+        <span aria-hidden="true" className={styles.settingSwitchTrack} />
+      </span>
+    </label>
+  );
+}
+
 function DeckMoreIcon() {
   return (
     <svg className={styles.deckMenuIcon} viewBox="0 0 24 24" aria-hidden="true">
@@ -1377,14 +1393,7 @@ export function LearnPanel({
           </div>
         )}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
-        <label className={styles.replayToggle}>
-          <input
-            checked={saveReplayFromStart}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => onSaveReplayFromStartChange(event.target.checked)}
-            type="checkbox"
-          />
-          <span>Replay full game before the position (200 ms per move)</span>
-        </label>
+        <SaveFullGameToggle checked={saveReplayFromStart} onChange={onSaveReplayFromStartChange} />
         {deckSummaries.length > 0 ? (
           <button
             className={`${styles.action} ${styles.fullWidthAction}`}
