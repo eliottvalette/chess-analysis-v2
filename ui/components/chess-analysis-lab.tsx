@@ -52,6 +52,7 @@ import {
   getDeckStudyQueue,
   sortCardsForReview,
   summarizeDeckProgress,
+  summarizeLineMastery,
   type DeckProgressMap,
 } from '@/lib/deck-progress';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
@@ -268,6 +269,7 @@ export function ChessAnalysisLab() {
   const deckPlaybackRequestIdRef = useRef(0);
   const deckReplayMovesRef = useRef<StoredMove[]>([]);
   const deckReplayInitialFenRef = useRef<string | null>(null);
+  const deckCardPromptStartedAtRef = useRef<number | null>(null);
   const suppressSpaceKeyUpRef = useRef(false);
   const deckProgressRef = useRef(deckProgress);
   const deckFeedbackRef = useRef(deckFeedback);
@@ -344,6 +346,10 @@ export function ChessAnalysisLab() {
   const activeDeckProgress = useMemo(
     () => (viewedDeckCard ? getDeckProgressEntry(deckProgress, viewedDeckCard.id) : null),
     [deckProgress, viewedDeckCard],
+  );
+  const deckLineMastery = useMemo(
+    () => summarizeLineMastery(deckCards, deckProgress),
+    [deckCards, deckProgress],
   );
   const reviewPlayerSide = useMemo(() => {
     if (!metadata) {
@@ -936,6 +942,8 @@ export function ChessAnalysisLab() {
     if (replayTargetIndex > 0) {
       await playDeckReplayToIndex(replayTargetIndex, card.side);
     }
+
+    deckCardPromptStartedAtRef.current = Date.now();
   }, [beginDeckCardSession, playDeckReplayToIndex]);
 
   const loadTrainingDeck = useCallback(async (deckId?: string | null, options?: { autoStart?: boolean; allDecks?: boolean; libraryLoading?: boolean }) => {
@@ -1307,7 +1315,15 @@ export function ChessAnalysisLab() {
         const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback);
         setDeckFeedback(gradedFeedback);
         if (!trainAllSession) {
-          setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, new Date().toISOString()));
+          const promptStartedAt = deckCardPromptStartedAtRef.current;
+          const responseMs = promptStartedAt == null ? null : Date.now() - promptStartedAt;
+          const attemptQuality = {
+            responseMs,
+            exact: gradedFeedback.exact,
+            evalLossCp: gradedFeedback.evalLossCp ?? null,
+          };
+          const seenAt = new Date().toISOString();
+          setDeckProgress(progress => applyDeckAttempt(progress, activeDeckCard.id, gradedFeedback.correct, seenAt, attemptQuality));
         }
         void saveTrainingAttempt(activeDeckCard, gradedFeedback);
       }
@@ -2199,11 +2215,9 @@ export function ChessAnalysisLab() {
           <div className={styles.topBar}>
             <div className={styles.titleBlock}>
               <h1 className={styles.appTitle}>Chess Lab</h1>
-              <span className={styles.contextLine}>
-                {hasLoadedGame
-                  ? `${whiteReviewName} vs ${blackReviewName} · ${moveHistory.length} plies`
-                  : 'Analyze, learn openings, and drill best moves'}
-              </span>
+              {hasLoadedGame ? (
+                <span className={styles.contextLine}>{whiteReviewName} vs {blackReviewName} · {moveHistory.length} plies</span>
+              ) : null}
             </div>
             <div className={styles.topActions}>
               <button className={`${styles.action} ${styles.compactAction}`} onClick={() => setPgnDialogOpen(true)}>
@@ -2436,6 +2450,7 @@ export function ChessAnalysisLab() {
                 deckFeedback={deckFeedback}
                 deckPlaybackBusy={deckPlaybackBusy}
                 deckStats={deckStats}
+                deckLineMastery={deckLineMastery}
                 trainAllSession={trainAllSession}
                 trainSessionCardCurrent={trainSessionCardCurrent}
                 trainSessionCardTotal={trainSessionCardTotal}
@@ -2588,6 +2603,8 @@ function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckP
       ease: localIsLater ? localEntry.ease : serverEntry.ease,
       intervalDays: localIsLater ? localEntry.intervalDays : serverEntry.intervalDays,
       learningStep: localIsLater ? localEntry.learningStep : serverEntry.learningStep,
+      masteryScore: localIsLater ? localEntry.masteryScore : serverEntry.masteryScore,
+      lastResponseMs: localIsLater ? localEntry.lastResponseMs : serverEntry.lastResponseMs,
       ignored: serverEntry.ignored || localEntry.ignored,
       lastOutcome: localIsLater ? localEntry.lastOutcome : serverEntry.lastOutcome,
       dueAt: localIsLater ? localEntry.dueAt : serverEntry.dueAt,

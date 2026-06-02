@@ -13,7 +13,13 @@ import {
   type TimelineReview,
 } from '@/lib/chess-analysis-client';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
-import { getDeckCardState, type DeckCardState, type DeckProgressEntry, type DeckProgressSummary } from '@/lib/deck-progress';
+import {
+  getEffectiveMasteryScore,
+  getMasteryGrade,
+  type DeckProgressEntry,
+  type DeckProgressSummary,
+  type MasteryGrade,
+} from '@/lib/deck-progress';
 
 type TrainSessionStats = {
   completed: number;
@@ -211,6 +217,7 @@ export function TrainPanel({
   deckFeedback,
   deckPlaybackBusy,
   deckStats,
+  deckLineMastery,
   canDeleteCard,
   newDeckTitle,
   nextCard,
@@ -232,10 +239,10 @@ export function TrainPanel({
   trainAllSession,
   trainSessionCardCurrent,
   trainSessionCardTotal,
-  trainSessionStats,
 }: {
   activeCard: DeckCard | null;
   activeCardProgress: DeckProgressEntry | null;
+  deckLineMastery: ReturnType<typeof import('@/lib/deck-progress').summarizeLineMastery>;
   deckActionError: string;
   deckActionLoading: boolean;
   deckCounterSan: string | null;
@@ -297,29 +304,15 @@ export function TrainPanel({
 
   return (
     <>
-      <section className={`${styles.card} ${styles.stateHeaderCard}`}>
-        <button className={`${styles.action} ${styles.backAction}`} onClick={onBack} type="button">
+      <div className={styles.trainBackRow}>
+        <button className={`${styles.action} ${styles.fullWidthAction} ${styles.backAction}`} onClick={onBack} type="button">
           Back
         </button>
-        <div className={styles.stateHeaderMain}>
-          <strong>
-            Learning card
-          </strong>
-          <span className={styles.support}>
-            {formatCardLineTitle(activeCard)} · {activeCard.side}
-          </span>
-          <span className={styles.support}>
-            {formatCardProgressDetail(activeCardProgress)}
-          </span>
-        </div>
-        <div className={styles.stateHeaderMeta}>
-          <strong>{trainAllSession ? `${trainSessionCardCurrent}/${trainSessionCardTotal}` : deckStats.due}</strong>
-          <span>{trainAllSession ? 'cram' : `due · new ${deckStats.new}`}</span>
-        </div>
-      </section>
+      </div>
       <DeckPanel
         activeCard={activeCard}
         activeCardProgress={activeCardProgress}
+        deckLineMastery={deckLineMastery}
         deckCounterSan={deckCounterSan}
         deckLoadError={deckLoadError}
         deckLoading={deckBusy}
@@ -334,7 +327,6 @@ export function TrainPanel({
         trainAllSession={trainAllSession}
         trainSessionCardCurrent={trainSessionCardCurrent}
         trainSessionCardTotal={trainSessionCardTotal}
-        trainSessionStats={trainSessionStats}
       />
     </>
   );
@@ -673,7 +665,7 @@ export function GameReviewPanel({
           </div>
           <span className={styles.statusText}>{timelineLoading ? 'building' : `${reviewMoments.length} moments`}</span>
         </div>
-        <p className={styles.coachText}>{coachReview ? compactCoachText(coachReview) : 'Load moments by analyzing the game.'}</p>
+        {coachReview ? <p className={styles.coachText}>{compactCoachText(coachReview)}</p> : null}
         <div className={styles.reviewCoachActions}>
           <button
             className={`${styles.action} ${styles.actionBest}`}
@@ -1026,56 +1018,12 @@ function capitalizeRecentGameTimeClass(value: 'bullet' | 'blitz' | 'rapid') {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function formatCardLineTitle(card: DeckCard) {
-  return card.lineName.includes(card.eco) ? card.lineName : `${card.eco} · ${card.lineName}`;
+function getMasteryGradeClass(grade: MasteryGrade) {
+  return styles[`masteryGrade${grade}`];
 }
 
-function formatLearningPrompt(card: DeckCard) {
-  if (card.sourceType === 'recent_game' || card.sourceType === 'review') {
-    return card.prompt;
-  }
-
-  if (card.opponentMoveSan) {
-    return `Opponent just played ${card.opponentMoveSan}. Find the best reply.`;
-  }
-
-  return 'Find the best move in this position.';
-}
-
-function formatDeckCardLabel(card: DeckCard) {
-  return card.kind === 'repertoire_choice' ? 'Fix your mistake' : 'Find the punishment';
-}
-
-function formatCardProgressDetail(progress: DeckProgressEntry | null) {
-  if (!progress || progress.seenCount === 0) {
-    return 'New card · no reviews yet';
-  }
-
-  const lastOutcomeLabel =
-    progress.lastOutcome === 'correct' ? 'last hit' : progress.lastOutcome === 'miss' ? 'last miss' : 'seen before';
-
-  return `${progress.reviewCount} reviews · ${progress.streak} streak · ${formatNextReview(progress)} · ${lastOutcomeLabel}`;
-}
-
-function getProgressState(progress: DeckProgressEntry | null): DeckCardState {
-  return progress ? getDeckCardState(progress) : 'new';
-}
-
-function formatStateLabel(state: DeckCardState) {
-  switch (state) {
-    case 'new':
-      return 'New';
-    case 'learning':
-      return 'Learning';
-    case 'due':
-      return 'Due';
-    case 'review':
-      return 'Review';
-    case 'mature':
-      return 'Mature';
-    case 'ignored':
-      return 'Ignored';
-  }
+function getMasteryToneClass(grade: MasteryGrade) {
+  return styles[`masteryTone${grade}`];
 }
 
 function formatNextReview(progress: DeckProgressEntry | null) {
@@ -1456,10 +1404,11 @@ export function DeckPanel({
   trainAllSession,
   trainSessionCardCurrent,
   trainSessionCardTotal,
-  trainSessionStats,
+  deckLineMastery,
 }: {
   activeCard: DeckCard | null;
   activeCardProgress: DeckProgressEntry | null;
+  deckLineMastery: ReturnType<typeof import('@/lib/deck-progress').summarizeLineMastery>;
   deckCounterSan: string | null;
   deckLoadError: string;
   deckLoading: boolean;
@@ -1474,41 +1423,36 @@ export function DeckPanel({
   trainAllSession: boolean;
   trainSessionCardCurrent: number;
   trainSessionCardTotal: number;
-  trainSessionStats: TrainSessionStats;
 }) {
   const card = activeCard ?? nextCard;
-  const cardState = getProgressState(activeCardProgress);
   const sessionProgressPercent =
     trainSessionCardTotal > 0 ? Math.round((trainSessionCardCurrent / trainSessionCardTotal) * 100) : 0;
-  const srsQueueLabel = `New ${deckStats.new} · Learning ${deckStats.learning} · Due ${deckStats.due}`;
+  const cardGrade = activeCardProgress ? getMasteryGrade(activeCardProgress) : null;
+  const activeLineMastery = card ? deckLineMastery.find(line => line.id === card.lineId) : null;
+  const displayedGrade = activeLineMastery?.grade ?? cardGrade ?? 'F';
+  const displayedScore = activeLineMastery?.masteryScore ?? (activeCardProgress ? getEffectiveMasteryScore(activeCardProgress) : 0);
 
   return (
     <>
-      <section className={`${styles.card} ${styles.deckCard}`}>
-        <div className={styles.panelHeader}>
-          <h2 className={styles.sectionTitle}>Learning</h2>
-          <span className={styles.statusText}>
-            {trainAllSession ? `Cram · ${trainSessionCardCurrent}/${trainSessionCardTotal}` : srsQueueLabel}
-          </span>
-        </div>
-        {trainAllSession ? (
-          <div className={styles.trainSessionProgress} aria-label="Cram progress">
-            <div className={styles.trainSessionProgressFill} style={{ width: `${sessionProgressPercent}%` }} />
-          </div>
-        ) : null}
-        <div className={styles.trainSessionSummary}>
-          <span>{trainAllSession ? 'Cram mode · SRS schedule unchanged' : `Current session · ${trainSessionStats.hits} hit · ${trainSessionStats.misses} miss`}</span>
-          <span>{formatStateLabel(cardState)}</span>
-        </div>
+      <section className={`${styles.card} ${styles.deckCard} ${styles.trainingDeckCard} ${getMasteryToneClass(displayedGrade)}`}>
         {card ? (
           <>
-            <div className={styles.deckPrompt}>
-              <span className={styles.metaLabel}>
-                {formatDeckCardLabel(card)} · {formatStateLabel(cardState)}
-              </span>
-              <strong>{formatLearningPrompt(card)}</strong>
-              <p>{formatCardProgressDetail(activeCardProgress)}</p>
+            <div className={styles.trainingCardHead}>
+              <strong className={styles.trainingCardEco}>{card.eco}</strong>
+              <span className={`${styles.masteryGradeBadge} ${getMasteryGradeClass(displayedGrade)}`}>{displayedGrade}</span>
             </div>
+            <div className={styles.trainSessionProgress} aria-hidden="true">
+              <div className={styles.trainSessionProgressFill} style={{ width: `${displayedScore}%` }} />
+            </div>
+            <div className={styles.trainingCardMeta}>
+              <span>{displayedScore}/100</span>
+              <span>{trainAllSession ? `${trainSessionCardCurrent}/${trainSessionCardTotal}` : `${deckStats.due + deckStats.new} study`}</span>
+            </div>
+            {trainAllSession ? (
+              <div className={styles.trainSessionProgress} aria-label="Cram progress">
+                <div className={styles.trainSessionProgressFill} style={{ width: `${sessionProgressPercent}%` }} />
+              </div>
+            ) : null}
             {deckFeedback ? (
               <div className={`${styles.feedbackBox} ${deckFeedback.pending ? styles.feedbackPending : deckFeedback.correct ? styles.feedbackGood : styles.feedbackBad}`}>
                 <strong>
@@ -1525,15 +1469,15 @@ export function DeckPanel({
                   {deckFeedback.scoreSwingCp != null ? ` · swing ${formatCpSwing(deckFeedback.scoreSwingCp)}` : ''}
                 </span>
                 {!deckFeedback.pending ? (
-                  <span>{trainAllSession ? 'Cram result only · SRS unchanged' : `Next review: ${formatNextReview(activeCardProgress)}`}</span>
+                  <span>
+                    {trainAllSession
+                      ? 'Cram only · grade unchanged'
+                      : `${activeCardProgress ? `${getMasteryGrade(activeCardProgress)} · ${getEffectiveMasteryScore(activeCardProgress)}/100` : ''} · ${formatNextReview(activeCardProgress)}`}
+                  </span>
                 ) : null}
                 {!deckFeedback.pending && !deckFeedback.correct && deckCounterSan ? <span>counter {deckCounterSan}</span> : null}
               </div>
-            ) : deckPlaybackBusy ? (
-              <p className={styles.copy}>Replaying the game before your turn.</p>
-            ) : (
-              <p className={styles.copy}>Play the exact best move on the board.</p>
-            )}
+            ) : null}
             <div className={styles.deckActions}>
               <button className={`${styles.action} ${styles.deleteAction}`} disabled={!card || !canDeleteCard || deckActionLoading} onClick={onDeleteCard} type="button">
                 Delete

@@ -737,45 +737,33 @@
 }
 
 .stateHeaderCard {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(42px, auto);
-  align-items: center;
-  gap: 10px;
-  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
   padding: 12px;
 }
 
-.stateHeaderMain {
-  min-width: 0;
+.stateHeaderTop {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  text-align: left;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.stateHeaderMain strong {
-  min-width: 0;
+.stateHeaderTitle {
   color: var(--text);
-  font-size: 15px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stateHeaderMain .support {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 16px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .stateHeaderMeta {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-  text-align: right;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 6px;
+  text-align: left;
 }
 
 .stateHeaderMeta strong {
@@ -1342,11 +1330,69 @@
 .openingListCard,
 .deckCard {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
   max-height: calc(100svh - 250px);
+}
+
+.trainBackRow {
+  display: flex;
+  width: 100%;
+  align-items: stretch;
+}
+
+.trainingDeckCard {
+  max-height: none;
+  border-radius: 10px;
+}
+
+.trainingDeckCard.masteryToneF,
+.trainingDeckCard.masteryToneE {
+  border-color: rgba(255, 92, 108, 0.42);
+  background: rgba(130, 38, 54, 0.2);
+}
+
+.trainingDeckCard.masteryToneD,
+.trainingDeckCard.masteryToneC {
+  border-color: rgba(255, 176, 84, 0.36);
+  background: rgba(130, 82, 32, 0.18);
+}
+
+.trainingDeckCard.masteryToneB {
+  border-color: rgba(138, 198, 255, 0.34);
+  background: rgba(42, 82, 126, 0.18);
+}
+
+.trainingDeckCard.masteryToneA,
+.trainingDeckCard.masteryToneS {
+  border-color: rgba(138, 227, 193, 0.38);
+  background: rgba(38, 118, 90, 0.18);
+}
+
+.trainingCardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.trainingCardEco {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+.trainingCardMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-soft);
+  font-size: 12px;
 }
 
 .openingList {
@@ -1792,6 +1838,107 @@
   font-size: 12px;
 }
 
+.lineMasteryGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.lineMasteryCard {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(9, 14, 23, 0.42);
+  padding: 9px 10px;
+  min-width: 0;
+}
+
+.masteryToneF,
+.masteryToneE {
+  border-color: rgba(255, 92, 108, 0.42);
+  background: rgba(130, 38, 54, 0.2);
+}
+
+.masteryToneD,
+.masteryToneC {
+  border-color: rgba(255, 176, 84, 0.36);
+  background: rgba(130, 82, 32, 0.18);
+}
+
+.masteryToneB {
+  border-color: rgba(138, 198, 255, 0.34);
+  background: rgba(42, 82, 126, 0.18);
+}
+
+.masteryToneA,
+.masteryToneS {
+  border-color: rgba(138, 227, 193, 0.38);
+  background: rgba(38, 118, 90, 0.18);
+}
+
+.lineMasteryHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.lineMasteryHead strong {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.lineMasteryName {
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineMasteryMeta {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.masteryGradeBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.masteryGradeF,
+.masteryGradeE {
+  background: #d94b62;
+  color: #fff7f8;
+}
+
+.masteryGradeD,
+.masteryGradeC {
+  background: #d98a35;
+  color: #fff7ec;
+}
+
+.masteryGradeB {
+  background: #4e93d8;
+  color: #f5fbff;
+}
+
+.masteryGradeA,
+.masteryGradeS {
+  background: #35a979;
+  color: #f4fff9;
+}
+
 .trainSessionSummary span:last-child {
   color: var(--text-muted);
   text-transform: uppercase;
@@ -2170,14 +2317,17 @@
   }
 
   .stateHeaderCard {
-    grid-template-columns: 1fr;
     min-height: 0;
   }
 
-  .stateHeaderMain,
   .stateHeaderMeta {
     align-items: flex-start;
+    justify-content: flex-start;
     text-align: left;
+  }
+
+  .stateHeaderTitle {
+    font-size: 15px;
   }
 
   .deckStats {

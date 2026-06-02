@@ -457,7 +457,7 @@ async function fetchDeckCounts(supabase: ReturnType<typeof createAdminClient>, d
 async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClient>, profileId: string) {
   const { data } = await supabase
     .from('training_card_progress')
-    .select('card_id,seen_count,ignored,due_at,interval_days,learning_step')
+    .select('card_id,seen_count,ignored,due_at,interval_days,learning_step,mastery_score,last_response_ms')
     .eq('profile_id', profileId);
   const result = new Map<string, ProgressRow>();
 
@@ -468,6 +468,8 @@ async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClie
       dueAt: row.due_at ? String(row.due_at) : null,
       intervalDays: Number(row.interval_days ?? 0),
       learningStep: Number(row.learning_step ?? 0),
+      masteryScore: Number(row.mastery_score ?? 0),
+      lastResponseMs: row.last_response_ms == null ? null : Number(row.last_response_ms),
     });
   }
 
@@ -531,6 +533,8 @@ function toDeckProgressEntry(progress: ProgressRow | undefined): DeckProgressEnt
     learningStep: progress?.learningStep ?? 0,
     ease: 2.5,
     intervalDays: progress?.intervalDays ?? 0,
+    masteryScore: progress?.masteryScore ?? 0,
+    lastResponseMs: progress?.lastResponseMs ?? null,
     ignored: Boolean(progress?.ignored),
     lastOutcome: null,
     dueAt: progress?.dueAt ?? null,
@@ -649,6 +653,8 @@ type ProgressRow = {
   dueAt: string | null;
   intervalDays: number;
   learningStep: number;
+  masteryScore: number;
+  lastResponseMs: number | null;
 };
 
 type TrainingProfileCookie = {
