@@ -40,6 +40,9 @@ create table if not exists public.deck_cards (
   opponent_move_uci text,
   opponent_move_san text,
   score_swing_cp integer,
+  replay_from_start boolean not null default false,
+  initial_fen text,
+  setup_moves text[] not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

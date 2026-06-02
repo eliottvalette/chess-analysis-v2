@@ -182,6 +182,23 @@ export async function analyzeGamePositions(
   return requestJson<{ analyses: AnalysisResult[] }>('/api/analyze-game', payload, signal);
 }
 
+export function buildStoredMovesFromSanList(initialFen: string | null, sanMoves: string[]) {
+  const chess = initialFen ? new Chess(initialFen) : new Chess();
+  const stored: StoredMove[] = [];
+
+  for (const san of sanMoves) {
+    const move = chess.move(san);
+
+    if (!move) {
+      throw new Error(`Invalid setup move: ${san}`);
+    }
+
+    stored.push(toStoredMove(move));
+  }
+
+  return stored;
+}
+
 export function toStoredMove(move: {
   from: string;
   to: string;

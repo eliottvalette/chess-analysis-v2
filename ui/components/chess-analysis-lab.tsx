@@ -37,6 +37,7 @@ import {
 } from '@/lib/chess-analysis-client';
 import { CHESS_SOUND_URLS, getMoveSoundSequence, getPrimaryMoveSound, type ChessSoundKey } from '@/lib/chess-sounds';
 import {
+  buildDeckCardStartState,
   buildPendingDeckFeedback,
   finalizeDeckFeedback,
   type DeckCard,
@@ -78,6 +79,8 @@ const TRAINING_USERNAME_STORAGE_KEY = 'chess-lab-training-username-v1';
 const TRAINING_PASSWORD_STORAGE_KEY = 'chess-lab-training-password-v1';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
 const LAST_TRAINING_DECK_STORAGE_KEY = 'chess-lab-last-training-deck-v1';
+const REVIEW_SAVE_REPLAY_STORAGE_KEY = 'chess-lab-save-game-replay-v1';
+const TRAINING_REPLAY_MOVE_MS = 200;
 const RECENT_GAMES_PAGE_SIZE = 10;
 
 function getReviewMoveStyle(category: ReviewCategory | null | undefined): CSSProperties {
@@ -118,6 +121,9 @@ function mapTrainingDeckCard(card: TrainingDeckCardRow): DeckCard {
     opponentMoveUci: card.opponent_move_uci ? String(card.opponent_move_uci) : undefined,
     opponentMoveSan: card.opponent_move_san ? String(card.opponent_move_san) : undefined,
     scoreSwingCp: typeof card.score_swing_cp === 'number' ? card.score_swing_cp : undefined,
+    replayFromStart: Boolean(card.replay_from_start),
+    initialFen: card.initial_fen ? String(card.initial_fen) : null,
+    setupMoves: Array.isArray(card.setup_moves) ? card.setup_moves.map(move => String(move)) : [],
   };
 }
 
@@ -152,8 +158,11 @@ type TrainingDeckCardRow = {
   reference_eval_cp?: number | null;
   max_eval_loss_cp?: number | null;
   opponent_move_uci?: string | null;
-  opponent_move_san?: string | null;
-  score_swing_cp?: number | null;
+    opponent_move_san?: string | null;
+    score_swing_cp?: number | null;
+    replay_from_start?: boolean | null;
+    initial_fen?: string | null;
+    setup_moves?: string[] | null;
 };
 
 type TrainSessionStats = {
@@ -245,6 +254,8 @@ export function ChessAnalysisLab() {
   const [trainingPassword, setTrainingPassword] = useState('');
   const trainingCredentialsHydratedRef = useRef(false);
   const [focusTrainCreateDeck, setFocusTrainCreateDeck] = useState(false);
+  const [saveReplayFromStart, setSaveReplayFromStart] = useState(true);
+  const [deckPlaybackBusy, setDeckPlaybackBusy] = useState(false);
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
   const evalRailRef = useRef<HTMLDivElement | null>(null);
@@ -252,6 +263,9 @@ export function ChessAnalysisLab() {
   const timelineRequestIdRef = useRef(0);
   const timelineRefineRequestIdRef = useRef(0);
   const reviewPlaybackRequestIdRef = useRef(0);
+  const deckPlaybackRequestIdRef = useRef(0);
+  const deckReplayMovesRef = useRef<StoredMove[]>([]);
+  const deckReplayInitialFenRef = useRef<string | null>(null);
   const suppressSpaceKeyUpRef = useRef(false);
   const deckProgressRef = useRef(deckProgress);
   const deckFeedbackRef = useRef(deckFeedback);
@@ -628,6 +642,26 @@ export function ChessAnalysisLab() {
     }
   }, []);
 
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const stored = window.localStorage.getItem(REVIEW_SAVE_REPLAY_STORAGE_KEY);
+
+    if (stored === '0') {
+      setSaveReplayFromStart(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(REVIEW_SAVE_REPLAY_STORAGE_KEY, saveReplayFromStart ? '1' : '0');
+  }, [saveReplayFromStart]);
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -791,7 +825,7 @@ export function ChessAnalysisLab() {
 
   const beginDeckCardSession = useCallback((card: DeckCard, lines: OpeningSeedLine[]) => {
     persistReviewWorkspaceSnapshot();
-    const deckState = buildDeckCardState(card, lines);
+    const deckState = buildDeckCardStartState(card, lines);
 
     setInitialFen(deckState.initialFen);
     setMoveHistory(deckState.moveHistory);
@@ -812,8 +846,74 @@ export function ChessAnalysisLab() {
     setTimelineAnalyses([]);
     setTimelineError('');
     clearSelection();
+    deckReplayMovesRef.current = deckState.moveHistory;
+    deckReplayInitialFenRef.current = deckState.initialFen;
+
+    if (deckState.replayTargetIndex > 0) {
+      playSound('game-start');
+      return deckState.replayTargetIndex;
+    }
+
     playSound('game-start');
+    return 0;
   }, [playSound]);
+
+  const playDeckReplayToIndex = useCallback(async (targetIndex: number, trainSide: DeckCard['side']) => {
+    const requestId = ++deckPlaybackRequestIdRef.current;
+    const moves = deckReplayMovesRef.current;
+    const startFen = deckReplayInitialFenRef.current;
+    const boundedTarget = Math.max(0, Math.min(targetIndex, moves.length));
+
+    if (boundedTarget === 0) {
+      return;
+    }
+
+    setDeckPlaybackBusy(true);
+
+    for (let nextIndex = 1; nextIndex <= boundedTarget; nextIndex += 1) {
+      if (deckPlaybackRequestIdRef.current !== requestId) {
+        setDeckPlaybackBusy(false);
+        return;
+      }
+
+      const nextGame = restoreGameFromHistory(moves, startFen, nextIndex);
+      const replayedMove = moves[nextIndex - 1];
+
+      if (replayedMove) {
+        const isSelfMove =
+          (trainSide === 'white' && replayedMove.color === 'w') || (trainSide === 'black' && replayedMove.color === 'b');
+
+        playSoundSequence(
+          getMoveSoundSequence({
+            move: replayedMove,
+            isSelfMove,
+            isCheck: nextGame.isCheck(),
+            isCheckmate: nextGame.isCheckmate(),
+            isGameOver: nextGame.isGameOver(),
+          }),
+        );
+      }
+
+      setHistoryIndex(nextIndex);
+      clearVariation();
+      setGame(nextGame);
+      clearSelection();
+      await delay(TRAINING_REPLAY_MOVE_MS);
+    }
+
+    if (deckPlaybackRequestIdRef.current === requestId) {
+      setDeckPlaybackBusy(false);
+    }
+  }, [clearSelection, playSoundSequence]);
+
+  const startDeckCardWithReplay = useCallback(async (card: DeckCard, lines: OpeningSeedLine[]) => {
+    deckPlaybackRequestIdRef.current += 1;
+    const replayTargetIndex = beginDeckCardSession(card, lines);
+
+    if (replayTargetIndex > 0) {
+      await playDeckReplayToIndex(replayTargetIndex, card.side);
+    }
+  }, [beginDeckCardSession, playDeckReplayToIndex]);
 
   const loadTrainingDeck = useCallback(async (deckId = selectedDeckId, options?: { autoStart?: boolean; allDecks?: boolean }) => {
     setDeckLoading(true);
@@ -850,7 +950,7 @@ export function ChessAnalysisLab() {
 
         if (options.autoStart && mixedCards.length > 0) {
           setTrainAllSession(true);
-          beginDeckCardSession(mixedCards[0], lines);
+          await startDeckCardWithReplay(mixedCards[0], lines);
         }
 
         return;
@@ -875,7 +975,7 @@ export function ChessAnalysisLab() {
         const nextCard = getDeckStudyQueue(cards, deckProgressRef.current)[0] ?? null;
 
         if (nextCard) {
-          beginDeckCardSession(nextCard, lines);
+          await startDeckCardWithReplay(nextCard, lines);
         }
       }
     } catch (error) {
@@ -886,7 +986,7 @@ export function ChessAnalysisLab() {
     } finally {
       setDeckLoading(false);
     }
-  }, [beginDeckCardSession, selectedDeckId]);
+  }, [selectedDeckId, startDeckCardWithReplay]);
 
   useEffect(() => {
     deckProgressRef.current = deckProgress;
@@ -1093,6 +1193,10 @@ export function ChessAnalysisLab() {
 
   const commitMove = useCallback(
     (nextGame: Chess, move: StoredMove) => {
+      if (deckPlaybackBusy) {
+        return;
+      }
+
       if (hasLoadedGame && !activeDeckCard) {
         const baseIndex = variationBaseIndex ?? historyIndex;
         const nextVariationMoves = [...variationMoves, move];
@@ -1149,11 +1253,15 @@ export function ChessAnalysisLab() {
         void saveTrainingAttempt(activeDeckCard, gradedFeedback);
       }
     },
-    [activeDeckCard, deckFeedback, hasLoadedGame, historyIndex, moveHistory, playSoundSequence, saveTrainingAttempt, trainAllSession, variationBaseIndex, variationMoves],
+    [activeDeckCard, deckFeedback, deckPlaybackBusy, hasLoadedGame, historyIndex, moveHistory, playSoundSequence, saveTrainingAttempt, trainAllSession, variationBaseIndex, variationMoves],
   );
 
   const tryMove = useCallback(
     (from: string, to: string, promotion = 'q') => {
+      if (deckPlaybackBusy) {
+        return false;
+      }
+
       const nextGame = new Chess(currentFen);
       const move = (() => {
         try {
@@ -1171,7 +1279,7 @@ export function ChessAnalysisLab() {
       commitMove(nextGame, toStoredMove(move));
       return true;
     },
-    [commitMove, currentFen, playSound],
+    [commitMove, currentFen, deckPlaybackBusy, playSound],
   );
 
   function jumpToIndex(index: number) {
@@ -1184,13 +1292,13 @@ export function ChessAnalysisLab() {
     clearSelection();
   }
 
-  const loadDeckCard = useCallback((card: DeckCard | null) => {
+  const loadDeckCard = useCallback(async (card: DeckCard | null) => {
     if (!card) {
       return;
     }
 
-    beginDeckCardSession(card, openingLines);
-  }, [beginDeckCardSession, openingLines]);
+    await startDeckCardWithReplay(card, openingLines);
+  }, [openingLines, startDeckCardWithReplay]);
 
   const finishDeckTrainingSession = useCallback(() => {
     const wasTrainAllSession = trainAllSession;
@@ -1226,6 +1334,22 @@ export function ChessAnalysisLab() {
     }
   }, [loadTrainingDeck, selectedDeckId, trainAllSession]);
 
+  const selectTrainingDeck = useCallback(async (deckId: string) => {
+    setTrainAllSession(false);
+    setTrainAllQueue([]);
+    setSelectedDeckId(deckId);
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LAST_TRAINING_DECK_STORAGE_KEY, deckId);
+    }
+
+    if (deckId === selectedDeckId && deckCards.length > 0 && !deckLoading) {
+      return;
+    }
+
+    await loadTrainingDeck(deckId, { autoStart: false });
+  }, [deckCards.length, deckLoading, loadTrainingDeck, selectedDeckId]);
+
   const trainDeckFromLibrary = useCallback(async (deckId: string) => {
     setTrainAllSession(false);
     setTrainAllQueue([]);
@@ -1244,14 +1368,14 @@ export function ChessAnalysisLab() {
 
       if (nextCard) {
         setDeckIndex(0);
-        beginDeckCardSession(nextCard, openingLines);
+        await startDeckCardWithReplay(nextCard, openingLines);
       }
 
       return;
     }
 
     await loadTrainingDeck(deckId, { autoStart: true });
-  }, [beginDeckCardSession, deckCards, deckLoading, deckProgress, loadTrainingDeck, openingLines, selectedDeckId]);
+  }, [deckCards, deckLoading, deckProgress, loadTrainingDeck, openingLines, selectedDeckId, startDeckCardWithReplay]);
 
   const trainAllDecks = useCallback(async () => {
     setTrainAllSession(true);
@@ -1269,6 +1393,8 @@ export function ChessAnalysisLab() {
   }
 
   const advanceDeckCard = useCallback(() => {
+    deckPlaybackRequestIdRef.current += 1;
+    setDeckPlaybackBusy(false);
     const feedback = deckFeedbackRef.current;
 
     if (feedback && !feedback.pending) {
@@ -1405,6 +1531,10 @@ export function ChessAnalysisLab() {
         suppressSpaceKeyUpRef.current = true;
 
         if (mode === 'train' && activeDeckCard) {
+          if (deckPlaybackBusy) {
+            return;
+          }
+
           if (activeDeckCard && deckFeedback && !deckFeedback.pending) {
             advanceDeckCard();
           }
@@ -1918,6 +2048,9 @@ export function ChessAnalysisLab() {
         throw new Error('Choose a deck and wait for analysis before saving.');
       }
 
+      const setupMoves = saveReplayFromStart ? currentMoves.map(move => move.san) : [];
+      const replayFromStart = saveReplayFromStart && setupMoves.length > 0;
+
       const response = await fetch('/api/training-deck', {
         method: 'POST',
         credentials: 'same-origin',
@@ -1936,6 +2069,9 @@ export function ChessAnalysisLab() {
             prompt: `${side === 'white' ? 'White' : 'Black'} to move: find the best response.`,
             context: currentMoves.length > 0 ? currentMoves.map(move => move.san).join(' ') : 'Starting position',
             referenceEvalCp,
+            replayFromStart,
+            initialFen: replayFromStart ? initialFen : null,
+            setupMoves,
           },
         }),
       });
@@ -2208,7 +2344,15 @@ export function ChessAnalysisLab() {
                 }
                 positionLoading={positionLoading}
                 reviewMoments={reviewMoments}
-                canSaveReviewCard={Boolean(trainingProfile && selectedDeck?.isOwned && positionAnalysis?.bestMove && !positionLoading)}
+                canSaveReviewCard={Boolean(
+                  trainingProfile &&
+                  selectedDeck?.isOwned &&
+                  positionAnalysis?.bestMove &&
+                  !positionLoading &&
+                  (!saveReplayFromStart || currentMoves.length > 0),
+                )}
+                saveReplayFromStart={saveReplayFromStart}
+                onSaveReplayFromStartChange={setSaveReplayFromStart}
                 onSaveReviewCard={() => void saveReviewPositionToDeck()}
                 onGoCreateDeck={openTrainCreateDeck}
                 onSelectSaveDeck={selectSaveDeck}
@@ -2243,6 +2387,7 @@ export function ChessAnalysisLab() {
                 deckLoading={deckLoading}
                 deckSummaries={deckSummaries}
                 deckFeedback={deckFeedback}
+                deckPlaybackBusy={deckPlaybackBusy}
                 deckStats={deckStats}
                 trainAllSession={trainAllSession}
                 trainSessionCardCurrent={trainSessionCardCurrent}
@@ -2292,11 +2437,13 @@ export function ChessAnalysisLab() {
                 onNext={advanceDeckCard}
                 onNewDeckTitleChange={setNewDeckTitle}
                 onTrainDeck={deckId => void trainDeckFromLibrary(deckId)}
+                onSelectDeck={deckId => void selectTrainingDeck(deckId)}
                 onTrainAll={() => void trainAllDecks()}
                 onRenameDeck={(deckId, name) => void renameTrainingDeck(deckId, name)}
                 onDeleteDeck={deckId => void deleteTrainingDeck(deckId)}
                 focusCreateDeck={focusTrainCreateDeck}
                 onCreateDeckFocusHandled={handleCreateDeckFocusHandled}
+                selectedDeckId={selectedDeckId}
               />
             )}
           </div>
@@ -2403,53 +2550,6 @@ function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckP
   return merged;
 }
 
-function buildDeckCardState(card: DeckCard, openingLines: OpeningSeedLine[]) {
-  const line = openingLines.find(candidate => candidate.id === card.lineId);
-
-  if (!line || !card.opponentMoveUci) {
-    return {
-      initialFen: card.fen,
-      moveHistory: [] as StoredMove[],
-      historyIndex: 0,
-      game: new Chess(card.fen),
-    };
-  }
-
-  try {
-    const baseGame = new Chess();
-
-    for (const san of line.moves.slice(0, Math.max(0, card.ply - 1))) {
-      baseGame.move(san);
-    }
-
-    const initialFen = baseGame.fen();
-    const replayGame = new Chess(initialFen);
-    const move = replayGame.move({
-      from: card.opponentMoveUci.slice(0, 2),
-      to: card.opponentMoveUci.slice(2, 4),
-      ...(card.opponentMoveUci[4] ? { promotion: card.opponentMoveUci[4] } : {}),
-    });
-
-    if (!move) {
-      throw new Error('Invalid opponent move');
-    }
-
-    return {
-      initialFen,
-      moveHistory: [toStoredMove(move)],
-      historyIndex: 1,
-      game: replayGame,
-    };
-  } catch {
-    return {
-      initialFen: card.fen,
-      moveHistory: [] as StoredMove[],
-      historyIndex: 0,
-      game: new Chess(card.fen),
-    };
-  }
-}
-
 function dedupeBoardArrows(arrows: Array<{ startSquare: string; endSquare: string; color: string }>) {
   const unique = new Map<string, { startSquare: string; endSquare: string; color: string }>();
 
@@ -2471,7 +2571,10 @@ function normalizeDeckLoadError(message: string) {
     message.includes('deck_cards.source_type') ||
     message.includes('deck_cards.validation_mode') ||
     message.includes('deck_cards.reference_eval_cp') ||
-    message.includes('deck_cards.max_eval_loss_cp')
+    message.includes('deck_cards.max_eval_loss_cp') ||
+    message.includes('deck_cards.replay_from_start') ||
+    message.includes('deck_cards.initial_fen') ||
+    message.includes('deck_cards.setup_moves')
   ) {
     return 'Supabase deck schema is outdated. Recreate the canonical deck tables and reseed.';
   }

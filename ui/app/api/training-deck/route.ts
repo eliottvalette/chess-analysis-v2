@@ -11,7 +11,7 @@ import { createAdminClient } from '@/utils/supabase/admin';
 
 const execFileAsync = promisify(execFile);
 const DECK_CARD_SELECT =
-  'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp';
+  'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp,replay_from_start,initial_fen,setup_moves';
 const DECK_SELECT = 'id,name,description,version,is_active,owner_profile_id,created_at,updated_at';
 
 export async function GET(request: Request) {
@@ -257,6 +257,9 @@ async function addReviewCard(profile: TrainingProfileCookie, body: Record<string
       opponent_move_uci: null,
       opponent_move_san: null,
       score_swing_cp: null,
+      replay_from_start: card.replayFromStart,
+      initial_fen: card.initialFen,
+      setup_moves: card.setupMoves,
     },
     { onConflict: 'id' },
   );
@@ -548,6 +551,13 @@ function sanitizeReviewCard(value: unknown) {
     return null;
   }
 
+  const replayFromStart = card.replayFromStart === true;
+  const setupMoves = sanitizeSetupMoves(card.setupMoves);
+
+  if (replayFromStart && setupMoves.length === 0) {
+    return null;
+  }
+
   return {
     lineName: clampText(String(card.lineName ?? 'Review position'), 120) || 'Review position',
     eco: clampText(String(card.eco ?? 'GAME'), 12) || 'GAME',
@@ -559,7 +569,21 @@ function sanitizeReviewCard(value: unknown) {
     prompt: clampText(String(card.prompt ?? ''), 180) || `${side === 'white' ? 'White' : 'Black'} to move: find the best response.`,
     context: clampText(String(card.context ?? 'Review position'), 500) || 'Review position',
     referenceEvalCp: Number.isFinite(Number(card.referenceEvalCp)) ? Math.trunc(Number(card.referenceEvalCp)) : null,
+    replayFromStart,
+    initialFen: typeof card.initialFen === 'string' && card.initialFen.trim() ? clampText(card.initialFen, 120) : null,
+    setupMoves,
   };
+}
+
+function sanitizeSetupMoves(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(move => clampText(String(move ?? ''), 12))
+    .filter(move => move.length > 0)
+    .slice(0, 500);
 }
 
 async function getTrainingProfileFromCookie(): Promise<TrainingProfileCookie | null> {

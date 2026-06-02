@@ -1,6 +1,7 @@
 import { Chess } from 'chess.js';
 
 import type { AnalysisLine, AnalysisResult, PerspectiveScore } from '@/lib/analysis-types';
+import { buildStoredMovesFromSanList, restoreGameFromHistory, toStoredMove, type StoredMove } from '@/lib/chess-analysis-client';
 
 export type TrainingSide = 'white' | 'black';
 export type DeckCardKind = 'punish_mistake' | 'repertoire_choice';
@@ -62,6 +63,9 @@ export type GeneratedDeckCard = {
   opponentMoveUci?: string;
   opponentMoveSan?: string;
   scoreSwingCp?: number;
+  replayFromStart: boolean;
+  initialFen: string | null;
+  setupMoves: string[];
 };
 
 export type DeckCard = GeneratedDeckCard;
@@ -124,6 +128,9 @@ export function buildDeckCards(lines: OpeningSeedLine[]) {
           validationMode: 'strict_best',
           referenceEvalCp: undefined,
           maxEvalLossCp: 0,
+          replayFromStart: false,
+          initialFen: null,
+          setupMoves: [],
         });
       }
 
@@ -234,6 +241,9 @@ export function buildPunishCardsFromAnalysis(
       opponentMoveUci: line.bestMove,
       opponentMoveSan: replyMove.san,
       scoreSwingCp,
+      replayFromStart: false,
+      initialFen: null,
+      setupMoves: [],
     });
   }
 
@@ -327,4 +337,68 @@ function getMoveFromFen(fen: string, moveUci: string) {
   } catch {
     return null;
   }
+}
+
+export type DeckCardStartState = {
+  initialFen: string | null;
+  moveHistory: StoredMove[];
+  historyIndex: number;
+  game: Chess;
+  replayTargetIndex: number;
+};
+
+export function buildDeckCardStartState(card: DeckCard, openingLines: OpeningSeedLine[]): DeckCardStartState {
+  if (card.replayFromStart && card.setupMoves.length > 0) {
+    const moveHistory = buildStoredMovesFromSanList(card.initialFen, card.setupMoves);
+
+    return {
+      initialFen: card.initialFen,
+      moveHistory,
+      historyIndex: 0,
+      game: restoreGameFromHistory(moveHistory, card.initialFen, 0),
+      replayTargetIndex: moveHistory.length,
+    };
+  }
+
+  const line = openingLines.find(candidate => candidate.id === card.lineId);
+
+  if (line && card.opponentMoveUci) {
+    try {
+      const baseGame = new Chess();
+
+      for (const san of line.moves.slice(0, Math.max(0, card.ply - 1))) {
+        baseGame.move(san);
+      }
+
+      const lineInitialFen = baseGame.fen();
+      const replayGame = new Chess(lineInitialFen);
+      const move = replayGame.move({
+        from: card.opponentMoveUci.slice(0, 2),
+        to: card.opponentMoveUci.slice(2, 4),
+        ...(card.opponentMoveUci[4] ? { promotion: card.opponentMoveUci[4] } : {}),
+      });
+
+      if (!move) {
+        throw new Error('Invalid opponent move');
+      }
+
+      return {
+        initialFen: lineInitialFen,
+        moveHistory: [toStoredMove(move)],
+        historyIndex: 1,
+        game: replayGame,
+        replayTargetIndex: 0,
+      };
+    } catch {
+      // fall through to fen spawn
+    }
+  }
+
+  return {
+    initialFen: card.fen,
+    moveHistory: [],
+    historyIndex: 0,
+    game: new Chess(card.fen),
+    replayTargetIndex: 0,
+  };
 }
