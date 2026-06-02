@@ -248,7 +248,8 @@ export function ChessAnalysisLab() {
   const [recentChessGamesNextOffset, setRecentChessGamesNextOffset] = useState(0);
   const [recentChessGamesError, setRecentChessGamesError] = useState('');
   const [trainingProfile, setTrainingProfile] = useState<TrainingProfile | null>(null);
-  const [trainingProfileLoading, setTrainingProfileLoading] = useState(true);
+  const [trainingProfileBootstrapping, setTrainingProfileBootstrapping] = useState(true);
+  const [trainingProfileSubmitting, setTrainingProfileSubmitting] = useState(false);
   const [trainingProfileError, setTrainingProfileError] = useState('');
   const [trainingUsername, setTrainingUsername] = useState('');
   const [trainingPassword, setTrainingPassword] = useState('');
@@ -580,6 +581,8 @@ export function ChessAnalysisLab() {
     }
   }, []);
 
+  const hydrateTrainingProgressRef = useRef<(options: { saveMerged: boolean }) => Promise<void>>(async () => undefined);
+
   const hydrateTrainingProgress = useCallback(
     async (options: { saveMerged: boolean }) => {
       try {
@@ -616,6 +619,10 @@ export function ChessAnalysisLab() {
     },
     [deckCards, saveTrainingProgress],
   );
+
+  useEffect(() => {
+    hydrateTrainingProgressRef.current = hydrateTrainingProgress;
+  }, [hydrateTrainingProgress]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -722,7 +729,6 @@ export function ChessAnalysisLab() {
     }
 
     async function loadTrainingProfile() {
-      setTrainingProfileLoading(true);
       setTrainingProfileError('');
 
       const savedUsername = readStoredTrainingUsername();
@@ -747,7 +753,7 @@ export function ChessAnalysisLab() {
         if (payload.profile) {
           setTrainingProfile(payload.profile);
           setTrainingUsername(payload.profile.username);
-          await hydrateTrainingProgress({ saveMerged: false });
+          await hydrateTrainingProgressRef.current({ saveMerged: false });
           return;
         }
 
@@ -760,7 +766,7 @@ export function ChessAnalysisLab() {
 
           setTrainingProfile(profile);
           setTrainingUsername(profile.username);
-          await hydrateTrainingProgress({ saveMerged: false });
+          await hydrateTrainingProgressRef.current({ saveMerged: false });
           return;
         }
 
@@ -774,7 +780,7 @@ export function ChessAnalysisLab() {
         progressHydratedRef.current = true;
 
         if (!cancelled) {
-          setTrainingProfileLoading(false);
+          setTrainingProfileBootstrapping(false);
         }
       }
     }
@@ -784,7 +790,7 @@ export function ChessAnalysisLab() {
     return () => {
       cancelled = true;
     };
-  }, [hydrateTrainingProgress]);
+  }, []);
 
   useEffect(() => {
     if (!trainingProfile || !progressHydratedRef.current) {
@@ -1890,7 +1896,7 @@ export function ChessAnalysisLab() {
   }
 
   async function openTrainingProfile() {
-    setTrainingProfileLoading(true);
+    setTrainingProfileSubmitting(true);
     setTrainingProfileError('');
 
     try {
@@ -1915,7 +1921,7 @@ export function ChessAnalysisLab() {
     } catch (error) {
       setTrainingProfileError(error instanceof Error ? error.message : 'Unable to open training profile.');
     } finally {
-      setTrainingProfileLoading(false);
+      setTrainingProfileSubmitting(false);
     }
   }
 
@@ -2380,8 +2386,9 @@ export function ChessAnalysisLab() {
               />
             ) : !trainingProfile ? (
               <TrainingProfilePanel
+                bootstrapping={trainingProfileBootstrapping}
                 error={trainingProfileError}
-                loading={trainingProfileLoading}
+                submitting={trainingProfileSubmitting}
                 password={trainingPassword}
                 setPassword={setTrainingPassword}
                 setUsername={setTrainingUsername}

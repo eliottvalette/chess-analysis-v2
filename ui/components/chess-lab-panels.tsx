@@ -335,27 +335,32 @@ export function TrainPanel({
 }
 
 export function TrainingProfilePanel({
+  bootstrapping,
   error,
-  loading,
+  submitting,
   password,
   setPassword,
   setUsername,
   username,
   onSubmit,
 }: {
+  bootstrapping: boolean;
   error: string;
-  loading: boolean;
+  submitting: boolean;
   password: string;
   setPassword: (value: string) => void;
   setUsername: (value: string) => void;
   username: string;
   onSubmit: () => void;
 }) {
+  const profileBusy = bootstrapping || submitting;
+  const statusText = bootstrapping ? 'syncing' : submitting ? 'signing in' : 'required';
+
   return (
     <section className={`${styles.card} ${styles.emptyStateCard}`}>
       <div className={styles.panelHeader}>
         <h2 className={styles.sectionTitle}>Training Profile</h2>
-        <span className={styles.statusText}>{loading ? 'syncing' : 'required'}</span>
+        <span className={styles.statusText}>{statusText}</span>
       </div>
       <form
         className={styles.profileForm}
@@ -370,6 +375,7 @@ export function TrainingProfilePanel({
           onChange={event => setUsername(event.target.value)}
           autoComplete="username"
           autoCorrect="off"
+          disabled={profileBusy}
           name="training_profile_username"
           placeholder="username"
           spellCheck={false}
@@ -379,12 +385,13 @@ export function TrainingProfilePanel({
           value={password}
           onChange={event => setPassword(event.target.value)}
           autoComplete="current-password"
+          disabled={profileBusy}
           name="training_profile_password"
           placeholder="password"
           type="password"
         />
-        <button className={`${styles.action} ${styles.primary} ${styles.profileFormWide}`} disabled={loading || username.trim().length < 3 || password.length < 4} type="submit">
-          {loading ? 'Opening profile' : 'Open profile'}
+        <button className={`${styles.action} ${styles.primary} ${styles.profileFormWide}`} disabled={profileBusy || username.trim().length < 3 || password.length < 4} type="submit">
+          {submitting ? 'Opening profile' : 'Open profile'}
         </button>
       </form>
       {error ? <p className={styles.error}>{error}</p> : null}
