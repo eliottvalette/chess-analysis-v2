@@ -52,10 +52,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'No training profile.' }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => ({}))) as { progress?: unknown; attempt?: unknown };
-  const progress = sanitizeProgress(body.progress);
-  const attempt = sanitizeAttempt(body.attempt);
-  const rows = Object.entries(progress).map(([cardId, entry]) => ({
+  try {
+    const body = (await request.json().catch(() => ({}))) as { progress?: unknown; attempt?: unknown };
+    const progress = sanitizeProgress(body.progress);
+    const attempt = sanitizeAttempt(body.attempt);
+    const supabase = createAdminClient();
+    const progressCardIds = Object.keys(progress);
+    const validProgressCardIds = await fetchExistingCardIds(supabase, progressCardIds);
+  const rows = Object.entries(progress).flatMap(([cardId, entry]) => {
+    if (!validProgressCardIds.has(cardId)) {
+      return [];
+    }
+
+    return [{
     profile_id: profile.id,
     card_id: cardId,
     seen_count: entry.seenCount,
@@ -71,9 +80,9 @@ export async function POST(request: Request) {
     last_outcome: entry.lastOutcome,
     due_at: entry.dueAt ?? new Date(0).toISOString(),
     last_seen_at: entry.lastSeenAt,
-  }));
+    }];
+  });
 
-  const supabase = createAdminClient();
   let saved = 0;
 
   if (rows.length > 0) {
@@ -87,6 +96,12 @@ export async function POST(request: Request) {
   }
 
   if (attempt) {
+    const attemptCardIds = await fetchExistingCardIds(supabase, [attempt.cardId]);
+
+    if (!attemptCardIds.has(attempt.cardId)) {
+      return NextResponse.json({ saved, attemptSaved: false });
+    }
+
     const { error } = await supabase.from('training_card_attempts').insert({
       profile_id: profile.id,
       card_id: attempt.cardId,
@@ -105,6 +120,10 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ saved, attemptSaved: Boolean(attempt) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to save training progress.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 function sanitizeProgress(value: unknown): DeckProgressMap {
@@ -138,6 +157,26 @@ function sanitizeProgress(value: unknown): DeckProgressMap {
   }
 
   return progress;
+}
+
+async function fetchExistingCardIds(supabase: ReturnType<typeof createAdminClient>, cardIds: string[]) {
+  const validCardIds = new Set<string>();
+
+  if (cardIds.length === 0) {
+    return validCardIds;
+  }
+
+  const { data, error } = await supabase.from('deck_cards').select('id').in('id', cardIds);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  for (const row of data ?? []) {
+    validCardIds.add(String(row.id));
+  }
+
+  return validCardIds;
 }
 
 function clampCount(value: unknown) {

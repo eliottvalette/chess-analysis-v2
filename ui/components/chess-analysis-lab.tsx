@@ -584,12 +584,24 @@ export function ChessAnalysisLab() {
     async (options: { saveMerged: boolean }) => {
       try {
         const response = await fetch('/api/training-progress', { credentials: 'same-origin' });
-        const payload = (await response.json()) as { progress?: DeckProgressMap };
+        const payload = (await response.json()) as { progress?: DeckProgressMap; error?: string };
         const serverProgress = response.ok && payload.progress ? payload.progress : {};
+
+        if (!response.ok && typeof window !== 'undefined') {
+          window.localStorage.removeItem(DECK_PROGRESS_STORAGE_KEY);
+        }
         let mergedProgress: DeckProgressMap | null = null;
 
         setDeckProgress(current => {
           mergedProgress = mergeDeckProgress(serverProgress, current);
+
+          if (typeof window !== 'undefined' && deckCards.length > 0) {
+            const validCardIds = new Set(deckCards.map(card => card.id));
+            mergedProgress = Object.fromEntries(
+              Object.entries(mergedProgress).filter(([cardId]) => validCardIds.has(cardId)),
+            );
+          }
+
           return mergedProgress;
         });
 
@@ -602,7 +614,7 @@ export function ChessAnalysisLab() {
         progressHydratedRef.current = true;
       }
     },
-    [saveTrainingProgress],
+    [deckCards, saveTrainingProgress],
   );
 
   useEffect(() => {
