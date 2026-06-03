@@ -3,6 +3,7 @@ import type { DeckCard } from '@/lib/opening-training';
 export type DeckAttemptOutcome = 'correct' | 'miss';
 export type DeckCardState = 'new' | 'learning' | 'due' | 'review' | 'mature' | 'ignored';
 export type MasteryGrade = 'F' | 'E' | 'D' | 'C' | 'B' | 'A' | 'S';
+export type DeckAttemptRating = 'fail' | 'hard' | 'good' | 'easy';
 
 export type DeckAttemptQuality = {
   responseMs?: number | null;
@@ -22,6 +23,10 @@ export type DeckProgressEntry = {
   intervalDays: number;
   masteryScore: number;
   lastResponseMs: number | null;
+  lastRating: DeckAttemptRating | null;
+  stability: number;
+  difficulty: number;
+  retrievability: number;
   ignored: boolean;
   lastOutcome: DeckAttemptOutcome | null;
   dueAt: string | null;
@@ -62,6 +67,10 @@ export function buildDefaultDeckProgressEntry(): DeckProgressEntry {
     intervalDays: 0,
     masteryScore: 0,
     lastResponseMs: null,
+    lastRating: null,
+    stability: 0,
+    difficulty: 5,
+    retrievability: 0,
     ignored: false,
     lastOutcome: null,
     dueAt: null,
@@ -88,6 +97,10 @@ export function normalizeDeckProgressEntry(entry: Partial<DeckProgressEntry> | n
     intervalDays: clampProgressNumber(entry.intervalDays, fallback.intervalDays),
     masteryScore: clampMasteryScore(entry.masteryScore, entry),
     lastResponseMs: clampNullableNumber(entry.lastResponseMs),
+    lastRating: normalizeAttemptRating(entry.lastRating),
+    stability: clampMemoryNumber(entry.stability, fallback.stability, 0, 3650),
+    difficulty: clampMemoryNumber(entry.difficulty, fallback.difficulty, 1, 10),
+    retrievability: clampMemoryNumber(entry.retrievability, fallback.retrievability, 0, 1),
     ignored: Boolean(entry.ignored),
     lastOutcome: entry.lastOutcome === 'correct' || entry.lastOutcome === 'miss' ? entry.lastOutcome : null,
     dueAt: typeof entry.dueAt === 'string' ? entry.dueAt : null,
@@ -103,9 +116,11 @@ export function applyDeckAttempt(
   quality: DeckAttemptQuality = {},
 ): DeckProgressMap {
   const current = getDeckProgressEntry(progress, cardId);
-  const performance = scoreAttemptPerformance(correct, quality);
-  const nextMasteryScore = getNextMasteryScore(current, correct, performance, seenAt);
-  const nextSchedule = getNextSchedule(current, correct, seenAt, performance, nextMasteryScore);
+  const rating = getAttemptRating(correct, quality.responseMs);
+  const performance = scoreAttemptPerformance(rating);
+  const memory = getNextMemoryState(current, rating, seenAt);
+  const nextMasteryScore = getNextMasteryScore(current, correct, performance, seenAt, memory);
+  const nextSchedule = getNextSchedule(current, rating, seenAt, performance, nextMasteryScore, memory);
 
   return {
     ...progress,
@@ -122,6 +137,10 @@ export function applyDeckAttempt(
       intervalDays: nextSchedule.intervalDays,
       masteryScore: nextMasteryScore,
       lastResponseMs: clampNullableNumber(quality.responseMs),
+      lastRating: rating,
+      stability: memory.stability,
+      difficulty: memory.difficulty,
+      retrievability: memory.retrievability,
       lastOutcome: correct ? 'correct' : 'miss',
       dueAt: nextSchedule.dueAt,
       lastSeenAt: seenAt,
@@ -227,11 +246,33 @@ export function sortCardsForReview(cards: DeckCard[], progress: DeckProgressMap,
   return [...cards].sort((left, right) => {
     const leftProgress = getDeckProgressEntry(progress, left.id);
     const rightProgress = getDeckProgressEntry(progress, right.id);
-    const leftRank = getReviewRank(leftProgress, now, left);
-    const rightRank = getReviewRank(rightProgress, now, right);
+    const leftRank = getReviewRank(leftProgress, now);
+    const rightRank = getReviewRank(rightProgress, now);
 
     if (leftRank === 0 || rightRank === 0) {
       return leftRank - rightRank;
+    }
+
+    const leftDue = Date.parse(leftProgress.dueAt ?? '');
+    const rightDue = Date.parse(rightProgress.dueAt ?? '');
+    const leftDueValue = Number.isFinite(leftDue) ? leftDue : Number.MIN_SAFE_INTEGER;
+    const rightDueValue = Number.isFinite(rightDue) ? rightDue : Number.MIN_SAFE_INTEGER;
+    const leftIsDue = leftRank <= 2;
+    const rightIsDue = rightRank <= 2;
+
+    if (leftIsDue !== rightIsDue) {
+      return leftIsDue ? -1 : 1;
+    }
+
+    if (leftIsDue && leftDueValue !== rightDueValue) {
+      return leftDueValue - rightDueValue;
+    }
+
+    const leftRetrievability = getCurrentRetrievability(leftProgress, now);
+    const rightRetrievability = getCurrentRetrievability(rightProgress, now);
+
+    if (Math.abs(leftRetrievability - rightRetrievability) > 0.001) {
+      return leftRetrievability - rightRetrievability;
     }
 
     const leftOpening = openingMastery.get(getDeckCardOpeningGroup(left).id);
@@ -254,22 +295,6 @@ export function sortCardsForReview(cards: DeckCard[], progress: DeckProgressMap,
       return leftRank - rightRank;
     }
 
-    const leftEffectiveScore = getEffectiveMasteryScore(leftProgress, now);
-    const rightEffectiveScore = getEffectiveMasteryScore(rightProgress, now);
-
-    if (leftEffectiveScore !== rightEffectiveScore) {
-      return leftEffectiveScore - rightEffectiveScore;
-    }
-
-    const leftDue = Date.parse(leftProgress.dueAt ?? '');
-    const rightDue = Date.parse(rightProgress.dueAt ?? '');
-    const leftDueValue = Number.isFinite(leftDue) ? leftDue : Number.MAX_SAFE_INTEGER;
-    const rightDueValue = Number.isFinite(rightDue) ? rightDue : Number.MAX_SAFE_INTEGER;
-
-    if (leftDueValue !== rightDueValue) {
-      return leftDueValue - rightDueValue;
-    }
-
     return (right.scoreSwingCp ?? 0) - (left.scoreSwingCp ?? 0);
   });
 }
@@ -281,6 +306,11 @@ export function getEffectiveMasteryScore(entry: DeckProgressEntry, nowIsoOrMs: s
 
   if (entry.seenCount === 0 || !Number.isFinite(now) || !Number.isFinite(lastSeen) || now <= lastSeen) {
     return currentScore;
+  }
+
+  if (entry.stability > 0) {
+    const retrievability = getCurrentRetrievability(entry, now);
+    return Math.max(0, Math.min(100, Math.round(currentScore * (0.35 + retrievability * 0.65))));
   }
 
   const elapsedDays = (now - lastSeen) / DAY_MS;
@@ -481,24 +511,23 @@ export function getDeckQueueCounts(cards: DeckCard[], progress: DeckProgressMap,
   };
 }
 
-function getReviewRank(entry: DeckProgressEntry, now: number, card?: DeckCard) {
-  void card;
-
+function getReviewRank(entry: DeckProgressEntry, now: number) {
   if (entry.ignored) {
     return 4;
   }
 
-  if (entry.lastOutcome === 'miss') {
+  if (entry.lastRating === 'fail' || entry.lastOutcome === 'miss') {
     return 0;
   }
 
-  const effectiveScore = getEffectiveMasteryScore(entry, now);
-
-  if (effectiveScore < 34) {
+  if (entry.seenCount === 0) {
     return 1;
   }
 
-  if (effectiveScore < 66) {
+  const due = Date.parse(entry.dueAt ?? '');
+  const isDue = !Number.isFinite(due) || !Number.isFinite(now) || due <= now;
+
+  if (isDue) {
     return 2;
   }
 
@@ -506,7 +535,10 @@ function getReviewRank(entry: DeckProgressEntry, now: number, card?: DeckCard) {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const REVIEW_FLOOR_SCORE = 66;
+const MINUTE_MS = 60 * 1000;
+const FSRS_TARGET_RETENTION = 0.9;
+const FSRS_DECAY = -0.5;
+const FSRS_FACTOR = Math.pow(FSRS_TARGET_RETENTION, 1 / FSRS_DECAY) - 1;
 const MASTERY_GRADE_CEILINGS: Record<MasteryGrade, number> = {
   F: 17,
   E: 33,
@@ -526,25 +558,27 @@ const NEXT_MASTERY_GRADE: Record<MasteryGrade, MasteryGrade> = {
   S: 'S',
 };
 
-function getNextSchedule(entry: DeckProgressEntry, correct: boolean, seenAt: string, performance: number, masteryScore: number) {
+function getNextSchedule(
+  entry: DeckProgressEntry,
+  rating: DeckAttemptRating,
+  seenAt: string,
+  performance: number,
+  masteryScore: number,
+  memory: Pick<DeckProgressEntry, 'stability' | 'difficulty' | 'retrievability'>,
+) {
+  void entry;
+  void performance;
+  void masteryScore;
   const seenTime = Date.parse(seenAt);
   const baseTime = Number.isFinite(seenTime) ? seenTime : Date.now();
-  const easeDelta = correct ? performance * 0.14 - 0.03 : -0.24;
-  const ease = Math.max(1.3, Math.min(3.4, Number((entry.ease + easeDelta).toFixed(2))));
-  const nextEntry = {
-    ...entry,
-    masteryScore,
-    ease,
-    streak: correct ? entry.streak + 1 : 0,
-    lapseCount: entry.lapseCount + (correct ? 0 : 1),
-  };
-  const retentionDays = getRetentionDays(nextEntry);
-  const daysUntilWeak = correct ? Math.max(1, Math.round(((masteryScore - REVIEW_FLOOR_SCORE) / 100) * retentionDays)) : 0;
+  const intervalMs = getNextIntervalMs(memory.stability, rating);
+  const intervalDays = Math.floor(intervalMs / DAY_MS);
+  const ease = Math.max(1.3, Math.min(3.4, Number((3.45 - memory.difficulty * 0.18).toFixed(2))));
 
   return {
-    dueAt: new Date(baseTime + daysUntilWeak * DAY_MS).toISOString(),
+    dueAt: new Date(baseTime + intervalMs).toISOString(),
     ease,
-    intervalDays: daysUntilWeak,
+    intervalDays,
     learningStep: 0,
   };
 }
@@ -562,6 +596,11 @@ function clampNullableNumber(value: unknown) {
   return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : null;
 }
 
+function clampMemoryNumber(value: unknown, fallback: number, min: number, max: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
 function clampMasteryScore(value: unknown, entry: Partial<DeckProgressEntry> | null | undefined) {
   void entry;
   const number = Number(value);
@@ -573,27 +612,107 @@ function clampMasteryScore(value: unknown, entry: Partial<DeckProgressEntry> | n
   return 0;
 }
 
-function scoreAttemptPerformance(correct: boolean, quality: DeckAttemptQuality) {
-  if (!correct) {
-    return 0;
-  }
-
-  const responseMs = Number(quality.responseMs);
-  const speedScore = !Number.isFinite(responseMs)
-    ? 0.68
-    : responseMs <= 3_000
-      ? 1
-      : responseMs <= 5_000
-        ? 1 - ((responseMs - 3_000) / 2_000) * 0.22
-        : 0.78;
-  const exactScore = quality.exact === false ? 0.72 : 1;
-  const evalLoss = Number(quality.evalLossCp);
-  const precisionScore = !Number.isFinite(evalLoss) ? 1 : Math.max(0.45, 1 - Math.max(0, evalLoss) / 180);
-
-  return Math.max(0, Math.min(1, speedScore * 0.55 + exactScore * 0.25 + precisionScore * 0.2));
+function normalizeAttemptRating(value: unknown): DeckAttemptRating | null {
+  return value === 'fail' || value === 'hard' || value === 'good' || value === 'easy' ? value : null;
 }
 
-function getNextMasteryScore(entry: DeckProgressEntry, correct: boolean, performance: number, seenAt: string) {
+export function getAttemptRating(correct: boolean, responseMs?: number | null): DeckAttemptRating {
+  if (!correct) {
+    return 'fail';
+  }
+
+  const elapsed = Number(responseMs);
+
+  if (Number.isFinite(elapsed) && elapsed < 2_000) {
+    return 'easy';
+  }
+
+  if (!Number.isFinite(elapsed) || elapsed < 5_000) {
+    return 'good';
+  }
+
+  return 'hard';
+}
+
+function scoreAttemptPerformance(rating: DeckAttemptRating) {
+  switch (rating) {
+    case 'easy':
+      return 1;
+    case 'good':
+      return 0.72;
+    case 'hard':
+      return 0.42;
+    case 'fail':
+      return 0;
+  }
+}
+
+function getNextMemoryState(entry: DeckProgressEntry, rating: DeckAttemptRating, seenAt: string) {
+  const retrievability = getCurrentRetrievability(entry, seenAt);
+  const previousStability = entry.stability > 0 ? entry.stability : 0;
+  const previousDifficulty = entry.difficulty > 0 ? entry.difficulty : 5;
+
+  if (previousStability === 0) {
+    const initialStability = {
+      fail: 0.02,
+      hard: 0.5,
+      good: 1.5,
+      easy: 4,
+    } satisfies Record<DeckAttemptRating, number>;
+    const initialDifficulty = {
+      fail: 8.2,
+      hard: 7,
+      good: 5.2,
+      easy: 3.6,
+    } satisfies Record<DeckAttemptRating, number>;
+
+    return {
+      stability: initialStability[rating],
+      difficulty: initialDifficulty[rating],
+      retrievability: rating === 'fail' ? 0 : 1,
+    };
+  }
+
+  const difficultyDelta = {
+    fail: 0.85,
+    hard: 0.35,
+    good: -0.12,
+    easy: -0.45,
+  } satisfies Record<DeckAttemptRating, number>;
+  const nextDifficulty = Math.max(1, Math.min(10, previousDifficulty + difficultyDelta[rating]));
+
+  if (rating === 'fail') {
+    return {
+      stability: Math.max(0.02, previousStability * 0.28),
+      difficulty: nextDifficulty,
+      retrievability: 0,
+    };
+  }
+
+  const ratingMultiplier = {
+    hard: 1.15,
+    good: 2.25,
+    easy: 3.6,
+  } satisfies Record<Exclude<DeckAttemptRating, 'fail'>, number>;
+  const difficultyPenalty = Math.max(0.45, 1.12 - nextDifficulty / 12);
+  const recallBonus = Math.max(0.35, 1.25 - retrievability);
+  const nextStability = previousStability * (1 + ratingMultiplier[rating] * difficultyPenalty * recallBonus);
+
+  return {
+    stability: Math.max(0.02, Math.min(3650, Number(nextStability.toFixed(3)))),
+    difficulty: Number(nextDifficulty.toFixed(3)),
+    retrievability: 1,
+  };
+}
+
+function getNextMasteryScore(
+  entry: DeckProgressEntry,
+  correct: boolean,
+  performance: number,
+  seenAt: string,
+  memory: Pick<DeckProgressEntry, 'stability' | 'difficulty' | 'retrievability'>,
+) {
+  void memory;
   const effectiveScore = getEffectiveMasteryScore(entry, seenAt);
 
   if (!correct) {
@@ -609,6 +728,32 @@ function getNextMasteryScore(entry: DeckProgressEntry, correct: boolean, perform
   }
 
   return clampMasteryGain(effectiveScore, effectiveScore + (targetScore - effectiveScore) * lift);
+}
+
+export function getCurrentRetrievability(entry: DeckProgressEntry, nowIsoOrMs: string | number = new Date().toISOString()) {
+  if (entry.seenCount === 0 || entry.stability <= 0) {
+    return 0;
+  }
+
+  const now = typeof nowIsoOrMs === 'number' ? nowIsoOrMs : Date.parse(nowIsoOrMs);
+  const lastSeen = Date.parse(entry.lastSeenAt ?? '');
+
+  if (!Number.isFinite(now) || !Number.isFinite(lastSeen) || now <= lastSeen) {
+    return Math.max(0, Math.min(1, entry.retrievability || 1));
+  }
+
+  const elapsedDays = (now - lastSeen) / DAY_MS;
+  return Math.max(0, Math.min(1, Math.pow(1 + FSRS_FACTOR * (elapsedDays / entry.stability), FSRS_DECAY)));
+}
+
+function getNextIntervalMs(stability: number, rating: DeckAttemptRating) {
+  if (rating === 'fail') {
+    return 10 * MINUTE_MS;
+  }
+
+  const intervalDays = stability * ((Math.pow(FSRS_TARGET_RETENTION, 1 / FSRS_DECAY) - 1) / FSRS_FACTOR);
+  const minimumMs = rating === 'hard' ? 30 * MINUTE_MS : DAY_MS;
+  return Math.max(minimumMs, Math.round(intervalDays * DAY_MS));
 }
 
 function clampMasteryGain(previousScore: number, nextScore: number) {

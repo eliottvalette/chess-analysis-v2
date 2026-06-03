@@ -15,7 +15,7 @@ export async function GET() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('training_card_progress')
-    .select('card_id,seen_count,correct_count,miss_count,streak,review_count,lapse_count,learning_step,ease,interval_days,mastery_score,last_response_ms,ignored,last_outcome,due_at,last_seen_at')
+    .select('card_id,seen_count,correct_count,miss_count,streak,review_count,lapse_count,learning_step,ease,interval_days,mastery_score,last_response_ms,last_rating,stability,difficulty,retrievability,ignored,last_outcome,due_at,last_seen_at')
     .eq('profile_id', profile.id);
 
   if (error) {
@@ -37,6 +37,10 @@ export async function GET() {
       intervalDays: Number(row.interval_days ?? 0),
       masteryScore: Number(row.mastery_score ?? 0),
       lastResponseMs: row.last_response_ms == null ? null : Number(row.last_response_ms),
+      lastRating: row.last_rating === 'fail' || row.last_rating === 'hard' || row.last_rating === 'good' || row.last_rating === 'easy' ? row.last_rating : null,
+      stability: Number(row.stability ?? 0),
+      difficulty: Number(row.difficulty ?? 5),
+      retrievability: Number(row.retrievability ?? 0),
       ignored: Boolean(row.ignored),
       lastOutcome: row.last_outcome === 'correct' || row.last_outcome === 'miss' ? row.last_outcome : null,
       dueAt: row.due_at ? String(row.due_at) : null,
@@ -80,6 +84,10 @@ export async function POST(request: Request) {
     interval_days: entry.intervalDays,
     mastery_score: entry.masteryScore,
     last_response_ms: entry.lastResponseMs,
+    last_rating: entry.lastRating,
+    stability: entry.stability,
+    difficulty: entry.difficulty,
+    retrievability: entry.retrievability,
     ignored: entry.ignored,
     last_outcome: entry.lastOutcome,
     due_at: entry.dueAt ?? new Date(0).toISOString(),
@@ -155,6 +163,10 @@ function sanitizeProgress(value: unknown): DeckProgressMap {
       intervalDays: clampCount(entry.intervalDays),
       masteryScore: clampCount(entry.masteryScore),
       lastResponseMs: clampNullableCount(entry.lastResponseMs),
+      lastRating: entry.lastRating === 'fail' || entry.lastRating === 'hard' || entry.lastRating === 'good' || entry.lastRating === 'easy' ? entry.lastRating : null,
+      stability: clampMemoryNumber(entry.stability, 0, 0, 3650),
+      difficulty: clampMemoryNumber(entry.difficulty, 5, 1, 10),
+      retrievability: clampMemoryNumber(entry.retrievability, 0, 0, 1),
       ignored: Boolean(entry.ignored),
       lastOutcome: entry.lastOutcome === 'correct' || entry.lastOutcome === 'miss' ? entry.lastOutcome : null,
       dueAt: typeof entry.dueAt === 'string' ? entry.dueAt : null,
@@ -191,6 +203,11 @@ function clampCount(value: unknown) {
 
 function clampEase(value: unknown) {
   return Math.max(1.3, Math.min(3.2, Number.isFinite(Number(value)) ? Number(value) : 2.5));
+}
+
+function clampMemoryNumber(value: unknown, fallback: number, min: number, max: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
 }
 
 function clampNullableCount(value: unknown) {

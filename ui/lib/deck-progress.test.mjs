@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   applyDeckAttempt,
   getDeckCardState,
+  getAttemptRating,
   getDeckQueueCounts,
   getDeckProgressEntry,
   getDeckStudyQueue,
@@ -44,6 +45,15 @@ test('applyDeckAttempt only advances one mastery letter per correct answer', () 
   });
 
   assert.equal(getDeckProgressEntry(first, 'card-1').masteryScore, 33);
+});
+
+test('getAttemptRating maps correctness and response time to automatic review buttons', () => {
+  assert.equal(getAttemptRating(false, 500), 'fail');
+  assert.equal(getAttemptRating(true, 1_999), 'easy');
+  assert.equal(getAttemptRating(true, 2_000), 'good');
+  assert.equal(getAttemptRating(true, 4_999), 'good');
+  assert.equal(getAttemptRating(true, 5_000), 'hard');
+  assert.equal(getAttemptRating(true, 20_000), 'hard');
 });
 
 test('applyDeckAttempt stops adding response-time penalty after five seconds', () => {

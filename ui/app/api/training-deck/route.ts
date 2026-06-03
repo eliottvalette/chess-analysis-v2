@@ -457,7 +457,7 @@ async function fetchDeckCounts(supabase: ReturnType<typeof createAdminClient>, d
 async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClient>, profileId: string) {
   const { data } = await supabase
     .from('training_card_progress')
-    .select('card_id,seen_count,ignored,due_at,interval_days,learning_step,mastery_score,last_response_ms')
+    .select('card_id,seen_count,ignored,due_at,interval_days,learning_step,mastery_score,last_response_ms,last_rating,stability,difficulty,retrievability,last_seen_at')
     .eq('profile_id', profileId);
   const result = new Map<string, ProgressRow>();
 
@@ -470,6 +470,11 @@ async function fetchProgressByCardId(supabase: ReturnType<typeof createAdminClie
       learningStep: Number(row.learning_step ?? 0),
       masteryScore: Number(row.mastery_score ?? 0),
       lastResponseMs: row.last_response_ms == null ? null : Number(row.last_response_ms),
+      lastRating: row.last_rating === 'fail' || row.last_rating === 'hard' || row.last_rating === 'good' || row.last_rating === 'easy' ? row.last_rating : null,
+      stability: Number(row.stability ?? 0),
+      difficulty: Number(row.difficulty ?? 5),
+      retrievability: Number(row.retrievability ?? 0),
+      lastSeenAt: row.last_seen_at ? String(row.last_seen_at) : null,
     });
   }
 
@@ -535,10 +540,14 @@ function toDeckProgressEntry(progress: ProgressRow | undefined): DeckProgressEnt
     intervalDays: progress?.intervalDays ?? 0,
     masteryScore: progress?.masteryScore ?? 0,
     lastResponseMs: progress?.lastResponseMs ?? null,
+    lastRating: progress?.lastRating ?? null,
+    stability: progress?.stability ?? 0,
+    difficulty: progress?.difficulty ?? 5,
+    retrievability: progress?.retrievability ?? 0,
     ignored: Boolean(progress?.ignored),
     lastOutcome: null,
     dueAt: progress?.dueAt ?? null,
-    lastSeenAt: null,
+    lastSeenAt: progress?.lastSeenAt ?? null,
   };
 }
 
@@ -655,6 +664,11 @@ type ProgressRow = {
   learningStep: number;
   masteryScore: number;
   lastResponseMs: number | null;
+  lastRating: DeckProgressEntry['lastRating'];
+  stability: number;
+  difficulty: number;
+  retrievability: number;
+  lastSeenAt: string | null;
 };
 
 type TrainingProfileCookie = {
