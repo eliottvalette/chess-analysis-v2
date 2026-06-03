@@ -563,23 +563,14 @@ function clampNullableNumber(value: unknown) {
 }
 
 function clampMasteryScore(value: unknown, entry: Partial<DeckProgressEntry> | null | undefined) {
+  void entry;
   const number = Number(value);
 
   if (Number.isFinite(number)) {
     return Math.max(0, Math.min(100, Math.round(number)));
   }
 
-  if (!entry || !entry.seenCount) {
-    return 0;
-  }
-
-  const correct = Number(entry.correctCount ?? 0);
-  const seen = Number(entry.seenCount ?? 0);
-  const streak = Number(entry.streak ?? 0);
-  const accuracy = seen > 0 ? correct / seen : 0;
-  const base = accuracy * 58 + Math.min(22, streak * 6) + Math.min(20, Number(entry.intervalDays ?? 0) * 2);
-
-  return Math.max(0, Math.min(100, Math.round(base)));
+  return 0;
 }
 
 function scoreAttemptPerformance(correct: boolean, quality: DeckAttemptQuality) {
