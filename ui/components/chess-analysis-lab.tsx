@@ -854,6 +854,7 @@ export function ChessAnalysisLab() {
 
   const beginDeckCardSession = useCallback((card: DeckCard, lines: OpeningSeedLine[]) => {
     persistReviewWorkspaceSnapshot();
+    deckCardPromptStartedAtRef.current = null;
     const deckState = buildDeckCardStartState(card, lines);
 
     setInitialFen(deckState.initialFen);
@@ -894,7 +895,7 @@ export function ChessAnalysisLab() {
     const boundedTarget = Math.max(0, Math.min(targetIndex, moves.length));
 
     if (boundedTarget === 0) {
-      return;
+      return true;
     }
 
     setDeckPlaybackBusy(true);
@@ -902,7 +903,7 @@ export function ChessAnalysisLab() {
     for (let nextIndex = 1; nextIndex <= boundedTarget; nextIndex += 1) {
       if (deckPlaybackRequestIdRef.current !== requestId) {
         setDeckPlaybackBusy(false);
-        return;
+        return false;
       }
 
       const nextGame = restoreGameFromHistory(moves, startFen, nextIndex);
@@ -932,7 +933,10 @@ export function ChessAnalysisLab() {
 
     if (deckPlaybackRequestIdRef.current === requestId) {
       setDeckPlaybackBusy(false);
+      return true;
     }
+
+    return false;
   }, [clearSelection, playSoundSequence]);
 
   const startDeckCardWithReplay = useCallback(async (card: DeckCard, lines: OpeningSeedLine[]) => {
@@ -940,7 +944,11 @@ export function ChessAnalysisLab() {
     const replayTargetIndex = beginDeckCardSession(card, lines);
 
     if (replayTargetIndex > 0) {
-      await playDeckReplayToIndex(replayTargetIndex, card.side);
+      const replayCompleted = await playDeckReplayToIndex(replayTargetIndex, card.side);
+
+      if (!replayCompleted) {
+        return;
+      }
     }
 
     deckCardPromptStartedAtRef.current = Date.now();
