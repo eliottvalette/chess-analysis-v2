@@ -2586,30 +2586,7 @@ function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckP
 
     if (!serverEntry) {
       merged[cardId] = localEntry;
-      continue;
     }
-
-    const localSeen = Date.parse(localEntry.lastSeenAt ?? '');
-    const serverSeen = Date.parse(serverEntry.lastSeenAt ?? '');
-    const localIsLater = Number.isFinite(localSeen) && (!Number.isFinite(serverSeen) || localSeen >= serverSeen);
-
-    merged[cardId] = {
-      seenCount: Math.max(serverEntry.seenCount, localEntry.seenCount),
-      correctCount: Math.max(serverEntry.correctCount, localEntry.correctCount),
-      missCount: Math.max(serverEntry.missCount, localEntry.missCount),
-      reviewCount: Math.max(serverEntry.reviewCount, localEntry.reviewCount),
-      lapseCount: Math.max(serverEntry.lapseCount, localEntry.lapseCount),
-      streak: localIsLater ? localEntry.streak : serverEntry.streak,
-      ease: localIsLater ? localEntry.ease : serverEntry.ease,
-      intervalDays: localIsLater ? localEntry.intervalDays : serverEntry.intervalDays,
-      learningStep: localIsLater ? localEntry.learningStep : serverEntry.learningStep,
-      masteryScore: localIsLater ? localEntry.masteryScore : serverEntry.masteryScore,
-      lastResponseMs: localIsLater ? localEntry.lastResponseMs : serverEntry.lastResponseMs,
-      ignored: serverEntry.ignored || localEntry.ignored,
-      lastOutcome: localIsLater ? localEntry.lastOutcome : serverEntry.lastOutcome,
-      dueAt: localIsLater ? localEntry.dueAt : serverEntry.dueAt,
-      lastSeenAt: localIsLater ? localEntry.lastSeenAt : serverEntry.lastSeenAt,
-    };
   }
 
   return merged;
