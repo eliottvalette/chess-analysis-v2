@@ -229,11 +229,10 @@ function parseArgs(args) {
 function buildLineRecord(game, username) {
   const playerColor = inferPlayerColor(game, username);
   const trainingSide = oppositeSide(playerColor);
-  const opponent = playerColor === 'white' ? game.black?.username : game.white?.username;
   const eco = extractTag(game.pgn, 'ECO') ?? 'GAME';
-  const date = extractTag(game.pgn, 'UTCDate') ?? 'recent';
   const lineId = `recent-${username.toLowerCase()}-${game.url.split('/').pop()}`;
-  const lineName = `${date} vs ${opponent ?? 'opponent'} · ${eco}`;
+  const openingName = getOpeningName(game.eco, eco);
+  const lineName = openingName ?? 'Opening';
   const moves = extractSanMoves(game.pgn);
 
   return {
@@ -245,6 +244,28 @@ function buildLineRecord(game, username) {
     moves,
   };
 }
+
+function getOpeningName(ecoUrl, eco) {
+  if (typeof ecoUrl !== 'string' || !ecoUrl.trim()) {
+    return ECO_NAME_FALLBACKS.get(String(eco).toUpperCase()) ?? null;
+  }
+
+  const slug = ecoUrl.split('/').filter(Boolean).pop();
+
+  if (!slug) {
+    return ECO_NAME_FALLBACKS.get(String(eco).toUpperCase()) ?? null;
+  }
+
+  return decodeURIComponent(slug)
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, character => character.toUpperCase());
+}
+
+const ECO_NAME_FALLBACKS = new Map([
+  ['B13', 'Caro-Kann Defense: Exchange Variation'],
+]);
 
 async function buildCardsForGame({
   game,

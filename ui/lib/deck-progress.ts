@@ -301,6 +301,53 @@ export function scoreToMasteryGrade(score: number): MasteryGrade {
   return 'F';
 }
 
+const ECO_NAME_FALLBACKS: Record<string, string> = {
+  B13: 'Caro-Kann Defense: Exchange Variation',
+};
+
+export function getDeckCardOpeningGroup(card: DeckCard) {
+  const eco = card.eco.trim().toUpperCase();
+  const mappedName = ECO_NAME_FALLBACKS[eco];
+
+  if (mappedName) {
+    return {
+      id: `eco:${eco}`,
+      name: mappedName,
+    };
+  }
+
+  const lineName = card.lineName.trim();
+  const generatedLineMatch = lineName.match(/^(.+?)\s+·\s+\d{4}-\d{2}-\d{2}\s+vs\s+.+$/i);
+
+  if (generatedLineMatch) {
+    return {
+      id: `name:${normalizeOpeningGroupId(generatedLineMatch[1])}`,
+      name: generatedLineMatch[1],
+    };
+  }
+
+  if (lineName && lineName !== card.eco && !/^.+?\s+vs\s+.+?$/i.test(lineName)) {
+    const cleanName = lineName.replace(/\s+·\s+([A-E]\d{2}|GAME)$/i, '');
+
+    return {
+      id: `name:${normalizeOpeningGroupId(cleanName)}`,
+      name: cleanName,
+    };
+  }
+
+  if (eco && eco !== 'GAME') {
+    return {
+      id: `eco:${eco}`,
+      name: `Unknown opening ${eco}`,
+    };
+  }
+
+  return {
+    id: 'opening:unknown',
+    name: 'Unknown opening',
+  };
+}
+
 export function summarizeLineMastery(cards: DeckCard[], progress: DeckProgressMap, nowIso = new Date().toISOString()) {
   const byLine = new Map<string, {
     id: string;
@@ -319,9 +366,10 @@ export function summarizeLineMastery(cards: DeckCard[], progress: DeckProgressMa
     const entry = getDeckProgressEntry(progress, card.id);
     const state = getDeckCardState(entry, nowIso);
     const score = getEffectiveMasteryScore(entry, Number.isFinite(now) ? now : nowIso);
-    const current = byLine.get(card.lineId) ?? {
-      id: card.lineId,
-      name: card.lineName,
+    const group = getDeckCardOpeningGroup(card);
+    const current = byLine.get(group.id) ?? {
+      id: group.id,
+      name: group.name,
       eco: card.eco,
       side: card.side,
       cardCount: 0,
@@ -341,7 +389,7 @@ export function summarizeLineMastery(cards: DeckCard[], progress: DeckProgressMa
       current.dueCount += 1;
     }
 
-    byLine.set(card.lineId, current);
+    byLine.set(group.id, current);
   }
 
   return [...byLine.values()]
@@ -368,6 +416,14 @@ export function summarizeLineMastery(cards: DeckCard[], progress: DeckProgressMa
 
       return right.dueCount - left.dueCount;
     });
+}
+
+function normalizeOpeningGroupId(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'unknown';
 }
 
 export function getDeckCardState(entry: DeckProgressEntry, nowIso = new Date().toISOString()): DeckCardState {

@@ -8,6 +8,7 @@ import {
   getDeckProgressEntry,
   getDeckStudyQueue,
   isDeckCardStudyable,
+  summarizeLineMastery,
   summarizeDeckProgress,
   toggleDeckIgnored,
 } from './deck-progress.ts';
@@ -107,6 +108,35 @@ test('toggleDeckIgnored flips ignored state without losing counters', () => {
 
   assert.equal(getDeckProgressEntry(toggled, 'card-2').ignored, true);
   assert.equal(getDeckProgressEntry(toggled, 'card-2').correctCount, 1);
+});
+
+test('summarizeLineMastery groups review cards by opening when line ids are empty', () => {
+  const cards = [
+    {
+      id: 'card-1',
+      lineId: '',
+      lineName: 'LosValettos vs alifzawawi',
+      eco: 'B13',
+      side: 'black',
+    },
+    {
+      id: 'card-2',
+      lineId: '',
+      lineName: 'LosValettos vs another',
+      eco: 'C65',
+      side: 'white',
+    },
+  ];
+
+  const summary = summarizeLineMastery(cards, {}, '2026-05-24T10:00:00.000Z');
+
+  assert.deepEqual(
+    summary.map(line => [line.id, line.name, line.cardCount]),
+    [
+      ['eco:B13', 'Caro-Kann Defense: Exchange Variation', 1],
+      ['eco:C65', 'Unknown opening C65', 1],
+    ],
+  );
 });
 
 test('summarizeDeckProgress reports review totals and SRS state buckets', () => {

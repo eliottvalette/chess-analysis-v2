@@ -14,6 +14,7 @@ import {
 } from '@/lib/chess-analysis-client';
 import type { ChessComRecentGameSummary } from '@/lib/chesscom';
 import {
+  getDeckCardOpeningGroup,
   getEffectiveMasteryScore,
   getMasteryGrade,
   type DeckProgressEntry,
@@ -1018,12 +1019,52 @@ function capitalizeRecentGameTimeClass(value: 'bullet' | 'blitz' | 'rapid') {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+const MASTERY_GRADE_ORDER: MasteryGrade[] = ['F', 'E', 'D', 'C', 'B', 'A', 'S'];
+
+function buildMasteryGradeDistribution(
+  lines: ReturnType<typeof import('@/lib/deck-progress').summarizeLineMastery>,
+) {
+  const counts = new Map<MasteryGrade, number>();
+
+  for (const grade of MASTERY_GRADE_ORDER) {
+    counts.set(grade, 0);
+  }
+
+  for (const line of lines) {
+    counts.set(line.grade, (counts.get(line.grade) ?? 0) + 1);
+  }
+
+  const total = lines.length;
+
+  if (total === 0) {
+    return [];
+  }
+
+  return MASTERY_GRADE_ORDER.flatMap(grade => {
+    const count = counts.get(grade) ?? 0;
+
+    if (count === 0) {
+      return [];
+    }
+
+    return [{
+      grade,
+      count,
+      percent: Math.round((count / total) * 100),
+    }];
+  });
+}
+
 function getMasteryGradeClass(grade: MasteryGrade) {
   return styles[`masteryGrade${grade}`];
 }
 
 function getMasteryToneClass(grade: MasteryGrade) {
   return styles[`masteryTone${grade}`];
+}
+
+function getOpeningDisplayName(card: DeckCard) {
+  return getDeckCardOpeningGroup(card).name;
 }
 
 function formatNextReview(progress: DeckProgressEntry | null) {
@@ -1427,26 +1468,33 @@ export function DeckPanel({
   const card = activeCard ?? nextCard;
   const sessionProgressPercent =
     trainSessionCardTotal > 0 ? Math.round((trainSessionCardCurrent / trainSessionCardTotal) * 100) : 0;
-  const cardGrade = activeCardProgress ? getMasteryGrade(activeCardProgress) : null;
-  const activeLineMastery = card ? deckLineMastery.find(line => line.id === card.lineId) : null;
-  const displayedGrade = activeLineMastery?.grade ?? cardGrade ?? 'F';
-  const displayedScore = activeLineMastery?.masteryScore ?? (activeCardProgress ? getEffectiveMasteryScore(activeCardProgress) : 0);
+  const cardGrade = activeCardProgress ? getMasteryGrade(activeCardProgress) : 'F';
+  const cardScore = activeCardProgress ? getEffectiveMasteryScore(activeCardProgress) : 0;
+  const activeOpeningGroup = card ? getDeckCardOpeningGroup(card) : null;
+  const activeLineMastery = activeOpeningGroup ? deckLineMastery.find(line => line.id === activeOpeningGroup.id) : null;
+  const gradeDistribution = useMemo(
+    () => buildMasteryGradeDistribution(deckLineMastery),
+    [deckLineMastery],
+  );
 
   return (
     <>
-      <section className={`${styles.card} ${styles.deckCard} ${styles.trainingDeckCard} ${getMasteryToneClass(displayedGrade)}`}>
+      <section className={`${styles.card} ${styles.deckCard} ${styles.trainingDeckCard} ${getMasteryToneClass(cardGrade)}`}>
         {card ? (
           <>
             <div className={styles.trainingCardHead}>
-              <strong className={styles.trainingCardEco}>{card.eco}</strong>
-              <span className={`${styles.masteryGradeBadge} ${getMasteryGradeClass(displayedGrade)}`}>{displayedGrade}</span>
+              <div className={styles.trainingCardTitleBlock}>
+                <strong className={styles.trainingCardTitle}>{getOpeningDisplayName(card)}</strong>
+                <span className={styles.trainingCardEco}>Active card</span>
+              </div>
+              <span className={`${styles.masteryGradeBadge} ${getMasteryGradeClass(cardGrade)}`} title="Active card grade">{cardGrade}</span>
             </div>
             <div className={styles.trainSessionProgress} aria-hidden="true">
-              <div className={styles.trainSessionProgressFill} style={{ width: `${displayedScore}%` }} />
+              <div className={styles.trainSessionProgressFill} style={{ width: `${cardScore}%` }} />
             </div>
             <div className={styles.trainingCardMeta}>
-              <span>{displayedScore}/100</span>
-              <span>{trainAllSession ? `${trainSessionCardCurrent}/${trainSessionCardTotal}` : `${deckStats.due + deckStats.new} study`}</span>
+              <span>Card {cardScore}/100</span>
+              <span>{trainAllSession ? `${trainSessionCardCurrent}/${trainSessionCardTotal}` : `${deckStats.due + deckStats.new} cards`}</span>
             </div>
             {trainAllSession ? (
               <div className={styles.trainSessionProgress} aria-label="Cram progress">
@@ -1494,6 +1542,55 @@ export function DeckPanel({
           </>
         )}
       </section>
+      {!trainAllSession && activeLineMastery ? (
+        <section className={`${styles.card} ${styles.lineMetricCard} ${getMasteryToneClass(activeLineMastery.grade)}`}>
+          <div className={styles.lineMetricHead}>
+            <div className={styles.trainingCardTitleBlock}>
+              <strong className={styles.lineMetricTitle}>Opening mastery</strong>
+              <span className={styles.lineMetricSubtitle}>{activeLineMastery.cardCount} cards in {getOpeningDisplayName(card!)}</span>
+            </div>
+            <span className={`${styles.masteryGradeBadge} ${getMasteryGradeClass(activeLineMastery.grade)}`} title="Line metric grade">{activeLineMastery.grade}</span>
+          </div>
+          <div className={styles.trainSessionProgress} aria-hidden="true">
+            <div className={styles.trainSessionProgressFill} style={{ width: `${activeLineMastery.masteryScore}%` }} />
+          </div>
+          <div className={styles.trainingCardMeta}>
+            <span>Opening {activeLineMastery.masteryScore}/100</span>
+            <span>{activeLineMastery.newCount + activeLineMastery.dueCount} due/new</span>
+          </div>
+        </section>
+      ) : null}
+      {!trainAllSession && gradeDistribution.length > 0 ? (
+        <section className={`${styles.card} ${styles.masteryDistributionCard}`}>
+          <div className={styles.masteryDistributionHeader}>
+            <span>Opening spread</span>
+            <span>{deckLineMastery.length} openings</span>
+          </div>
+          <div
+            aria-label={`Line metric spread: ${gradeDistribution.map(segment => `${segment.grade} ${segment.percent}%`).join(', ')}`}
+            className={styles.masteryDistributionBar}
+            role="img"
+          >
+            {gradeDistribution.map(segment => (
+              <div
+                className={`${styles.masteryDistributionSegment} ${styles[`masteryDistribution${segment.grade}`]}`}
+                key={segment.grade}
+                style={{ flex: `${segment.count} ${segment.count} 0` }}
+                title={`${segment.grade} · ${segment.count} line${segment.count === 1 ? '' : 's'} · ${segment.percent}%`}
+              />
+            ))}
+          </div>
+          <div className={styles.masteryDistributionLegend}>
+            {gradeDistribution.map(segment => (
+              <span className={styles.masteryDistributionLegendItem} key={segment.grade}>
+                <span className={`${styles.masteryDistributionDot} ${styles[`masteryDistribution${segment.grade}`]}`} />
+                <span>{segment.grade}</span>
+                <span>{segment.percent}%</span>
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </>
   );
 }
