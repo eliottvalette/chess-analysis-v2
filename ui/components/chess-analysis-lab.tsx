@@ -1489,12 +1489,12 @@ export function ChessAnalysisLab() {
     }
 
     const currentCardId = activeDeckCard?.id ?? null;
-    const currentIndex = currentCardId ? sessionCards.findIndex(card => card.id === currentCardId) : -1;
-    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % sessionCards.length : deckIndex % sessionCards.length;
+    const nextPriorityCard = sessionCards.find(card => card.id !== currentCardId) ?? sessionCards[0];
+    const nextIndex = sessionCards.findIndex(card => card.id === nextPriorityCard.id);
 
     setDeckIndex(nextIndex);
-    loadDeckCard(sessionCards[nextIndex]);
-  }, [activeDeckCard, availableDeckCards, deckIndex, finishDeckTrainingSession, loadDeckCard, trainAllQueue, trainAllSession, trainSessionIndex]);
+    loadDeckCard(nextPriorityCard);
+  }, [activeDeckCard, availableDeckCards, finishDeckTrainingSession, loadDeckCard, trainAllQueue, trainAllSession, trainSessionIndex]);
 
   const deleteActiveDeckCard = useCallback(async () => {
     const card = activeDeckCard ?? nextDeckCard;

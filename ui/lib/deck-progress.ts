@@ -222,12 +222,33 @@ export function isDeckCardStudyable(entry: DeckProgressEntry, nowIso = new Date(
 
 export function sortCardsForReview(cards: DeckCard[], progress: DeckProgressMap, nowIso = new Date().toISOString()) {
   const now = Date.parse(nowIso);
+  const openingMastery = new Map(summarizeLineMastery(cards, progress, nowIso).map(line => [line.id, line]));
 
   return [...cards].sort((left, right) => {
     const leftProgress = getDeckProgressEntry(progress, left.id);
     const rightProgress = getDeckProgressEntry(progress, right.id);
     const leftRank = getReviewRank(leftProgress, now, left);
     const rightRank = getReviewRank(rightProgress, now, right);
+
+    if (leftRank === 0 || rightRank === 0) {
+      return leftRank - rightRank;
+    }
+
+    const leftOpening = openingMastery.get(getDeckCardOpeningGroup(left).id);
+    const rightOpening = openingMastery.get(getDeckCardOpeningGroup(right).id);
+    const leftOpeningScore = leftOpening?.masteryScore ?? 0;
+    const rightOpeningScore = rightOpening?.masteryScore ?? 0;
+
+    if (leftOpeningScore !== rightOpeningScore) {
+      return leftOpeningScore - rightOpeningScore;
+    }
+
+    const leftOpeningActive = (leftOpening?.dueCount ?? 0) + (leftOpening?.newCount ?? 0);
+    const rightOpeningActive = (rightOpening?.dueCount ?? 0) + (rightOpening?.newCount ?? 0);
+
+    if (leftOpeningActive !== rightOpeningActive) {
+      return rightOpeningActive - leftOpeningActive;
+    }
 
     if (leftRank !== rightRank) {
       return leftRank - rightRank;
@@ -306,7 +327,7 @@ const ECO_NAME_FALLBACKS: Record<string, string> = {
 };
 
 export function getDeckCardOpeningGroup(card: DeckCard) {
-  const eco = card.eco.trim().toUpperCase();
+  const eco = String(card.eco ?? '').trim().toUpperCase();
   const mappedName = ECO_NAME_FALLBACKS[eco];
 
   if (mappedName) {
@@ -316,7 +337,7 @@ export function getDeckCardOpeningGroup(card: DeckCard) {
     };
   }
 
-  const lineName = card.lineName.trim();
+  const lineName = String(card.lineName ?? '').trim();
   const generatedLineMatch = lineName.match(/^(.+?)\s+·\s+\d{4}-\d{2}-\d{2}\s+vs\s+.+$/i);
 
   if (generatedLineMatch) {
@@ -486,6 +507,24 @@ function getReviewRank(entry: DeckProgressEntry, now: number, card?: DeckCard) {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REVIEW_FLOOR_SCORE = 66;
+const MASTERY_GRADE_CEILINGS: Record<MasteryGrade, number> = {
+  F: 17,
+  E: 33,
+  D: 49,
+  C: 65,
+  B: 79,
+  A: 91,
+  S: 100,
+};
+const NEXT_MASTERY_GRADE: Record<MasteryGrade, MasteryGrade> = {
+  F: 'E',
+  E: 'D',
+  D: 'C',
+  C: 'B',
+  B: 'A',
+  A: 'S',
+  S: 'S',
+};
 
 function getNextSchedule(entry: DeckProgressEntry, correct: boolean, seenAt: string, performance: number, masteryScore: number) {
   const seenTime = Date.parse(seenAt);
@@ -553,11 +592,9 @@ function scoreAttemptPerformance(correct: boolean, quality: DeckAttemptQuality) 
     ? 0.68
     : responseMs <= 3_000
       ? 1
-      : responseMs <= 8_000
-        ? 0.78
-        : responseMs <= 18_000
-          ? 0.55
-          : 0.35;
+      : responseMs <= 5_000
+        ? 1 - ((responseMs - 3_000) / 2_000) * 0.22
+        : 0.78;
   const exactScore = quality.exact === false ? 0.72 : 1;
   const evalLoss = Number(quality.evalLossCp);
   const precisionScore = !Number.isFinite(evalLoss) ? 1 : Math.max(0.45, 1 - Math.max(0, evalLoss) / 180);
@@ -577,10 +614,18 @@ function getNextMasteryScore(entry: DeckProgressEntry, correct: boolean, perform
   const lift = effectiveScore < 50 ? 0.68 : effectiveScore < 80 ? 0.45 : 0.28;
 
   if (targetScore <= effectiveScore) {
-    return Math.max(0, Math.min(100, Math.round(effectiveScore + performance * 4)));
+    return clampMasteryGain(effectiveScore, effectiveScore + performance * 4);
   }
 
-  return Math.max(0, Math.min(100, Math.round(effectiveScore + (targetScore - effectiveScore) * lift)));
+  return clampMasteryGain(effectiveScore, effectiveScore + (targetScore - effectiveScore) * lift);
+}
+
+function clampMasteryGain(previousScore: number, nextScore: number) {
+  const currentGrade = scoreToMasteryGrade(previousScore);
+  const nextGrade = NEXT_MASTERY_GRADE[currentGrade];
+  const maxScore = MASTERY_GRADE_CEILINGS[nextGrade];
+
+  return Math.max(0, Math.min(100, maxScore, Math.round(nextScore)));
 }
 
 function getRetentionDays(entry: Pick<DeckProgressEntry, 'masteryScore' | 'ease' | 'streak' | 'lapseCount'>) {

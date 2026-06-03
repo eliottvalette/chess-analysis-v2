@@ -8,6 +8,7 @@ import {
   getDeckProgressEntry,
   getDeckStudyQueue,
   isDeckCardStudyable,
+  sortCardsForReview,
   summarizeLineMastery,
   summarizeDeckProgress,
   toggleDeckIgnored,
@@ -33,6 +34,40 @@ test('applyDeckAttempt uses Anki-style learning steps on first success', () => {
     dueAt: '2026-05-24T10:01:00.000Z',
     lastSeenAt: '2026-05-24T10:00:00.000Z',
   });
+});
+
+test('applyDeckAttempt only advances one mastery letter per correct answer', () => {
+  const first = applyDeckAttempt({}, 'card-1', true, '2026-05-24T10:00:00.000Z', {
+    exact: true,
+    evalLossCp: 0,
+    responseMs: 1_000,
+  });
+
+  assert.equal(getDeckProgressEntry(first, 'card-1').masteryScore, 33);
+});
+
+test('applyDeckAttempt stops adding response-time penalty after five seconds', () => {
+  const baseEntry = {
+    ...getDeckProgressEntry({}, 'card-1'),
+    seenCount: 1,
+    masteryScore: 34,
+    lastSeenAt: '2026-05-23T10:00:00.000Z',
+  };
+  const fiveSeconds = applyDeckAttempt({ 'card-1': baseEntry }, 'card-1', true, '2026-05-24T10:00:00.000Z', {
+    exact: true,
+    evalLossCp: 0,
+    responseMs: 5_000,
+  });
+  const twentySeconds = applyDeckAttempt({ 'card-1': baseEntry }, 'card-1', true, '2026-05-24T10:00:00.000Z', {
+    exact: true,
+    evalLossCp: 0,
+    responseMs: 20_000,
+  });
+
+  assert.equal(
+    getDeckProgressEntry(fiveSeconds, 'card-1').masteryScore,
+    getDeckProgressEntry(twentySeconds, 'card-1').masteryScore,
+  );
 });
 
 test('applyDeckAttempt increments seen counts and reschedules misses in one minute', () => {
@@ -136,6 +171,46 @@ test('summarizeLineMastery groups review cards by opening when line ids are empt
       ['eco:B13', 'Caro-Kann Defense: Exchange Variation', 1],
       ['eco:C65', 'Unknown opening C65', 1],
     ],
+  );
+});
+
+test('sortCardsForReview prioritizes weaker opening groups before stronger cards', () => {
+  const cards = [
+    {
+      id: 'strong-card',
+      lineId: '',
+      lineName: 'LosValettos vs alifzawawi',
+      eco: 'B13',
+      side: 'black',
+    },
+    {
+      id: 'weak-card',
+      lineId: '',
+      lineName: 'Unknown position',
+      eco: 'C65',
+      side: 'white',
+    },
+  ];
+  const progress = {
+    'strong-card': {
+      ...getDeckProgressEntry({}, 'strong-card'),
+      seenCount: 1,
+      masteryScore: 77,
+      dueAt: '2026-05-24T10:00:00.000Z',
+      lastSeenAt: '2026-05-23T10:00:00.000Z',
+    },
+    'weak-card': {
+      ...getDeckProgressEntry({}, 'weak-card'),
+      seenCount: 1,
+      masteryScore: 8,
+      dueAt: '2026-05-24T10:00:00.000Z',
+      lastSeenAt: '2026-05-23T10:00:00.000Z',
+    },
+  };
+
+  assert.deepEqual(
+    sortCardsForReview(cards, progress, '2026-05-24T10:00:00.000Z').map(card => card.id),
+    ['weak-card', 'strong-card'],
   );
 });
 
