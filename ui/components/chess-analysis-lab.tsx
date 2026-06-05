@@ -93,6 +93,9 @@ type CachedTimelineAnalysis = {
   updatedAt?: string;
 };
 
+const recentGameAnalysisMemoryCache = new Map<string, CachedTimelineAnalysis>();
+const recentGameAnalysisInFlightCache = new Map<string, Promise<CachedTimelineAnalysis | null>>();
+
 function getReviewMoveStyle(category: ReviewCategory | null | undefined): CSSProperties {
   if (!category) {
     return LAST_MOVE_STYLE;
@@ -152,6 +155,18 @@ function getPgnHash(pgn: string) {
 }
 
 async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimelineAnalysis | null> {
+  const memoryHit = recentGameAnalysisMemoryCache.get(cacheKey);
+
+  if (memoryHit) {
+    return memoryHit;
+  }
+
+  const inFlightHit = recentGameAnalysisInFlightCache.get(cacheKey);
+
+  if (inFlightHit) {
+    return inFlightHit;
+  }
+
   try {
     const response = await fetch(`/api/game-analysis-cache?key=${encodeURIComponent(cacheKey)}`, { credentials: 'same-origin' });
     const payload = (await response.json()) as { analysis?: CachedTimelineAnalysis | null };
@@ -163,6 +178,7 @@ async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimel
       Array.isArray(analysis.preMoveAnalyses) &&
       Array.isArray(analysis.timelineAnalyses)
     ) {
+      recentGameAnalysisMemoryCache.set(cacheKey, analysis);
       return analysis;
     }
   } catch {
@@ -185,6 +201,12 @@ async function saveCachedTimelineAnalysis({
   preMoveAnalyses: AnalysisResult[];
   timelineAnalyses: AnalysisResult[];
 }) {
+  recentGameAnalysisMemoryCache.set(cacheKey, {
+    preMoveAnalyses,
+    timelineAnalyses,
+    updatedAt: new Date().toISOString(),
+  });
+
   try {
     await fetch('/api/game-analysis-cache', {
       method: 'POST',
@@ -327,6 +349,7 @@ export function ChessAnalysisLab() {
   const [recentChessGamesNextOffset, setRecentChessGamesNextOffset] = useState(0);
   const [recentChessGamesNextCursor, setRecentChessGamesNextCursor] = useState<string | null>(null);
   const [recentChessGamesError, setRecentChessGamesError] = useState('');
+  const [recentPreloadTick, setRecentPreloadTick] = useState(0);
   const [trainingProfile, setTrainingProfile] = useState<TrainingProfile | null>(null);
   const [trainingProfileBootstrapping, setTrainingProfileBootstrapping] = useState(true);
   const [trainingProfileSubmitting, setTrainingProfileSubmitting] = useState(false);
@@ -955,7 +978,6 @@ export function ChessAnalysisLab() {
   useEffect(() => {
     const markInteraction = () => {
       lastReviewInteractionAtRef.current = Date.now();
-      recentPreloadRequestIdRef.current += 1;
     };
 
     window.addEventListener('pointerdown', markInteraction, { passive: true });
@@ -1007,10 +1029,12 @@ export function ChessAnalysisLab() {
       return;
     }
 
-    const nextGame = recentChessGames.find(game => {
-      const cacheKey = getRecentGameCacheKey(game);
-      return cacheKey !== activeRecentGameCacheKeyRef.current && !recentPreloadedKeysRef.current.has(cacheKey);
-    });
+    const nextGame = [...recentChessGames]
+      .sort((left, right) => Number(right.endTime ?? 0) - Number(left.endTime ?? 0))
+      .find(game => {
+        const cacheKey = getRecentGameCacheKey(game);
+        return cacheKey !== activeRecentGameCacheKeyRef.current && !recentPreloadedKeysRef.current.has(cacheKey);
+      });
 
     if (!nextGame?.pgn) {
       return;
@@ -1021,19 +1045,19 @@ export function ChessAnalysisLab() {
 
     const cached = await loadCachedTimelineAnalysis(cacheKey);
     if (cached) {
+      setRecentPreloadTick(tick => tick + 1);
       return;
     }
 
     const requestId = ++recentPreloadRequestIdRef.current;
-
-    try {
+    const preloadPromise = (async (): Promise<CachedTimelineAnalysis | null> => {
       const preloadGame = new Chess();
       preloadGame.loadPgn(nextGame.pgn);
       const nextInitialFen = preloadGame.header().FEN ?? null;
       const nextHistory = preloadGame.history({ verbose: true }).map(toStoredMove);
 
       if (nextHistory.length === 0) {
-        return;
+        return null;
       }
 
       const response = await analyzeGamePositions({
@@ -1043,19 +1067,37 @@ export function ChessAnalysisLab() {
       });
 
       if (recentPreloadRequestIdRef.current !== requestId) {
-        return;
+        return null;
       }
 
       const sequence = response.analyses ?? [];
+      const analysis = {
+        preMoveAnalyses: sequence.slice(0, -1),
+        timelineAnalyses: sequence.slice(1),
+      } satisfies CachedTimelineAnalysis;
+
       await saveCachedTimelineAnalysis({
         cacheKey,
         gameLink: nextGame.link || nextGame.url,
         pgn: nextGame.pgn,
-        preMoveAnalyses: sequence.slice(0, -1),
-        timelineAnalyses: sequence.slice(1),
+        preMoveAnalyses: analysis.preMoveAnalyses,
+        timelineAnalyses: analysis.timelineAnalyses,
       });
+      return analysis;
+    })();
+
+    recentGameAnalysisInFlightCache.set(cacheKey, preloadPromise);
+
+    try {
+      const analysis = await preloadPromise;
+      if (analysis) {
+        recentGameAnalysisMemoryCache.set(cacheKey, analysis);
+      }
+      setRecentPreloadTick(tick => tick + 1);
     } catch {
       recentPreloadedKeysRef.current.delete(cacheKey);
+    } finally {
+      recentGameAnalysisInFlightCache.delete(cacheKey);
     }
   }, [positionLoading, recentChessGames, timelineLoading]);
 
@@ -1069,7 +1111,7 @@ export function ChessAnalysisLab() {
     }, RECENT_GAMES_PRELOAD_IDLE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [preloadRecentGameAnalysis, recentChessGames, timelineAnalyses, timelineLoading, positionLoading]);
+  }, [preloadRecentGameAnalysis, recentChessGames, recentPreloadTick, timelineAnalyses, timelineLoading, positionLoading]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -2224,7 +2266,6 @@ export function ChessAnalysisLab() {
   }
 
   async function loadRecentChessGame(gameSummary: ChessComRecentGameSummary) {
-    recentPreloadRequestIdRef.current += 1;
     lastReviewInteractionAtRef.current = Date.now();
 
     const cacheKey = getRecentGameCacheKey(gameSummary);

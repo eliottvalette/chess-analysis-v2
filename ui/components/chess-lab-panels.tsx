@@ -632,7 +632,7 @@ export function GameReviewPanel({
                   key={game.link}
                   onClick={() => loadRecentGame(game)}
                 >
-                  <span className={styles.recentGameDate}>{game.utcDate ?? 'recent'}</span>
+                  <span className={styles.recentGameDate}>{formatRecentGameAge(game)}</span>
                   <strong className={styles.recentGamePlayers}>
                     {formatRecentGamePlayers(game)}
                   </strong>
@@ -1013,6 +1013,63 @@ function formatRecentGameMeta(game: ChessComRecentGameSummary) {
   const eco = game.eco ?? 'game';
   const color = game.playerColor;
   return `${eco} · ${color}`;
+}
+
+function formatRecentGameAge(game: ChessComRecentGameSummary) {
+  const playedAt = getRecentGameTime(game);
+
+  if (!playedAt) {
+    return 'recent';
+  }
+
+  const elapsedMs = Date.now() - playedAt.getTime();
+  const elapsedMinutes = Math.max(0, Math.floor(elapsedMs / 60_000));
+
+  if (elapsedMinutes < 1) {
+    return 'now';
+  }
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} min`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+
+  if (elapsedHours < 24) {
+    return `${elapsedHours} h`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+
+  if (elapsedDays < 30) {
+    return `${elapsedDays} d`;
+  }
+
+  const elapsedMonths = Math.floor(elapsedDays / 30);
+
+  if (elapsedMonths < 12) {
+    return `${elapsedMonths} mo`;
+  }
+
+  return `${Math.floor(elapsedMonths / 12)} y`;
+}
+
+function getRecentGameTime(game: ChessComRecentGameSummary) {
+  if (typeof game.endTime === 'number') {
+    return new Date(game.endTime * 1000);
+  }
+
+  if (game.utcDate) {
+    const normalizedDate = game.utcDate.replaceAll('.', '-');
+    const normalizedTime = game.utcTime ?? '00:00:00';
+    const date = new Date(`${normalizedDate}T${normalizedTime}Z`);
+
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
+  }
+
+  return null;
 }
 
 function capitalizeRecentGameTimeClass(value: ChessComRecentGameTimeClass) {
