@@ -8,6 +8,7 @@ export async function GET(request: Request) {
   const timeClass = searchParams.get('timeClass')?.trim().toLowerCase() || 'blitz';
   const count = Math.max(1, Math.min(10, Number.parseInt(searchParams.get('count') ?? '10', 10) || 10));
   const offset = Math.max(0, Number.parseInt(searchParams.get('offset') ?? '0', 10) || 0);
+  const cursor = searchParams.get('cursor')?.trim() || null;
 
   if (!username) {
     return NextResponse.json({ error: 'Missing username.' }, { status: 400 });
@@ -15,19 +16,22 @@ export async function GET(request: Request) {
 
   try {
     const archives = await fetchArchives(username);
-    const games = await fetchRecentGames({
+    const page = await fetchRecentGames({
       username,
       archives,
-      count: count + 1,
+      count,
       offset,
+      cursor,
       timeClass,
     });
+    const games = page.games.slice(0, count);
 
     return NextResponse.json({
       username,
-      games: games.slice(0, count).map(game => toGameSummary(game, username)),
-      hasMore: games.length > count,
-      nextOffset: offset + Math.min(count, games.length),
+      games: games.map(game => toGameSummary(game, username)),
+      hasMore: page.hasMore || page.games.length > count,
+      nextCursor: page.nextCursor,
+      nextOffset: page.nextOffset,
     });
   } catch (error) {
     return NextResponse.json(

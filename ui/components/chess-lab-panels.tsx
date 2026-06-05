@@ -12,7 +12,7 @@ import {
   type StoredMove,
   type TimelineReview,
 } from '@/lib/chess-analysis-client';
-import type { ChessComRecentGameSummary } from '@/lib/chesscom';
+import type { ChessComRecentGameSummary, ChessComRecentGameTimeClass } from '@/lib/chesscom';
 import {
   getDeckCardOpeningGroup,
   getEffectiveMasteryScore,
@@ -113,14 +113,14 @@ export function ReviewPanel({
   }>;
   onBack: () => void;
   onChesscomUsernameChange: (value: string) => void;
-  onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
+  onRecentGameTimeClassChange: (value: ChessComRecentGameTimeClass) => void;
   onFetchRecentGames: () => void;
   onLoadMoreRecentGames: () => void;
   recentGames: ChessComRecentGameSummary[];
   recentGamesError: string;
   recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
-  recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
+  recentGameTimeClass: ChessComRecentGameTimeClass;
   reviewDeckSaveStatus: string;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
   reviewSaveMoveSan: string | null;
@@ -524,14 +524,14 @@ export function GameReviewPanel({
   }>;
   moveHistoryLength: number;
   onChesscomUsernameChange: (value: string) => void;
-  onRecentGameTimeClassChange: (value: 'bullet' | 'blitz' | 'rapid') => void;
+  onRecentGameTimeClassChange: (value: ChessComRecentGameTimeClass) => void;
   onFetchRecentGames: () => void;
   onLoadMoreRecentGames: () => void;
   recentGames: ChessComRecentGameSummary[];
   recentGamesError: string;
   recentGamesHasMore: boolean;
   recentGamesLoading: boolean;
-  recentGameTimeClass: 'bullet' | 'blitz' | 'rapid';
+  recentGameTimeClass: ChessComRecentGameTimeClass;
   reviewDeckSaveStatus: string;
   reviewMoments: ReturnType<typeof filterReviewMoments>;
   reviewSaveMoveSan: string | null;
@@ -1015,7 +1015,11 @@ function formatRecentGameMeta(game: ChessComRecentGameSummary) {
   return `${eco} · ${color}`;
 }
 
-function capitalizeRecentGameTimeClass(value: 'bullet' | 'blitz' | 'rapid') {
+function capitalizeRecentGameTimeClass(value: ChessComRecentGameTimeClass) {
+  if (value === 'all') {
+    return 'Games';
+  }
+
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 

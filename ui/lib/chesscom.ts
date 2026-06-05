@@ -21,13 +21,22 @@ export type ChessComRecentGameSummary = {
   pgn: string;
 };
 
+export type ChessComRecentGameTimeClass = 'all' | 'bullet' | 'blitz' | 'rapid';
+
+export type ChessComRecentGamePage = {
+  games: RawChessComGame[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  nextOffset: number;
+};
+
 type RawChessComPlayer = {
   username?: string;
   rating?: number;
   result?: string;
 };
 
-type RawChessComGame = {
+export type RawChessComGame = {
   url?: string;
   pgn?: string;
   end_time?: number;
@@ -36,6 +45,8 @@ type RawChessComGame = {
   white?: RawChessComPlayer;
   black?: RawChessComPlayer;
 };
+
+const ARCHIVE_FETCH_CONCURRENCY = 2;
 
 export async function fetchArchives(username: string) {
   const response = await fetchJson(`https://api.chess.com/pub/player/${username}/games/archives`);
@@ -53,36 +64,55 @@ export async function fetchRecentGames({
   archives,
   count,
   offset = 0,
+  cursor = null,
   timeClass,
 }: {
   username: string;
   archives: string[];
   count: number;
   offset?: number;
+  cursor?: string | null;
   timeClass: string;
-}) {
+}): Promise<ChessComRecentGamePage> {
   const selected: RawChessComGame[] = [];
-  const needed = count + offset;
+  const needed = cursor ? count + 1 : count + offset + 1;
+  const reversedArchives = [...archives].reverse();
 
-  for (const archiveUrl of [...archives].reverse()) {
-    const response = await fetchJson(archiveUrl);
-    const games = Array.isArray(response.games) ? response.games : [];
+  for (let index = 0; index < reversedArchives.length; index += ARCHIVE_FETCH_CONCURRENCY) {
+    const archiveUrls = reversedArchives.slice(index, index + ARCHIVE_FETCH_CONCURRENCY);
+    const archiveResponses = await Promise.all(archiveUrls.map(archiveUrl => fetchJson(archiveUrl)));
 
-    const matchingGames = (games as RawChessComGame[])
-      .filter(game => game?.time_class === timeClass)
-      .filter(game => isPlayerInGame(username, game))
-      .sort((left, right) => Number(right.end_time ?? 0) - Number(left.end_time ?? 0));
+    for (const response of archiveResponses) {
+      const games = Array.isArray(response.games) ? response.games : [];
 
-    selected.push(...matchingGames);
+      selected.push(
+        ...(games as RawChessComGame[])
+          .filter(game => timeClass === 'all' || game?.time_class === timeClass)
+          .filter(game => isPlayerInGame(username, game)),
+      );
+    }
 
-    if (selected.length >= needed) {
+    const availableAfterCursor = cursor
+      ? dedupeGames(selected).sort(compareGamesForRecentPage).filter(game => isAfterCursor(game, cursor)).length
+      : selected.length;
+
+    if (availableAfterCursor >= needed) {
       break;
     }
   }
 
-  return selected
-    .sort((left, right) => Number(right.end_time ?? 0) - Number(left.end_time ?? 0))
-    .slice(offset, offset + count);
+  const sorted = dedupeGames(selected)
+    .sort(compareGamesForRecentPage)
+    .filter(game => isAfterCursor(game, cursor));
+  const page = cursor ? sorted.slice(0, count + 1) : sorted.slice(offset, offset + count + 1);
+  const games = page.slice(0, count);
+
+  return {
+    games,
+    hasMore: page.length > count,
+    nextCursor: games.length > 0 ? encodeCursor(games[games.length - 1]) : null,
+    nextOffset: offset + games.length,
+  };
 }
 
 export function toGameSummary(game: RawChessComGame, username: string): ChessComRecentGameSummary {
@@ -137,6 +167,80 @@ async function fetchJson(url: string) {
   }
 
   return response.json();
+}
+
+function dedupeGames(games: RawChessComGame[]) {
+  const seen = new Set<string>();
+  const deduped: RawChessComGame[] = [];
+
+  for (const game of games) {
+    const key = getGameStableKey(game);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(game);
+  }
+
+  return deduped;
+}
+
+function getGameStableKey(game: RawChessComGame) {
+  return extractTag(game.pgn, 'Link') ?? game.url ?? `${game.end_time ?? 0}:${game.white?.username ?? ''}:${game.black?.username ?? ''}`;
+}
+
+function encodeCursor(game: RawChessComGame) {
+  return `${Number(game.end_time ?? 0)}|${encodeURIComponent(getGameStableKey(game))}`;
+}
+
+function parseCursor(cursor: string | null) {
+  if (!cursor) {
+    return null;
+  }
+
+  const [rawEndTime, rawKey = ''] = cursor.split('|');
+  const endTime = Number(rawEndTime);
+
+  if (!Number.isFinite(endTime)) {
+    return null;
+  }
+
+  return {
+    endTime,
+    key: decodeURIComponent(rawKey),
+  };
+}
+
+function compareGamesForRecentPage(left: RawChessComGame, right: RawChessComGame) {
+  const timeCompare = Number(right.end_time ?? 0) - Number(left.end_time ?? 0);
+
+  if (timeCompare !== 0) {
+    return timeCompare;
+  }
+
+  return getGameStableKey(left).localeCompare(getGameStableKey(right));
+}
+
+function isAfterCursor(game: RawChessComGame, cursor: string | null) {
+  const parsed = parseCursor(cursor);
+
+  if (!parsed) {
+    return true;
+  }
+
+  const endTime = Number(game.end_time ?? 0);
+
+  if (endTime < parsed.endTime) {
+    return true;
+  }
+
+  if (endTime > parsed.endTime) {
+    return false;
+  }
+
+  return getGameStableKey(game).localeCompare(parsed.key) > 0;
 }
 
 function isPlayerInGame(username: string, game: RawChessComGame) {

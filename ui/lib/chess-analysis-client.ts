@@ -996,7 +996,11 @@ function isReviewKeyMoment(category: ReviewCategory | null, expectedPointsLost: 
   }
 
   if (category === 'inaccuracy') {
-    return (cpLossCp ?? 0) >= 80 || (expectedPointsLost ?? 0) >= 0.085;
+    return (cpLossCp ?? 0) >= 120 || (expectedPointsLost ?? 0) >= 0.12;
+  }
+
+  if (category === 'miss') {
+    return (cpLossCp ?? 0) >= 140 || (expectedPointsLost ?? 0) >= 0.14;
   }
 
   return afterMate != null && afterMate < 0;
@@ -1088,17 +1092,44 @@ function extractKeyMoments(reviews: TimelineReview[]) {
 
   return selected
     .sort((left, right) => {
-      const leftLoss = left.cpLossCp ?? Math.round((left.expectedPointsLost ?? 0) * 1000);
-      const rightLoss = right.cpLossCp ?? Math.round((right.expectedPointsLost ?? 0) * 1000);
+      const leftRank = getKeyMomentRank(left);
+      const rightRank = getKeyMomentRank(right);
 
-      if (left.isKeyMoment !== right.isKeyMoment) {
-        return left.isKeyMoment ? -1 : 1;
+      if (leftRank !== rightRank) {
+        return rightRank - leftRank;
       }
 
-      return rightLoss - leftLoss;
+      return getKeyMomentLossScore(right) - getKeyMomentLossScore(left);
     })
     .slice(0, 16)
     .sort((left, right) => left.ply - right.ply);
+}
+
+function getKeyMomentRank(review: TimelineReview) {
+  switch (review.category) {
+    case 'blunder':
+      return 90;
+    case 'mistake':
+      return 80;
+    case 'brilliant':
+      return 76;
+    case 'great':
+      return 68;
+    case 'miss':
+      return 58;
+    case 'inaccuracy':
+      return 42;
+    default:
+      return review.isKeyMoment ? 30 : 0;
+  }
+}
+
+function getKeyMomentLossScore(review: TimelineReview) {
+  const expectedLoss = Math.round((review.expectedPointsLost ?? 0) * 1_000);
+  const cpLoss = review.cpLossCp ?? 0;
+  const matePenalty = review.afterMate != null && review.afterMate < 0 ? 10_000 : 0;
+
+  return matePenalty + Math.max(cpLoss, expectedLoss);
 }
 
 function formatCpScore(scoreCp: number) {

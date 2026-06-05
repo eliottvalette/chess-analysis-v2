@@ -55,7 +55,7 @@ import {
   summarizeLineMastery,
   type DeckProgressMap,
 } from '@/lib/deck-progress';
-import type { ChessComRecentGameSummary } from '@/lib/chesscom';
+import type { ChessComRecentGameSummary, ChessComRecentGameTimeClass } from '@/lib/chesscom';
 import styles from './chess-analysis-lab.module.css';
 
 const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
@@ -83,6 +83,15 @@ const LAST_TRAINING_DECK_STORAGE_KEY = 'chess-lab-last-training-deck-v1';
 const REVIEW_SAVE_REPLAY_STORAGE_KEY = 'chess-lab-save-game-replay-v1';
 const TRAINING_REPLAY_MOVE_MS = 200;
 const RECENT_GAMES_PAGE_SIZE = 10;
+const RECENT_GAMES_AUTO_REFRESH_MS = 90_000;
+const RECENT_GAMES_PRELOAD_IDLE_MS = 1_400;
+const RECENT_GAMES_INTERACTION_IDLE_MS = 2_500;
+
+type CachedTimelineAnalysis = {
+  preMoveAnalyses: AnalysisResult[];
+  timelineAnalyses: AnalysisResult[];
+  updatedAt?: string;
+};
 
 function getReviewMoveStyle(category: ReviewCategory | null | undefined): CSSProperties {
   if (!category) {
@@ -126,6 +135,74 @@ function mapTrainingDeckCard(card: TrainingDeckCardRow): DeckCard {
     initialFen: card.initial_fen ? String(card.initial_fen) : null,
     setupMoves: Array.isArray(card.setup_moves) ? card.setup_moves.map(move => String(move)) : [],
   };
+}
+
+function getRecentGameCacheKey(game: ChessComRecentGameSummary) {
+  return `chesscom:${game.link || game.url}`;
+}
+
+function getPgnHash(pgn: string) {
+  let hash = 5381;
+
+  for (let index = 0; index < pgn.length; index += 1) {
+    hash = (hash * 33) ^ pgn.charCodeAt(index);
+  }
+
+  return `pgn:${(hash >>> 0).toString(16)}`;
+}
+
+async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimelineAnalysis | null> {
+  try {
+    const response = await fetch(`/api/game-analysis-cache?key=${encodeURIComponent(cacheKey)}`, { credentials: 'same-origin' });
+    const payload = (await response.json()) as { analysis?: CachedTimelineAnalysis | null };
+    const analysis = payload.analysis;
+
+    if (
+      response.ok &&
+      analysis &&
+      Array.isArray(analysis.preMoveAnalyses) &&
+      Array.isArray(analysis.timelineAnalyses)
+    ) {
+      return analysis;
+    }
+  } catch {
+    // Analysis cache is an optimization; misses should not affect review.
+  }
+
+  return null;
+}
+
+async function saveCachedTimelineAnalysis({
+  cacheKey,
+  gameLink,
+  pgn,
+  preMoveAnalyses,
+  timelineAnalyses,
+}: {
+  cacheKey: string;
+  gameLink?: string | null;
+  pgn?: string | null;
+  preMoveAnalyses: AnalysisResult[];
+  timelineAnalyses: AnalysisResult[];
+}) {
+  try {
+    await fetch('/api/game-analysis-cache', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: cacheKey,
+        gameLink,
+        pgnHash: pgn ? getPgnHash(pgn) : null,
+        analysis: {
+          preMoveAnalyses,
+          timelineAnalyses,
+        },
+      }),
+    });
+  } catch {
+    // Best-effort persistence only.
+  }
 }
 
 type TrainingProfile = {
@@ -243,11 +320,12 @@ export function ChessAnalysisLab() {
   const [reviewDeckSaveStatus, setReviewDeckSaveStatus] = useState('');
   const [deckProgress, setDeckProgress] = useState<DeckProgressMap>({});
   const [chesscomUsername, setChesscomUsername] = useState('');
-  const [recentGameTimeClass, setRecentGameTimeClass] = useState<'bullet' | 'blitz' | 'rapid'>('blitz');
+  const [recentGameTimeClass, setRecentGameTimeClass] = useState<ChessComRecentGameTimeClass>('blitz');
   const [recentChessGames, setRecentChessGames] = useState<ChessComRecentGameSummary[]>([]);
   const [recentChessGamesLoading, setRecentChessGamesLoading] = useState(false);
   const [recentChessGamesHasMore, setRecentChessGamesHasMore] = useState(false);
   const [recentChessGamesNextOffset, setRecentChessGamesNextOffset] = useState(0);
+  const [recentChessGamesNextCursor, setRecentChessGamesNextCursor] = useState<string | null>(null);
   const [recentChessGamesError, setRecentChessGamesError] = useState('');
   const [trainingProfile, setTrainingProfile] = useState<TrainingProfile | null>(null);
   const [trainingProfileBootstrapping, setTrainingProfileBootstrapping] = useState(true);
@@ -265,6 +343,7 @@ export function ChessAnalysisLab() {
   const positionRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
   const timelineRefineRequestIdRef = useRef(0);
+  const timelineRefineBusyRef = useRef(false);
   const reviewPlaybackRequestIdRef = useRef(0);
   const deckPlaybackRequestIdRef = useRef(0);
   const deckReplayMovesRef = useRef<StoredMove[]>([]);
@@ -276,6 +355,14 @@ export function ChessAnalysisLab() {
   const soundPlayersRef = useRef<Partial<Record<ChessSoundKey, HTMLAudioElement>>>({});
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
+  const recentFetchRequestIdRef = useRef(0);
+  const recentAutoFetchStartedRef = useRef(false);
+  const recentPreloadRequestIdRef = useRef(0);
+  const recentPreloadedKeysRef = useRef(new Set<string>());
+  const activeRecentGameCacheKeyRef = useRef<string | null>(null);
+  const activeRecentGameLinkRef = useRef<string | null>(null);
+  const activeRecentGamePgnRef = useRef<string | null>(null);
+  const lastReviewInteractionAtRef = useRef(Date.now());
   const progressHydratedRef = useRef(false);
   const progressSyncTimerRef = useRef<number | null>(null);
   const selectedDeckIdRef = useRef<string | null>(null);
@@ -506,53 +593,82 @@ export function ChessAnalysisLab() {
   }, []);
 
   const fetchRecentChessGames = useCallback(
-    async (usernameOverride?: string, timeClassOverride?: 'bullet' | 'blitz' | 'rapid', append = false) => {
+    async (usernameOverride?: string, timeClassOverride?: ChessComRecentGameTimeClass, append = false, quiet = false) => {
+      const requestId = ++recentFetchRequestIdRef.current;
       const username = (usernameOverride ?? chesscomUsername).trim().toLowerCase();
       const timeClass = timeClassOverride ?? recentGameTimeClass;
-      const offset = append ? recentChessGamesNextOffset : 0;
+      const offset = append && !recentChessGamesNextCursor ? recentChessGamesNextOffset : 0;
+      const cursor = append ? recentChessGamesNextCursor : null;
 
       if (!username) {
         setRecentChessGames([]);
         setRecentChessGamesHasMore(false);
         setRecentChessGamesNextOffset(0);
+        setRecentChessGamesNextCursor(null);
         setRecentChessGamesError('Enter a Chess.com username.');
         return;
       }
 
-      setRecentChessGamesLoading(true);
-      setRecentChessGamesError('');
+      if (!quiet) {
+        setRecentChessGamesLoading(true);
+      }
+      if (!append) {
+        setRecentChessGamesError('');
+      }
 
       try {
         writeCookie(CHESSCOM_USERNAME_COOKIE, username);
         writeCookie(CHESSCOM_TIME_CLASS_COOKIE, timeClass);
-        const response = await fetch(
-          `/api/chesscom/recent-games?username=${encodeURIComponent(username)}&timeClass=${encodeURIComponent(timeClass)}&count=${RECENT_GAMES_PAGE_SIZE}&offset=${offset}`,
-        );
-        const payload = (await response.json()) as { error?: string; games?: ChessComRecentGameSummary[]; hasMore?: boolean; nextOffset?: number };
+        const params = new URLSearchParams({
+          username,
+          timeClass,
+          count: String(RECENT_GAMES_PAGE_SIZE),
+          offset: String(offset),
+        });
+
+        if (cursor) {
+          params.set('cursor', cursor);
+        }
+
+        const response = await fetch(`/api/chesscom/recent-games?${params.toString()}`);
+        const payload = (await response.json()) as {
+          error?: string;
+          games?: ChessComRecentGameSummary[];
+          hasMore?: boolean;
+          nextCursor?: string | null;
+          nextOffset?: number;
+        };
 
         if (!response.ok) {
           throw new Error(payload.error ?? `Chess.com fetch failed: HTTP ${response.status}`);
         }
 
+        if (recentFetchRequestIdRef.current !== requestId) {
+          return;
+        }
+
         const nextGames = Array.isArray(payload.games) ? payload.games : [];
         setRecentChessGames(current => {
           const merged = append ? [...current, ...nextGames] : nextGames;
-          return [...new Map(merged.map(game => [game.link, game])).values()];
+          return [...new Map(merged.map(game => [game.link || game.url, game])).values()].sort(
+            (left, right) => Number(right.endTime ?? 0) - Number(left.endTime ?? 0),
+          );
         });
         setRecentChessGamesHasMore(Boolean(payload.hasMore));
+        setRecentChessGamesNextCursor(payload.nextCursor ?? null);
         setRecentChessGamesNextOffset(typeof payload.nextOffset === 'number' ? payload.nextOffset : offset + nextGames.length);
       } catch (error) {
-        if (!append) {
-          setRecentChessGames([]);
-          setRecentChessGamesHasMore(false);
-          setRecentChessGamesNextOffset(0);
+        if (recentFetchRequestIdRef.current !== requestId) {
+          return;
         }
         setRecentChessGamesError(error instanceof Error ? error.message : 'Unable to fetch Chess.com games.');
       } finally {
-        setRecentChessGamesLoading(false);
+        if (recentFetchRequestIdRef.current === requestId && !quiet) {
+          setRecentChessGamesLoading(false);
+        }
       }
     },
-    [chesscomUsername, recentChessGamesNextOffset, recentGameTimeClass],
+    [chesscomUsername, recentChessGamesNextCursor, recentChessGamesNextOffset, recentGameTimeClass],
   );
 
   const saveTrainingProgress = useCallback(async (progress: DeckProgressMap) => {
@@ -831,10 +947,129 @@ export function ChessAnalysisLab() {
       setChesscomUsername(savedUsername);
     }
 
-    if (savedTimeClass === 'bullet' || savedTimeClass === 'blitz' || savedTimeClass === 'rapid') {
+    if (savedTimeClass === 'all' || savedTimeClass === 'bullet' || savedTimeClass === 'blitz' || savedTimeClass === 'rapid') {
       setRecentGameTimeClass(savedTimeClass);
     }
   }, []);
+
+  useEffect(() => {
+    const markInteraction = () => {
+      lastReviewInteractionAtRef.current = Date.now();
+      recentPreloadRequestIdRef.current += 1;
+    };
+
+    window.addEventListener('pointerdown', markInteraction, { passive: true });
+    window.addEventListener('keydown', markInteraction);
+
+    return () => {
+      window.removeEventListener('pointerdown', markInteraction);
+      window.removeEventListener('keydown', markInteraction);
+    };
+  }, []);
+
+  useEffect(() => {
+    const username = chesscomUsername.trim().toLowerCase();
+
+    if (!username || recentAutoFetchStartedRef.current) {
+      return;
+    }
+
+    recentAutoFetchStartedRef.current = true;
+    void fetchRecentChessGames(username, recentGameTimeClass, false, true);
+  }, [chesscomUsername, fetchRecentChessGames, recentGameTimeClass]);
+
+  useEffect(() => {
+    if (!chesscomUsername.trim()) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      if (modeRef.current !== 'review' || document.visibilityState !== 'visible') {
+        return;
+      }
+
+      void fetchRecentChessGames(undefined, undefined, false, true);
+    }, RECENT_GAMES_AUTO_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, [chesscomUsername, fetchRecentChessGames]);
+
+  const preloadRecentGameAnalysis = useCallback(async () => {
+    if (
+      modeRef.current !== 'review' ||
+      document.visibilityState !== 'visible' ||
+      timelineLoading ||
+      positionLoading ||
+      timelineRefineBusyRef.current ||
+      positionInFlightRef.current.size > 0 ||
+      Date.now() - lastReviewInteractionAtRef.current < RECENT_GAMES_INTERACTION_IDLE_MS
+    ) {
+      return;
+    }
+
+    const nextGame = recentChessGames.find(game => {
+      const cacheKey = getRecentGameCacheKey(game);
+      return cacheKey !== activeRecentGameCacheKeyRef.current && !recentPreloadedKeysRef.current.has(cacheKey);
+    });
+
+    if (!nextGame?.pgn) {
+      return;
+    }
+
+    const cacheKey = getRecentGameCacheKey(nextGame);
+    recentPreloadedKeysRef.current.add(cacheKey);
+
+    const cached = await loadCachedTimelineAnalysis(cacheKey);
+    if (cached) {
+      return;
+    }
+
+    const requestId = ++recentPreloadRequestIdRef.current;
+
+    try {
+      const preloadGame = new Chess();
+      preloadGame.loadPgn(nextGame.pgn);
+      const nextInitialFen = preloadGame.header().FEN ?? null;
+      const nextHistory = preloadGame.history({ verbose: true }).map(toStoredMove);
+
+      if (nextHistory.length === 0) {
+        return;
+      }
+
+      const response = await analyzeGamePositions({
+        positions: buildTimelineSequencePositions(nextHistory, nextInitialFen),
+        depth: 12,
+        movetimeMs: TIMELINE_MOVETIME_MS,
+      });
+
+      if (recentPreloadRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const sequence = response.analyses ?? [];
+      await saveCachedTimelineAnalysis({
+        cacheKey,
+        gameLink: nextGame.link || nextGame.url,
+        pgn: nextGame.pgn,
+        preMoveAnalyses: sequence.slice(0, -1),
+        timelineAnalyses: sequence.slice(1),
+      });
+    } catch {
+      recentPreloadedKeysRef.current.delete(cacheKey);
+    }
+  }, [positionLoading, recentChessGames, timelineLoading]);
+
+  useEffect(() => {
+    if (recentChessGames.length === 0) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      void preloadRecentGameAnalysis();
+    }, RECENT_GAMES_PRELOAD_IDLE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [preloadRecentGameAnalysis, recentChessGames, timelineAnalyses, timelineLoading, positionLoading]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1819,8 +2054,21 @@ export function ChessAnalysisLab() {
       }
 
       const sequence = response.analyses ?? [];
-      setPreMoveAnalyses(sequence.slice(0, -1));
-      setTimelineAnalyses(sequence.slice(1));
+      const nextPreMoveAnalyses = sequence.slice(0, -1);
+      const nextTimelineAnalyses = sequence.slice(1);
+      setPreMoveAnalyses(nextPreMoveAnalyses);
+      setTimelineAnalyses(nextTimelineAnalyses);
+
+      if (activeRecentGameCacheKeyRef.current) {
+        void saveCachedTimelineAnalysis({
+          cacheKey: activeRecentGameCacheKeyRef.current,
+          gameLink: activeRecentGameLinkRef.current,
+          pgn: activeRecentGamePgnRef.current,
+          preMoveAnalyses: nextPreMoveAnalyses,
+          timelineAnalyses: nextTimelineAnalyses,
+        });
+      }
+
       void refineTimelineAnalysis(nextMoves, nextInitialFen);
     } catch (error) {
       if (timelineRequestIdRef.current !== requestId) {
@@ -1844,6 +2092,7 @@ export function ChessAnalysisLab() {
 
     const requestId = ++timelineRefineRequestIdRef.current;
     const sequence: AnalysisResult[] = [];
+    timelineRefineBusyRef.current = true;
 
     try {
       for (const position of buildTimelineSequencePositions(nextMoves, nextInitialFen)) {
@@ -1864,17 +2113,45 @@ export function ChessAnalysisLab() {
         return;
       }
 
-      setPreMoveAnalyses(sequence.slice(0, -1));
-      setTimelineAnalyses(sequence.slice(1));
+      const nextPreMoveAnalyses = sequence.slice(0, -1);
+      const nextTimelineAnalyses = sequence.slice(1);
+      setPreMoveAnalyses(nextPreMoveAnalyses);
+      setTimelineAnalyses(nextTimelineAnalyses);
+
+      if (activeRecentGameCacheKeyRef.current) {
+        void saveCachedTimelineAnalysis({
+          cacheKey: activeRecentGameCacheKeyRef.current,
+          gameLink: activeRecentGameLinkRef.current,
+          pgn: activeRecentGamePgnRef.current,
+          preMoveAnalyses: nextPreMoveAnalyses,
+          timelineAnalyses: nextTimelineAnalyses,
+        });
+      }
     } catch {
       // Keep the fast timeline in place if the background high-quality pass fails.
+    } finally {
+      if (timelineRefineRequestIdRef.current === requestId) {
+        timelineRefineBusyRef.current = false;
+      }
     }
   }
 
-  async function loadPgnText(name: string, content: string, preferredOrientation?: 'white' | 'black') {
+  async function loadPgnText(
+    name: string,
+    content: string,
+    preferredOrientation?: 'white' | 'black',
+    options?: {
+      cachedAnalysis?: CachedTimelineAnalysis | null;
+      cacheKey?: string | null;
+      gameLink?: string | null;
+    },
+  ) {
     persistTrainWorkspaceSnapshot();
     reviewWorkspaceSnapshotRef.current = null;
     timelineRefineRequestIdRef.current += 1;
+    activeRecentGameCacheKeyRef.current = options?.cacheKey ?? null;
+    activeRecentGameLinkRef.current = options?.gameLink ?? null;
+    activeRecentGamePgnRef.current = options?.cacheKey ? content : null;
 
     try {
       const loadedGame = new Chess();
@@ -1897,8 +2174,8 @@ export function ChessAnalysisLab() {
       setActiveDeckCard(null);
       setDeckFeedback(null);
       setPositionAnalysis(null);
-      setPreMoveAnalyses([]);
-      setTimelineAnalyses([]);
+      setPreMoveAnalyses(options?.cachedAnalysis?.preMoveAnalyses ?? []);
+      setTimelineAnalyses(options?.cachedAnalysis?.timelineAnalyses ?? []);
       setTimelineError('');
       setServerError('');
       setPgnDialogOpen(false);
@@ -1910,7 +2187,11 @@ export function ChessAnalysisLab() {
       clearSelection();
       playSound('game-start');
 
-      await runTimelineAnalysis(nextHistory, nextInitialFen);
+      if (options?.cachedAnalysis) {
+        void refineTimelineAnalysis(nextHistory, nextInitialFen);
+      } else {
+        await runTimelineAnalysis(nextHistory, nextInitialFen);
+      }
     } catch (error) {
       setTimelineAnalyses([]);
       setTimelineError('Invalid PGN file.');
@@ -1943,7 +2224,22 @@ export function ChessAnalysisLab() {
   }
 
   async function loadRecentChessGame(gameSummary: ChessComRecentGameSummary) {
-    await loadPgnText(gameSummary.link, gameSummary.pgn, gameSummary.playerColor === 'black' ? 'black' : 'white');
+    recentPreloadRequestIdRef.current += 1;
+    lastReviewInteractionAtRef.current = Date.now();
+
+    const cacheKey = getRecentGameCacheKey(gameSummary);
+    const cachedAnalysis = await loadCachedTimelineAnalysis(cacheKey);
+
+    await loadPgnText(
+      gameSummary.link,
+      gameSummary.pgn,
+      gameSummary.playerColor === 'black' ? 'black' : 'white',
+      {
+        cachedAnalysis,
+        cacheKey,
+        gameLink: gameSummary.link || gameSummary.url,
+      },
+    );
   }
 
   async function openTrainingProfile() {
@@ -2386,6 +2682,7 @@ export function ChessAnalysisLab() {
                     setRecentChessGames([]);
                     setRecentChessGamesHasMore(false);
                     setRecentChessGamesNextOffset(0);
+                    setRecentChessGamesNextCursor(null);
                     setRecentChessGamesError('');
                   }
                 }}
@@ -2395,6 +2692,8 @@ export function ChessAnalysisLab() {
                   setRecentChessGames([]);
                   setRecentChessGamesHasMore(false);
                   setRecentChessGamesNextOffset(0);
+                  setRecentChessGamesNextCursor(null);
+                  void fetchRecentChessGames(undefined, timeClass);
                 }}
                 onFetchRecentGames={() => void fetchRecentChessGames()}
                 recentGames={recentChessGames}
