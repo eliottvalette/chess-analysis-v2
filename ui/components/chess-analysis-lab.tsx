@@ -2147,6 +2147,7 @@ export function ChessAnalysisLab() {
       cachedAnalysis?: CachedTimelineAnalysis | null;
       cacheKey?: string | null;
       gameLink?: string | null;
+      skipAnalysis?: boolean;
     },
   ) {
     persistTrainWorkspaceSnapshot();
@@ -2196,7 +2197,9 @@ export function ChessAnalysisLab() {
       clearSelection();
       playSound('game-start');
 
-      if (!cachedAnalysis) {
+      if (!cachedAnalysis && options?.skipAnalysis) {
+        setTimelineLoading(false);
+      } else if (!cachedAnalysis) {
         await runTimelineAnalysis(nextHistory, nextInitialFen);
       }
     } catch (error) {
@@ -2234,18 +2237,50 @@ export function ChessAnalysisLab() {
     lastReviewInteractionAtRef.current = Date.now();
 
     const cacheKey = getRecentGameCacheKey(gameSummary);
-    const cachedAnalysis = await loadCachedTimelineAnalysis(cacheKey);
+    const memoryCachedAnalysis = recentGameAnalysisMemoryCache.get(cacheKey) ?? null;
+    const parsedGame = new Chess();
+    parsedGame.loadPgn(gameSummary.pgn);
+    const nextInitialFen = parsedGame.header().FEN ?? null;
+    const nextHistory = parsedGame.history({ verbose: true }).map(toStoredMove);
 
     await loadPgnText(
       gameSummary.link,
       gameSummary.pgn,
       gameSummary.playerColor === 'black' ? 'black' : 'white',
       {
-        cachedAnalysis,
+        cachedAnalysis: memoryCachedAnalysis,
         cacheKey,
         gameLink: gameSummary.link || gameSummary.url,
+        skipAnalysis: !memoryCachedAnalysis,
       },
     );
+
+    if (!memoryCachedAnalysis) {
+      void (async () => {
+        setTimelineLoading(true);
+        const analysis = await loadCachedTimelineAnalysis(cacheKey);
+
+        if (activeRecentGameCacheKeyRef.current !== cacheKey) {
+          return;
+        }
+
+        if (
+          analysis &&
+          analysis.preMoveAnalyses.length === nextHistory.length &&
+          analysis.timelineAnalyses.length === nextHistory.length
+        ) {
+          setPreMoveAnalyses(analysis.preMoveAnalyses);
+          setTimelineAnalyses(analysis.timelineAnalyses);
+          return;
+        }
+
+        await runTimelineAnalysis(nextHistory, nextInitialFen);
+      })().finally(() => {
+          if (activeRecentGameCacheKeyRef.current === cacheKey) {
+            setTimelineLoading(false);
+          }
+        });
+    }
   }
 
   async function openTrainingProfile() {
