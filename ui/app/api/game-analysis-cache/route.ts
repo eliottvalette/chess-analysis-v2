@@ -6,6 +6,7 @@ import { createAdminClient } from '@/utils/supabase/admin';
 export const runtime = 'nodejs';
 
 type CachedAnalysisPayload = {
+  quality?: 'refined';
   preMoveAnalyses?: AnalysisResult[];
   timelineAnalyses?: AnalysisResult[];
   updatedAt?: string;
@@ -99,6 +100,7 @@ function normalizeAnalysis(analysis: CachedAnalysisPayload | null | undefined) {
   }
 
   return {
+    quality: 'refined',
     preMoveAnalyses: analysis.preMoveAnalyses,
     timelineAnalyses: analysis.timelineAnalyses,
     updatedAt: new Date().toISOString(),

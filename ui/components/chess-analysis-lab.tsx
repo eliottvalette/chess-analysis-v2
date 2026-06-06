@@ -15,7 +15,6 @@ import {
   type WorkspaceMode,
 } from '@/components/chess-lab-panels';
 import {
-  analyzeGamePositions,
   analyzeSinglePosition,
   buildGameReview,
   buildMoveUciHistory,
@@ -65,7 +64,6 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
 
 const POSITION_DEPTH = 20;
 const POSITION_MOVETIME_MS = 400;
-const TIMELINE_MOVETIME_MS = 80;
 const POSITION_MULTIPV = 3;
 const PRELOAD_AHEAD = 15;
 const LAST_MOVE_STYLE = {
@@ -88,6 +86,7 @@ const RECENT_GAMES_PRELOAD_IDLE_MS = 1_400;
 const RECENT_GAMES_INTERACTION_IDLE_MS = 2_500;
 
 type CachedTimelineAnalysis = {
+  quality: 'refined';
   preMoveAnalyses: AnalysisResult[];
   timelineAnalyses: AnalysisResult[];
   updatedAt?: string;
@@ -175,6 +174,7 @@ async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimel
     if (
       response.ok &&
       analysis &&
+      analysis.quality === 'refined' &&
       Array.isArray(analysis.preMoveAnalyses) &&
       Array.isArray(analysis.timelineAnalyses)
     ) {
@@ -202,6 +202,7 @@ async function saveCachedTimelineAnalysis({
   timelineAnalyses: AnalysisResult[];
 }) {
   recentGameAnalysisMemoryCache.set(cacheKey, {
+    quality: 'refined',
     preMoveAnalyses,
     timelineAnalyses,
     updatedAt: new Date().toISOString(),
@@ -217,6 +218,7 @@ async function saveCachedTimelineAnalysis({
         gameLink,
         pgnHash: pgn ? getPgnHash(pgn) : null,
         analysis: {
+          quality: 'refined',
           preMoveAnalyses,
           timelineAnalyses,
         },
@@ -366,7 +368,6 @@ export function ChessAnalysisLab() {
   const positionRequestIdRef = useRef(0);
   const timelineRequestIdRef = useRef(0);
   const timelineRefineRequestIdRef = useRef(0);
-  const timelineRefineBusyRef = useRef(false);
   const reviewPlaybackRequestIdRef = useRef(0);
   const deckPlaybackRequestIdRef = useRef(0);
   const deckReplayMovesRef = useRef<StoredMove[]>([]);
@@ -555,7 +556,7 @@ export function ChessAnalysisLab() {
   );
 
   const fetchCachedPositionAnalysis = useCallback(
-    (cacheKey: string, fen: string, moves: string[]) => {
+    (cacheKey: string, fen: string, moves: string[], requestInitialFen = initialFen) => {
       const cachedAnalysis = positionCacheRef.current.get(cacheKey);
 
       if (cachedAnalysis) {
@@ -570,7 +571,7 @@ export function ChessAnalysisLab() {
 
       const request = analyzeSinglePosition({
         fen,
-        initialFen,
+        initialFen: requestInitialFen,
         moves,
         depth: POSITION_DEPTH,
         movetimeMs: POSITION_MOVETIME_MS,
@@ -1022,7 +1023,6 @@ export function ChessAnalysisLab() {
       document.visibilityState !== 'visible' ||
       timelineLoading ||
       positionLoading ||
-      timelineRefineBusyRef.current ||
       positionInFlightRef.current.size > 0 ||
       Date.now() - lastReviewInteractionAtRef.current < RECENT_GAMES_INTERACTION_IDLE_MS
     ) {
@@ -1060,18 +1060,23 @@ export function ChessAnalysisLab() {
         return null;
       }
 
-      const response = await analyzeGamePositions({
-        positions: buildTimelineSequencePositions(nextHistory, nextInitialFen),
-        depth: 12,
-        movetimeMs: TIMELINE_MOVETIME_MS,
-      });
+      const sequence: AnalysisResult[] = [];
+      for (const position of buildTimelineSequencePositions(nextHistory, nextInitialFen)) {
+        if (recentPreloadRequestIdRef.current !== requestId) {
+          return null;
+        }
 
-      if (recentPreloadRequestIdRef.current !== requestId) {
-        return null;
+        const moves = position.moves ?? [];
+        if (!position.fen) {
+          throw new Error('Missing timeline position.');
+        }
+
+        const positionCacheKey = getPositionCacheKey(nextInitialFen, moves);
+        sequence.push(await fetchCachedPositionAnalysis(positionCacheKey, position.fen, moves, nextInitialFen));
       }
 
-      const sequence = response.analyses ?? [];
       const analysis = {
+        quality: 'refined',
         preMoveAnalyses: sequence.slice(0, -1),
         timelineAnalyses: sequence.slice(1),
       } satisfies CachedTimelineAnalysis;
@@ -1099,7 +1104,7 @@ export function ChessAnalysisLab() {
     } finally {
       recentGameAnalysisInFlightCache.delete(cacheKey);
     }
-  }, [positionLoading, recentChessGames, timelineLoading]);
+  }, [fetchCachedPositionAnalysis, positionLoading, recentChessGames, timelineLoading]);
 
   useEffect(() => {
     if (recentChessGames.length === 0) {
@@ -2085,17 +2090,26 @@ export function ChessAnalysisLab() {
     setTimelineError('');
 
     try {
-      const response = await analyzeGamePositions({
-        positions: buildTimelineSequencePositions(nextMoves, nextInitialFen),
-        depth: 12,
-        movetimeMs: TIMELINE_MOVETIME_MS,
-      });
+      const sequence: AnalysisResult[] = [];
+
+      for (const position of buildTimelineSequencePositions(nextMoves, nextInitialFen)) {
+        if (timelineRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        const moves = position.moves ?? [];
+        if (!position.fen) {
+          throw new Error('Missing timeline position.');
+        }
+
+        const cacheKey = getPositionCacheKey(nextInitialFen, moves);
+        sequence.push(await fetchCachedPositionAnalysis(cacheKey, position.fen, moves, nextInitialFen));
+      }
 
       if (timelineRequestIdRef.current !== requestId) {
         return;
       }
 
-      const sequence = response.analyses ?? [];
       const nextPreMoveAnalyses = sequence.slice(0, -1);
       const nextTimelineAnalyses = sequence.slice(1);
       setPreMoveAnalyses(nextPreMoveAnalyses);
@@ -2110,8 +2124,6 @@ export function ChessAnalysisLab() {
           timelineAnalyses: nextTimelineAnalyses,
         });
       }
-
-      void refineTimelineAnalysis(nextMoves, nextInitialFen);
     } catch (error) {
       if (timelineRequestIdRef.current !== requestId) {
         return;
@@ -2123,57 +2135,6 @@ export function ChessAnalysisLab() {
     } finally {
       if (timelineRequestIdRef.current === requestId) {
         setTimelineLoading(false);
-      }
-    }
-  }
-
-  async function refineTimelineAnalysis(nextMoves = moveHistory, nextInitialFen = initialFen) {
-    if (nextMoves.length === 0) {
-      return;
-    }
-
-    const requestId = ++timelineRefineRequestIdRef.current;
-    const sequence: AnalysisResult[] = [];
-    timelineRefineBusyRef.current = true;
-
-    try {
-      for (const position of buildTimelineSequencePositions(nextMoves, nextInitialFen)) {
-        if (timelineRefineRequestIdRef.current !== requestId) {
-          return;
-        }
-
-        const moves = position.moves ?? [];
-        if (!position.fen) {
-          throw new Error('Missing timeline position.');
-        }
-
-        const cacheKey = getPositionCacheKey(nextInitialFen, moves);
-        sequence.push(await fetchCachedPositionAnalysis(cacheKey, position.fen, moves));
-      }
-
-      if (timelineRefineRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      const nextPreMoveAnalyses = sequence.slice(0, -1);
-      const nextTimelineAnalyses = sequence.slice(1);
-      setPreMoveAnalyses(nextPreMoveAnalyses);
-      setTimelineAnalyses(nextTimelineAnalyses);
-
-      if (activeRecentGameCacheKeyRef.current) {
-        void saveCachedTimelineAnalysis({
-          cacheKey: activeRecentGameCacheKeyRef.current,
-          gameLink: activeRecentGameLinkRef.current,
-          pgn: activeRecentGamePgnRef.current,
-          preMoveAnalyses: nextPreMoveAnalyses,
-          timelineAnalyses: nextTimelineAnalyses,
-        });
-      }
-    } catch {
-      // Keep the fast timeline in place if the background high-quality pass fails.
-    } finally {
-      if (timelineRefineRequestIdRef.current === requestId) {
-        timelineRefineBusyRef.current = false;
       }
     }
   }
@@ -2202,6 +2163,12 @@ export function ChessAnalysisLab() {
       const nextInitialFen = loadedGame.header().FEN ?? null;
       const nextHistory = loadedGame.history({ verbose: true }).map(toStoredMove);
       const nextGame = restoreGameFromHistory(nextHistory, nextInitialFen, 0);
+      const cachedAnalysis =
+        options?.cachedAnalysis &&
+        options.cachedAnalysis.preMoveAnalyses.length === nextHistory.length &&
+        options.cachedAnalysis.timelineAnalyses.length === nextHistory.length
+          ? options.cachedAnalysis
+          : null;
 
       setInitialFen(nextInitialFen);
       setMoveHistory(nextHistory);
@@ -2216,8 +2183,8 @@ export function ChessAnalysisLab() {
       setActiveDeckCard(null);
       setDeckFeedback(null);
       setPositionAnalysis(null);
-      setPreMoveAnalyses(options?.cachedAnalysis?.preMoveAnalyses ?? []);
-      setTimelineAnalyses(options?.cachedAnalysis?.timelineAnalyses ?? []);
+      setPreMoveAnalyses(cachedAnalysis?.preMoveAnalyses ?? []);
+      setTimelineAnalyses(cachedAnalysis?.timelineAnalyses ?? []);
       setTimelineError('');
       setServerError('');
       setPgnDialogOpen(false);
@@ -2229,9 +2196,7 @@ export function ChessAnalysisLab() {
       clearSelection();
       playSound('game-start');
 
-      if (options?.cachedAnalysis) {
-        void refineTimelineAnalysis(nextHistory, nextInitialFen);
-      } else {
+      if (!cachedAnalysis) {
         await runTimelineAnalysis(nextHistory, nextInitialFen);
       }
     } catch (error) {
