@@ -66,7 +66,7 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
 const POSITION_DEPTH = 20;
 const POSITION_MOVETIME_MS = 400;
 const POSITION_MULTIPV = 3;
-const TIMELINE_ANALYSIS_BATCH_SIZE = 2;
+const TIMELINE_ANALYSIS_BATCH_SIZE = 4;
 const PRELOAD_AHEAD = 15;
 const LAST_MOVE_STYLE = {
   backgroundColor: 'rgba(84, 173, 255, 0.26)',

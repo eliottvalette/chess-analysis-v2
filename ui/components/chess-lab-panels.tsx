@@ -928,6 +928,7 @@ function ReviewTimelineStrip({
   const scores = timelineAnalyses.map(analysis => Math.max(-10, Math.min(10, toChartScore(analysis))));
   const pointCount = Math.max(1, scores.length);
   const cursorX = moveHistoryLength <= 1 ? 0 : ((Math.max(1, historyIndex) - 1) / Math.max(1, moveHistoryLength - 1)) * 100;
+  const progressValue = getTimelineProgressValue(timelineProgress);
   const timelinePoints = scores.map((score, index) => {
     const x = pointCount <= 1 ? 0 : (index / (pointCount - 1)) * 100;
     const y = 14 - Math.tanh(score / 4) * 10.5;
@@ -939,18 +940,21 @@ function ReviewTimelineStrip({
   const whiteAreaPath = timelinePoints.length
     ? `M 0 28 L ${timelinePoints.map(point => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')} L 100 28 Z`
     : '';
+  const loadingAreaPath = 'M 0 28 L 0 11.8 L 9 13.2 L 18 10.4 L 29 15.6 L 41 12.6 L 53 17.2 L 66 11.4 L 78 14.8 L 90 9.8 L 100 12.8 L 100 28 Z';
+  const loadingBoundaryPath = 'M 0 11.8 L 9 13.2 L 18 10.4 L 29 15.6 L 41 12.6 L 53 17.2 L 66 11.4 L 78 14.8 L 90 9.8 L 100 12.8';
+  const hasTimeline = timelineAnalysesLength > 0;
 
   return (
     <div className={styles.reviewTimeline}>
-      <div className={styles.reviewTimelineGraph}>
+      <div className={`${styles.reviewTimelineGraph} ${timelineLoading ? styles.reviewTimelineGraphLoading : ''}`}>
         <svg className={styles.reviewTimelineSvg} viewBox="0 0 100 28" preserveAspectRatio="none" aria-label="Evaluation timeline">
           <rect className={styles.reviewTimelineBlack} x="0" y="0" width="100" height="28" />
-          {timelineAnalysesLength > 0 ? <path className={styles.reviewTimelineWhite} d={whiteAreaPath} /> : null}
+          <path className={styles.reviewTimelineWhite} d={hasTimeline ? whiteAreaPath : loadingAreaPath} />
           <line className={styles.reviewTimelineMidline} x1="0" x2="100" y1="14" y2="14" />
-          {timelineAnalysesLength > 0 ? <path className={styles.reviewTimelinePath} d={boundaryPath} /> : null}
+          <path className={styles.reviewTimelinePath} d={hasTimeline ? boundaryPath : loadingBoundaryPath} />
           <line className={styles.reviewTimelineCursor} x1={cursorX} x2={cursorX} y1="0" y2="28" vectorEffect="non-scaling-stroke" />
         </svg>
-        {timelineReviews.map(review => {
+        {hasTimeline ? timelineReviews.map(review => {
           const dotColor = getReviewDotColor(review);
 
           if (!dotColor) {
@@ -973,20 +977,35 @@ function ReviewTimelineStrip({
               type="button"
             />
           );
-        })}
+        }) : null}
       </div>
-      {timelineAnalysesLength === 0 ? <div className={styles.reviewTimelineFallback}>{timelineLoading ? formatTimelineProgress(timelineProgress) : 'No review yet.'}</div> : null}
+      {timelineLoading ? (
+        <div className={styles.reviewTimelineProgress} aria-label={`Analysis ${formatTimelineProgress(progressValue)}`}>
+          <div className={styles.reviewTimelineProgressTop}>
+            <span>Deep analysis</span>
+            <strong>{formatTimelineProgress(progressValue)}</strong>
+          </div>
+          <div className={styles.reviewTimelineProgressTrack}>
+            <span className={styles.reviewTimelineProgressFill} style={{ width: `${progressValue}%` }} />
+          </div>
+        </div>
+      ) : null}
+      {!timelineLoading && timelineAnalysesLength === 0 ? <div className={styles.reviewTimelineFallback}>No review yet.</div> : null}
       {timelineError ? <span className={styles.reviewTimelineError}>{timelineError}</span> : null}
     </div>
   );
 }
 
 function formatTimelineProgress(progress: number | null) {
+  return `${getTimelineProgressValue(progress)}%`;
+}
+
+function getTimelineProgressValue(progress: number | null) {
   if (typeof progress !== 'number' || !Number.isFinite(progress)) {
-    return '0%';
+    return 0;
   }
 
-  return `${Math.max(0, Math.min(100, Math.round(progress)))}%`;
+  return Math.max(0, Math.min(100, Math.round(progress)));
 }
 
 function compactCoachText(review: TimelineReview) {

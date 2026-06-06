@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import type { AnalyzeRequest } from '@/lib/analysis-types';
-import { getStockfishSession } from '@/lib/stockfish-session';
+import { getStockfishSessionPool } from '@/lib/stockfish-session';
 
 export const runtime = 'nodejs';
 
@@ -23,12 +23,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const session = await getStockfishSession();
-    const analyses = [];
-
-    for (const position of positions) {
-      analyses.push(await session.analyze({ ...position, depth: body.depth, movetimeMs: body.movetimeMs }));
-    }
+    const sessions = await getStockfishSessionPool(Math.min(positions.length || 1, 4));
+    const analyses = await Promise.all(
+      positions.map((position, index) =>
+        sessions[index % sessions.length].analyze({ ...position, depth: body.depth, movetimeMs: body.movetimeMs }),
+      ),
+    );
 
     return NextResponse.json({ analyses });
   } catch (error) {

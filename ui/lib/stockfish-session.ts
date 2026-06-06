@@ -21,6 +21,8 @@ const MAX_MULTIPV = 3;
 const MIN_MOVETIME_MS = 1;
 const MAX_MOVETIME_MS = 5_000;
 const ENGINE_TIMEOUT_MS = 15_000;
+const DEFAULT_ENGINE_POOL_SIZE = 4;
+const MAX_ENGINE_POOL_SIZE = 6;
 const DEFAULT_STOCKFISH_PATHS = [
   path.join(process.cwd(), 'bin', 'stockfish'),
   path.join(process.cwd(), 'ui', 'bin', 'stockfish'),
@@ -235,15 +237,27 @@ class StockfishSession {
 
 declare global {
   var __chessAnalysisStockfishSession: Promise<StockfishSession> | undefined;
+  var __chessAnalysisStockfishSessions: Array<Promise<StockfishSession> | undefined> | undefined;
+  var __chessAnalysisStockfishRoundRobin: number | undefined;
   var __chessAnalysisCache: Map<string, AnalysisResult> | undefined;
 }
 
 if (process.env.NODE_ENV !== 'production') {
   globalThis.__chessAnalysisStockfishSession = undefined;
+  globalThis.__chessAnalysisStockfishSessions = undefined;
+  globalThis.__chessAnalysisStockfishRoundRobin = undefined;
 }
 
-export function getStockfishSession() {
-  if (!globalThis.__chessAnalysisStockfishSession) {
+export function getStockfishSession(slot?: number) {
+  const poolSize = getStockfishPoolSize();
+  const requestedSlot =
+    typeof slot === 'number' && Number.isFinite(slot)
+      ? Math.max(0, Math.floor(slot)) % poolSize
+      : getNextStockfishSlot(poolSize);
+
+  globalThis.__chessAnalysisStockfishSessions ??= [];
+
+  if (!globalThis.__chessAnalysisStockfishSessions[requestedSlot]) {
     const sessionPromise = NativeStockfishEngine.create()
       .then(async engine => {
         const session = new StockfishSession(engine);
@@ -251,14 +265,38 @@ export function getStockfishSession() {
         return session;
       })
       .catch(error => {
-        globalThis.__chessAnalysisStockfishSession = undefined;
+        if (globalThis.__chessAnalysisStockfishSessions) {
+          globalThis.__chessAnalysisStockfishSessions[requestedSlot] = undefined;
+        }
         throw error;
       });
 
-    globalThis.__chessAnalysisStockfishSession = sessionPromise;
+    globalThis.__chessAnalysisStockfishSessions[requestedSlot] = sessionPromise;
   }
 
-  return globalThis.__chessAnalysisStockfishSession;
+  globalThis.__chessAnalysisStockfishSession = globalThis.__chessAnalysisStockfishSessions[requestedSlot];
+  return globalThis.__chessAnalysisStockfishSessions[requestedSlot];
+}
+
+export async function getStockfishSessionPool(size = getStockfishPoolSize()) {
+  const poolSize = Math.max(1, Math.min(getStockfishPoolSize(), Math.floor(size)));
+  return Promise.all(Array.from({ length: poolSize }, (_, index) => getStockfishSession(index)));
+}
+
+function getNextStockfishSlot(poolSize: number) {
+  const next = globalThis.__chessAnalysisStockfishRoundRobin ?? 0;
+  globalThis.__chessAnalysisStockfishRoundRobin = (next + 1) % poolSize;
+  return next;
+}
+
+function getStockfishPoolSize() {
+  const parsed = Number.parseInt(String(process.env.STOCKFISH_POOL_SIZE ?? DEFAULT_ENGINE_POOL_SIZE), 10);
+
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_ENGINE_POOL_SIZE;
+  }
+
+  return Math.max(1, Math.min(MAX_ENGINE_POOL_SIZE, parsed));
 }
 
 function getAnalysisCache() {
