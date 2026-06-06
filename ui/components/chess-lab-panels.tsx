@@ -92,6 +92,7 @@ export function ReviewPanel({
   timelineAnalysesLength,
   timelineError,
   timelineLoading,
+  timelineProgress,
   timelineReviews,
   whiteReviewName,
 }: {
@@ -138,6 +139,7 @@ export function ReviewPanel({
   timelineAnalysesLength: number;
   timelineError: string;
   timelineLoading: boolean;
+  timelineProgress: number | null;
   timelineReviews: TimelineReview[];
   whiteReviewName: string;
 }) {
@@ -177,6 +179,7 @@ export function ReviewPanel({
     timelineAnalysesLength,
     timelineError,
     timelineLoading,
+    timelineProgress,
     timelineReviews,
     whiteReviewName,
   };
@@ -504,6 +507,7 @@ export function GameReviewPanel({
   timelineAnalysesLength,
   timelineError,
   timelineLoading,
+  timelineProgress,
   timelineReviews,
   whiteReviewName,
 }: {
@@ -549,6 +553,7 @@ export function GameReviewPanel({
   timelineAnalysesLength: number;
   timelineError: string;
   timelineLoading: boolean;
+  timelineProgress: number | null;
   timelineReviews: TimelineReview[];
   whiteReviewName: string;
 }) {
@@ -660,11 +665,11 @@ export function GameReviewPanel({
         <div className={styles.coachHeader}>
           <div className={styles.coachTitle}>
             <span className={styles.reviewBadge} style={{ ['--review-color' as string]: coachReview?.colorHex ?? '#98b8ff' }}>
-              {coachReview?.label ?? (timelineLoading ? 'Analyzing' : 'Review')}
+              {coachReview?.label ?? 'Review'}
             </span>
             <strong>{coachReview ? `${coachReview.moveLabel} ${coachReview.san}` : `${whiteReviewName} vs ${blackReviewName}`}</strong>
           </div>
-          <span className={styles.statusText}>{timelineLoading ? 'building' : `${reviewMoments.length} moments`}</span>
+          <span className={styles.statusText}>{timelineLoading ? formatTimelineProgress(timelineProgress) : `${reviewMoments.length} moments`}</span>
         </div>
         {coachReview ? <p className={styles.coachText}>{compactCoachText(coachReview)}</p> : null}
         <div className={styles.reviewCoachActions}>
@@ -724,6 +729,7 @@ export function GameReviewPanel({
         timelineAnalysesLength={timelineAnalysesLength}
         timelineError={timelineError}
         timelineLoading={timelineLoading}
+        timelineProgress={timelineProgress}
         timelineReviews={timelineReviews}
       />
 
@@ -906,6 +912,7 @@ function ReviewTimelineStrip({
   timelineAnalysesLength,
   timelineError,
   timelineLoading,
+  timelineProgress,
   timelineReviews,
 }: {
   historyIndex: number;
@@ -915,6 +922,7 @@ function ReviewTimelineStrip({
   timelineAnalysesLength: number;
   timelineError: string;
   timelineLoading: boolean;
+  timelineProgress: number | null;
   timelineReviews: TimelineReview[];
 }) {
   const scores = timelineAnalyses.map(analysis => Math.max(-10, Math.min(10, toChartScore(analysis))));
@@ -967,10 +975,18 @@ function ReviewTimelineStrip({
           );
         })}
       </div>
-      {timelineAnalysesLength === 0 ? <div className={styles.reviewTimelineFallback}>{timelineLoading ? 'Analyzing...' : 'No review yet.'}</div> : null}
+      {timelineAnalysesLength === 0 ? <div className={styles.reviewTimelineFallback}>{timelineLoading ? formatTimelineProgress(timelineProgress) : 'No review yet.'}</div> : null}
       {timelineError ? <span className={styles.reviewTimelineError}>{timelineError}</span> : null}
     </div>
   );
+}
+
+function formatTimelineProgress(progress: number | null) {
+  if (typeof progress !== 'number' || !Number.isFinite(progress)) {
+    return '0%';
+  }
+
+  return `${Math.max(0, Math.min(100, Math.round(progress)))}%`;
 }
 
 function compactCoachText(review: TimelineReview) {

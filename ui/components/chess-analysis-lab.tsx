@@ -322,6 +322,7 @@ export function ChessAnalysisLab() {
   const [timelineAnalyses, setTimelineAnalyses] = useState<AnalysisResult[]>([]);
   const [positionLoading, setPositionLoading] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineProgress, setTimelineProgress] = useState<number | null>(null);
   const [serverError, setServerError] = useState('');
   const [timelineError, setTimelineError] = useState('');
   const [boardWidth, setBoardWidth] = useState(640);
@@ -593,10 +594,20 @@ export function ChessAnalysisLab() {
   );
 
   const analyzeTimelineDeep = useCallback(
-    async (moves: StoredMove[], requestInitialFen: string | null) => {
+    async (
+      moves: StoredMove[],
+      requestInitialFen: string | null,
+      onProgress?: (progress: number) => void,
+    ) => {
       const positions = buildTimelineSequencePositions(moves, requestInitialFen);
       const sequence: AnalysisResult[] = new Array(positions.length);
       const missing: Array<{ index: number; cacheKey: string; position: NonNullable<typeof positions[number]> }> = [];
+      let completed = 0;
+      const reportProgress = (completed: number) => {
+        onProgress?.((completed / Math.max(1, positions.length)) * 100);
+      };
+
+      reportProgress(0);
 
       positions.forEach((position, index) => {
         const positionMoves = position.moves ?? [];
@@ -605,6 +616,8 @@ export function ChessAnalysisLab() {
 
         if (cachedAnalysis) {
           sequence[index] = cachedAnalysis;
+          completed += 1;
+          reportProgress(completed);
           return;
         }
 
@@ -626,6 +639,7 @@ export function ChessAnalysisLab() {
       });
 
       if (missing.length > 0) {
+        onProgress?.(Math.max(1, Math.min(95, ((positions.length - missing.length) / Math.max(1, positions.length)) * 100)));
         const response = await analyzeGamePositions({
           positions: missing.map(item => item.position),
           depth: POSITION_DEPTH,
@@ -643,9 +657,12 @@ export function ChessAnalysisLab() {
 
           positionCacheRef.current.set(item.cacheKey, analysis);
           sequence[item.index] = analysis;
+          completed += 1;
+          reportProgress(completed);
         });
       }
 
+      reportProgress(positions.length);
       return sequence;
     },
     [],
@@ -2134,14 +2151,20 @@ export function ChessAnalysisLab() {
       setTimelineAnalyses([]);
       setTimelineError('');
       setTimelineLoading(false);
+      setTimelineProgress(null);
       return;
     }
 
     setTimelineLoading(true);
+    setTimelineProgress(0);
     setTimelineError('');
 
     try {
-      const sequence = await analyzeTimelineDeep(nextMoves, nextInitialFen);
+      const sequence = await analyzeTimelineDeep(nextMoves, nextInitialFen, progress => {
+        if (timelineRequestIdRef.current === requestId) {
+          setTimelineProgress(progress);
+        }
+      });
 
       if (timelineRequestIdRef.current !== requestId) {
         return;
@@ -2172,6 +2195,7 @@ export function ChessAnalysisLab() {
     } finally {
       if (timelineRequestIdRef.current === requestId) {
         setTimelineLoading(false);
+        setTimelineProgress(null);
       }
     }
   }
@@ -2224,6 +2248,7 @@ export function ChessAnalysisLab() {
       setPreMoveAnalyses(cachedAnalysis?.preMoveAnalyses ?? []);
       setTimelineAnalyses(cachedAnalysis?.timelineAnalyses ?? []);
       setTimelineError('');
+      setTimelineProgress(null);
       setServerError('');
       setPgnDialogOpen(false);
       if (preferredOrientation) {
@@ -2234,6 +2259,7 @@ export function ChessAnalysisLab() {
 
       if (!cachedAnalysis && options?.skipAnalysis) {
         setTimelineLoading(false);
+        setTimelineProgress(null);
       } else if (!cachedAnalysis) {
         await runTimelineAnalysis(nextHistory, nextInitialFen);
       }
@@ -2293,6 +2319,7 @@ export function ChessAnalysisLab() {
     if (!memoryCachedAnalysis) {
       void (async () => {
         setTimelineLoading(true);
+        setTimelineProgress(0);
         const analysis = await loadCachedTimelineAnalysis(cacheKey);
 
         if (activeRecentGameCacheKeyRef.current !== cacheKey) {
@@ -2306,6 +2333,7 @@ export function ChessAnalysisLab() {
         ) {
           setPreMoveAnalyses(analysis.preMoveAnalyses);
           setTimelineAnalyses(analysis.timelineAnalyses);
+          setTimelineProgress(100);
           return;
         }
 
@@ -2313,6 +2341,7 @@ export function ChessAnalysisLab() {
       })().finally(() => {
           if (activeRecentGameCacheKeyRef.current === cacheKey) {
             setTimelineLoading(false);
+            setTimelineProgress(null);
           }
         });
     }
@@ -2805,6 +2834,7 @@ export function ChessAnalysisLab() {
                 timelineAnalysesLength={timelineAnalyses.length}
                 timelineError={timelineError}
                 timelineLoading={timelineLoading}
+                timelineProgress={timelineProgress}
                 timelineReviews={timelineReviews}
                 whiteReviewName={whiteReviewName}
               />
