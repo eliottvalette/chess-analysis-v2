@@ -15,6 +15,7 @@ import {
   type WorkspaceMode,
 } from '@/components/chess-lab-panels';
 import {
+  analyzeGamePositions,
   analyzeSinglePosition,
   buildGameReview,
   buildMoveUciHistory,
@@ -591,6 +592,65 @@ export function ChessAnalysisLab() {
     [initialFen],
   );
 
+  const analyzeTimelineDeep = useCallback(
+    async (moves: StoredMove[], requestInitialFen: string | null) => {
+      const positions = buildTimelineSequencePositions(moves, requestInitialFen);
+      const sequence: AnalysisResult[] = new Array(positions.length);
+      const missing: Array<{ index: number; cacheKey: string; position: NonNullable<typeof positions[number]> }> = [];
+
+      positions.forEach((position, index) => {
+        const positionMoves = position.moves ?? [];
+        const cacheKey = getPositionCacheKey(requestInitialFen, positionMoves);
+        const cachedAnalysis = positionCacheRef.current.get(cacheKey);
+
+        if (cachedAnalysis) {
+          sequence[index] = cachedAnalysis;
+          return;
+        }
+
+        if (!position.fen) {
+          throw new Error('Missing timeline position.');
+        }
+
+        missing.push({
+          index,
+          cacheKey,
+          position: {
+            ...position,
+            initialFen: requestInitialFen,
+            depth: POSITION_DEPTH,
+            movetimeMs: POSITION_MOVETIME_MS,
+            multipv: POSITION_MULTIPV,
+          },
+        });
+      });
+
+      if (missing.length > 0) {
+        const response = await analyzeGamePositions({
+          positions: missing.map(item => item.position),
+          depth: POSITION_DEPTH,
+          movetimeMs: POSITION_MOVETIME_MS,
+        });
+
+        const analyses = response.analyses ?? [];
+
+        missing.forEach((item, index) => {
+          const analysis = analyses[index];
+
+          if (!analysis) {
+            throw new Error('Missing deep analysis result.');
+          }
+
+          positionCacheRef.current.set(item.cacheKey, analysis);
+          sequence[item.index] = analysis;
+        });
+      }
+
+      return sequence;
+    },
+    [],
+  );
+
   useEffect(() => {
     const stage = boardStageRef.current;
 
@@ -1060,19 +1120,10 @@ export function ChessAnalysisLab() {
         return null;
       }
 
-      const sequence: AnalysisResult[] = [];
-      for (const position of buildTimelineSequencePositions(nextHistory, nextInitialFen)) {
-        if (recentPreloadRequestIdRef.current !== requestId) {
-          return null;
-        }
+      const sequence = await analyzeTimelineDeep(nextHistory, nextInitialFen);
 
-        const moves = position.moves ?? [];
-        if (!position.fen) {
-          throw new Error('Missing timeline position.');
-        }
-
-        const positionCacheKey = getPositionCacheKey(nextInitialFen, moves);
-        sequence.push(await fetchCachedPositionAnalysis(positionCacheKey, position.fen, moves, nextInitialFen));
+      if (recentPreloadRequestIdRef.current !== requestId) {
+        return null;
       }
 
       const analysis = {
@@ -1104,7 +1155,7 @@ export function ChessAnalysisLab() {
     } finally {
       recentGameAnalysisInFlightCache.delete(cacheKey);
     }
-  }, [fetchCachedPositionAnalysis, positionLoading, recentChessGames, timelineLoading]);
+  }, [analyzeTimelineDeep, positionLoading, recentChessGames, timelineLoading]);
 
   useEffect(() => {
     if (recentChessGames.length === 0) {
@@ -2090,21 +2141,7 @@ export function ChessAnalysisLab() {
     setTimelineError('');
 
     try {
-      const sequence: AnalysisResult[] = [];
-
-      for (const position of buildTimelineSequencePositions(nextMoves, nextInitialFen)) {
-        if (timelineRequestIdRef.current !== requestId) {
-          return;
-        }
-
-        const moves = position.moves ?? [];
-        if (!position.fen) {
-          throw new Error('Missing timeline position.');
-        }
-
-        const cacheKey = getPositionCacheKey(nextInitialFen, moves);
-        sequence.push(await fetchCachedPositionAnalysis(cacheKey, position.fen, moves, nextInitialFen));
-      }
+      const sequence = await analyzeTimelineDeep(nextMoves, nextInitialFen);
 
       if (timelineRequestIdRef.current !== requestId) {
         return;
@@ -2192,8 +2229,6 @@ export function ChessAnalysisLab() {
       if (preferredOrientation) {
         setOrientation(preferredOrientation);
       }
-      positionCacheRef.current.clear();
-      positionInFlightRef.current.clear();
       clearSelection();
       playSound('game-start');
 
