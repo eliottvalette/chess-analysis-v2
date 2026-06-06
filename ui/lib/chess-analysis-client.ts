@@ -168,7 +168,17 @@ export const reviewCategoryMeta: Record<
 };
 
 export async function analyzeSinglePosition(payload: AnalyzeRequest, signal?: AbortSignal) {
-  return requestJson<AnalysisResult>('/api/analyze-position', payload, signal);
+  const startedAt = getAnalysisLogTime();
+  logAnalysisFetchStart('position', formatSingleAnalysisFetch(payload));
+
+  try {
+    const result = await requestJson<AnalysisResult>('/api/analyze-position', payload, signal);
+    logAnalysisFetchDone('position', startedAt, formatAnalysisResult(result));
+    return result;
+  } catch (error) {
+    logAnalysisFetchFail('position', startedAt, error);
+    throw error;
+  }
 }
 
 export async function analyzeGamePositions(
@@ -179,7 +189,67 @@ export async function analyzeGamePositions(
   },
   signal?: AbortSignal,
 ) {
-  return requestJson<{ analyses: AnalysisResult[] }>('/api/analyze-game', payload, signal);
+  const startedAt = getAnalysisLogTime();
+  logAnalysisFetchStart('game', formatBatchAnalysisFetch(payload));
+
+  try {
+    const result = await requestJson<{ analyses: AnalysisResult[] }>('/api/analyze-game', payload, signal);
+    logAnalysisFetchDone('game', startedAt, `${result.analyses.length} results`);
+    return result;
+  } catch (error) {
+    logAnalysisFetchFail('game', startedAt, error);
+    throw error;
+  }
+}
+
+function formatSingleAnalysisFetch(payload: AnalyzeRequest) {
+  return [
+    `ply=${payload.moves?.length ?? 0}`,
+    `depth=${payload.depth ?? '-'}`,
+    `time=${payload.movetimeMs ?? '-'}ms`,
+    `pv=${payload.multipv ?? '-'}`,
+  ].join(' ');
+}
+
+function formatBatchAnalysisFetch(payload: { positions: AnalyzeRequest[]; depth?: number; movetimeMs?: number }) {
+  const plies = payload.positions.map(position => position.moves?.length ?? 0);
+  const firstPly = plies[0] ?? 0;
+  const lastPly = plies[plies.length - 1] ?? firstPly;
+
+  return [
+    `n=${payload.positions.length}`,
+    `plies=${firstPly}-${lastPly}`,
+    `depth=${payload.depth ?? '-'}`,
+    `time=${payload.movetimeMs ?? '-'}ms`,
+  ].join(' ');
+}
+
+function formatAnalysisResult(result: AnalysisResult) {
+  return [
+    `best=${result.bestMove ?? '-'}`,
+    `depth=${result.depth}`,
+    `pv=${result.multipv}`,
+  ].join(' ');
+}
+
+function getAnalysisLogTime() {
+  return typeof performance === 'undefined' ? Date.now() : performance.now();
+}
+
+function getAnalysisElapsedMs(startedAt: number) {
+  return Math.round(getAnalysisLogTime() - startedAt);
+}
+
+function logAnalysisFetchStart(kind: 'position' | 'game', detail: string) {
+  console.info(`[analysis:${kind}] -> ${detail}`);
+}
+
+function logAnalysisFetchDone(kind: 'position' | 'game', startedAt: number, detail: string) {
+  console.info(`[analysis:${kind}] <- ${getAnalysisElapsedMs(startedAt)}ms ${detail}`);
+}
+
+function logAnalysisFetchFail(kind: 'position' | 'game', startedAt: number, error: unknown) {
+  console.warn(`[analysis:${kind}] !! ${getAnalysisElapsedMs(startedAt)}ms ${error instanceof Error ? error.message : String(error)}`);
 }
 
 export function buildStoredMovesFromSanList(initialFen: string | null, sanMoves: string[]) {
