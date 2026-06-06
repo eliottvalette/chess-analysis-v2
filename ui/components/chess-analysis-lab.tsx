@@ -66,6 +66,7 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
 const POSITION_DEPTH = 20;
 const POSITION_MOVETIME_MS = 400;
 const POSITION_MULTIPV = 3;
+const TIMELINE_ANALYSIS_BATCH_SIZE = 2;
 const PRELOAD_AHEAD = 15;
 const LAST_MOVE_STYLE = {
   backgroundColor: 'rgba(84, 173, 255, 0.26)',
@@ -638,17 +639,17 @@ export function ChessAnalysisLab() {
         });
       });
 
-      if (missing.length > 0) {
-        onProgress?.(Math.max(1, Math.min(95, ((positions.length - missing.length) / Math.max(1, positions.length)) * 100)));
+      for (let start = 0; start < missing.length; start += TIMELINE_ANALYSIS_BATCH_SIZE) {
+        const batch = missing.slice(start, start + TIMELINE_ANALYSIS_BATCH_SIZE);
         const response = await analyzeGamePositions({
-          positions: missing.map(item => item.position),
+          positions: batch.map(item => item.position),
           depth: POSITION_DEPTH,
           movetimeMs: POSITION_MOVETIME_MS,
         });
 
         const analyses = response.analyses ?? [];
 
-        missing.forEach((item, index) => {
+        batch.forEach((item, index) => {
           const analysis = analyses[index];
 
           if (!analysis) {
