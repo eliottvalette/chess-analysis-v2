@@ -84,8 +84,8 @@ const REVIEW_SAVE_REPLAY_STORAGE_KEY = 'chess-lab-save-game-replay-v1';
 const TRAINING_REPLAY_MOVE_MS = 200;
 const RECENT_GAMES_PAGE_SIZE = 10;
 const RECENT_GAMES_AUTO_REFRESH_MS = 90_000;
-const RECENT_GAMES_PRELOAD_IDLE_MS = 1_400;
 const RECENT_GAMES_INTERACTION_IDLE_MS = 2_500;
+const RECENT_GAMES_PRELOAD_SCAN_MS = 1_000;
 
 type CachedTimelineAnalysis = {
   quality: 'refined';
@@ -153,6 +153,16 @@ function getPgnHash(pgn: string) {
   }
 
   return `pgn:${(hash >>> 0).toString(16)}`;
+}
+
+function logRecentGamePreload(status: string, detail: string) {
+  console.info(`[preload:game] ${status} ${detail}`);
+}
+
+function formatRecentGameLogLabel(game: ChessComRecentGameSummary) {
+  const player = game.playerUsername ?? 'You';
+  const opponent = game.opponentUsername ?? 'opponent';
+  return game.playerColor === 'black' ? `${opponent} vs ${player}` : `${player} vs ${opponent}`;
 }
 
 async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimelineAnalysis | null> {
@@ -384,6 +394,7 @@ export function ChessAnalysisLab() {
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
   const recentFetchRequestIdRef = useRef(0);
   const recentAutoFetchStartedRef = useRef(false);
+  const recentPreloadBusyRef = useRef(false);
   const recentPreloadRequestIdRef = useRef(0);
   const recentPreloadedKeysRef = useRef(new Set<string>());
   const activeRecentGameCacheKeyRef = useRef<string | null>(null);
@@ -1096,6 +1107,10 @@ export function ChessAnalysisLab() {
   }, [chesscomUsername, fetchRecentChessGames]);
 
   const preloadRecentGameAnalysis = useCallback(async () => {
+    if (recentPreloadBusyRef.current) {
+      return;
+    }
+
     if (
       modeRef.current !== 'review' ||
       document.visibilityState !== 'visible' ||
@@ -1120,57 +1135,65 @@ export function ChessAnalysisLab() {
 
     const cacheKey = getRecentGameCacheKey(nextGame);
     recentPreloadedKeysRef.current.add(cacheKey);
-
-    const cached = await loadCachedTimelineAnalysis(cacheKey);
-    if (cached) {
-      setRecentPreloadTick(tick => tick + 1);
-      return;
-    }
-
-    const requestId = ++recentPreloadRequestIdRef.current;
-    const preloadPromise = (async (): Promise<CachedTimelineAnalysis | null> => {
-      const preloadGame = new Chess();
-      preloadGame.loadPgn(nextGame.pgn);
-      const nextInitialFen = preloadGame.header().FEN ?? null;
-      const nextHistory = preloadGame.history({ verbose: true }).map(toStoredMove);
-
-      if (nextHistory.length === 0) {
-        return null;
-      }
-
-      const sequence = await analyzeTimelineDeep(nextHistory, nextInitialFen);
-
-      if (recentPreloadRequestIdRef.current !== requestId) {
-        return null;
-      }
-
-      const analysis = {
-        quality: 'refined',
-        preMoveAnalyses: sequence.slice(0, -1),
-        timelineAnalyses: sequence.slice(1),
-      } satisfies CachedTimelineAnalysis;
-
-      await saveCachedTimelineAnalysis({
-        cacheKey,
-        gameLink: nextGame.link || nextGame.url,
-        pgn: nextGame.pgn,
-        preMoveAnalyses: analysis.preMoveAnalyses,
-        timelineAnalyses: analysis.timelineAnalyses,
-      });
-      return analysis;
-    })();
-
-    recentGameAnalysisInFlightCache.set(cacheKey, preloadPromise);
+    recentPreloadBusyRef.current = true;
 
     try {
+      const cached = await loadCachedTimelineAnalysis(cacheKey);
+      if (cached) {
+        logRecentGamePreload('cache', `${formatRecentGameLogLabel(nextGame)} ${cached.timelineAnalyses.length} plies`);
+        setRecentPreloadTick(tick => tick + 1);
+        return;
+      }
+
+      const requestId = ++recentPreloadRequestIdRef.current;
+      const preloadPromise = (async (): Promise<CachedTimelineAnalysis | null> => {
+        const preloadGame = new Chess();
+        preloadGame.loadPgn(nextGame.pgn);
+        const nextInitialFen = preloadGame.header().FEN ?? null;
+        const nextHistory = preloadGame.history({ verbose: true }).map(toStoredMove);
+
+        if (nextHistory.length === 0) {
+          return null;
+        }
+
+        logRecentGamePreload('start', `${formatRecentGameLogLabel(nextGame)} ${nextHistory.length} plies`);
+        const sequence = await analyzeTimelineDeep(nextHistory, nextInitialFen);
+
+        if (recentPreloadRequestIdRef.current !== requestId) {
+          return null;
+        }
+
+        const analysis = {
+          quality: 'refined',
+          preMoveAnalyses: sequence.slice(0, -1),
+          timelineAnalyses: sequence.slice(1),
+        } satisfies CachedTimelineAnalysis;
+
+        await saveCachedTimelineAnalysis({
+          cacheKey,
+          gameLink: nextGame.link || nextGame.url,
+          pgn: nextGame.pgn,
+          preMoveAnalyses: analysis.preMoveAnalyses,
+          timelineAnalyses: analysis.timelineAnalyses,
+        });
+        return analysis;
+      })();
+
+      recentGameAnalysisInFlightCache.set(cacheKey, preloadPromise);
+
       const analysis = await preloadPromise;
       if (analysis) {
         recentGameAnalysisMemoryCache.set(cacheKey, analysis);
+        logRecentGamePreload('done', `${formatRecentGameLogLabel(nextGame)} ${analysis.timelineAnalyses.length} plies`);
+      } else {
+        logRecentGamePreload('skip', `${formatRecentGameLogLabel(nextGame)} stale`);
       }
       setRecentPreloadTick(tick => tick + 1);
-    } catch {
+    } catch (error) {
       recentPreloadedKeysRef.current.delete(cacheKey);
+      logRecentGamePreload('fail', `${formatRecentGameLogLabel(nextGame)} ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      recentPreloadBusyRef.current = false;
       recentGameAnalysisInFlightCache.delete(cacheKey);
     }
   }, [analyzeTimelineDeep, positionLoading, recentChessGames, timelineLoading]);
@@ -1180,11 +1203,11 @@ export function ChessAnalysisLab() {
       return undefined;
     }
 
-    const timer = window.setTimeout(() => {
+    const timer = window.setInterval(() => {
       void preloadRecentGameAnalysis();
-    }, RECENT_GAMES_PRELOAD_IDLE_MS);
+    }, RECENT_GAMES_PRELOAD_SCAN_MS);
 
-    return () => window.clearTimeout(timer);
+    return () => window.clearInterval(timer);
   }, [preloadRecentGameAnalysis, recentChessGames, recentPreloadTick, timelineAnalyses, timelineLoading, positionLoading]);
 
   useEffect(() => {
