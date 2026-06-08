@@ -80,7 +80,6 @@ const TRAINING_USERNAME_STORAGE_KEY = 'chess-lab-training-username-v1';
 const TRAINING_PASSWORD_STORAGE_KEY = 'chess-lab-training-password-v1';
 const DECK_PROGRESS_STORAGE_KEY = 'chess-lab-deck-progress-v1';
 const LAST_TRAINING_DECK_STORAGE_KEY = 'chess-lab-last-training-deck-v1';
-const REVIEW_SAVE_REPLAY_STORAGE_KEY = 'chess-lab-save-game-replay-v1';
 const TRAINING_REPLAY_MOVE_MS = 200;
 const RECENT_GAMES_PAGE_SIZE = 10;
 const RECENT_GAMES_AUTO_REFRESH_MS = 90_000;
@@ -392,7 +391,7 @@ export function ChessAnalysisLab() {
   const [trainingPassword, setTrainingPassword] = useState('');
   const trainingCredentialsHydratedRef = useRef(false);
   const [focusTrainCreateDeck, setFocusTrainCreateDeck] = useState(false);
-  const [saveReplayFromStart, setSaveReplayFromStart] = useState(true);
+  const saveReplayFromStart = true;
   const [deckPlaybackBusy, setDeckPlaybackBusy] = useState(false);
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
@@ -944,14 +943,6 @@ export function ChessAnalysisLab() {
       setTrainingPassword(savedPassword);
     }
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(REVIEW_SAVE_REPLAY_STORAGE_KEY, saveReplayFromStart ? '1' : '0');
-  }, [saveReplayFromStart]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -2893,8 +2884,6 @@ export function ChessAnalysisLab() {
                   !positionLoading &&
                   (!saveReplayFromStart || currentMoves.length > 0),
                 )}
-                saveReplayFromStart={saveReplayFromStart}
-                onSaveReplayFromStartChange={setSaveReplayFromStart}
                 onSaveReviewCard={() => void saveReviewPositionToDeck()}
                 onGoCreateDeck={openTrainCreateDeck}
                 onSelectSaveDeck={selectSaveDeck}
@@ -2982,10 +2971,8 @@ export function ChessAnalysisLab() {
                 onDeleteCard={() => void deleteActiveDeckCard()}
                 onNext={advanceDeckCard}
                 onNewDeckTitleChange={setNewDeckTitle}
-                onSaveReplayFromStartChange={setSaveReplayFromStart}
                 onTrainDeck={deckId => void trainDeckFromLibrary(deckId)}
                 onTrainAll={() => void trainAllDecks()}
-                saveReplayFromStart={saveReplayFromStart}
                 onRenameDeck={(deckId, name) => void renameTrainingDeck(deckId, name)}
                 onDeleteDeck={deckId => void deleteTrainingDeck(deckId)}
                 focusCreateDeck={focusTrainCreateDeck}

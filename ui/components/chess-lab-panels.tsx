@@ -81,8 +81,6 @@ export function ReviewPanel({
   reviewSaveMoveSan,
   positionLoading,
   canSaveReviewCard,
-  saveReplayFromStart,
-  onSaveReplayFromStartChange,
   deckSummaries,
   onSaveReviewCard,
   onGoCreateDeck,
@@ -128,8 +126,6 @@ export function ReviewPanel({
   reviewSaveMoveSan: string | null;
   positionLoading: boolean;
   canSaveReviewCard: boolean;
-  saveReplayFromStart: boolean;
-  onSaveReplayFromStartChange: (value: boolean) => void;
   deckSummaries: TrainingDeckSummary[];
   onSaveReviewCard: () => void;
   onGoCreateDeck: () => void;
@@ -168,8 +164,6 @@ export function ReviewPanel({
     reviewSaveMoveSan,
     positionLoading,
     canSaveReviewCard,
-    saveReplayFromStart,
-    onSaveReplayFromStartChange,
     deckSummaries,
     onSaveReviewCard,
     onGoCreateDeck,
@@ -235,11 +229,9 @@ export function TrainPanel({
   onTrainAll,
   onRenameDeck,
   onDeleteDeck,
-  onSaveReplayFromStartChange,
   focusCreateDeck,
   onCreateDeckFocusHandled,
   onNewDeckTitleChange,
-  saveReplayFromStart,
   selectedDeckId,
   trainAllSession,
   trainSessionCardCurrent,
@@ -270,11 +262,9 @@ export function TrainPanel({
   onTrainAll: () => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
-  onSaveReplayFromStartChange: (value: boolean) => void;
   focusCreateDeck: boolean;
   onCreateDeckFocusHandled: () => void;
   onNewDeckTitleChange: (value: string) => void;
-  saveReplayFromStart: boolean;
   selectedDeckId: string | null;
   trainAllSession: boolean;
   trainSessionCardCurrent: number;
@@ -296,10 +286,8 @@ export function TrainPanel({
         onCreateDeckFocusHandled={onCreateDeckFocusHandled}
         onGenerateRecentDeck={onGenerateRecentDeck}
         onNewDeckTitleChange={onNewDeckTitleChange}
-        onSaveReplayFromStartChange={onSaveReplayFromStartChange}
         onTrainDeck={onTrainDeck}
         onTrainAll={onTrainAll}
-        saveReplayFromStart={saveReplayFromStart}
         onRenameDeck={onRenameDeck}
         onDeleteDeck={onDeleteDeck}
         selectedDeckId={selectedDeckId}
@@ -496,8 +484,6 @@ export function GameReviewPanel({
   reviewSaveMoveSan,
   positionLoading,
   canSaveReviewCard,
-  saveReplayFromStart,
-  onSaveReplayFromStartChange,
   deckSummaries,
   onSaveReviewCard,
   onGoCreateDeck,
@@ -542,8 +528,6 @@ export function GameReviewPanel({
   reviewSaveMoveSan: string | null;
   positionLoading: boolean;
   canSaveReviewCard: boolean;
-  saveReplayFromStart: boolean;
-  onSaveReplayFromStartChange: (value: boolean) => void;
   deckSummaries: TrainingDeckSummary[];
   onSaveReviewCard: () => void;
   onGoCreateDeck: () => void;
@@ -740,12 +724,10 @@ export function GameReviewPanel({
           deckSummaries={deckSummaries}
           onGoCreateDeck={onGoCreateDeck}
           onSaveReviewCard={onSaveReviewCard}
-          onSaveReplayFromStartChange={onSaveReplayFromStartChange}
           onSelectSaveDeck={onSelectSaveDeck}
           reviewDeckSaveStatus={reviewDeckSaveStatus}
           reviewSaveMoveSan={reviewSaveMoveSan}
           positionLoading={positionLoading}
-          saveReplayFromStart={saveReplayFromStart}
           selectedDeckId={selectedDeckId}
         />
       ) : null}
@@ -755,8 +737,6 @@ export function GameReviewPanel({
 
 function ReviewSaveDeckPanel({
   canSaveReviewCard,
-  saveReplayFromStart,
-  onSaveReplayFromStartChange,
   deckSummaries,
   onGoCreateDeck,
   onSaveReviewCard,
@@ -767,8 +747,6 @@ function ReviewSaveDeckPanel({
   selectedDeckId,
 }: {
   canSaveReviewCard: boolean;
-  saveReplayFromStart: boolean;
-  onSaveReplayFromStartChange: (value: boolean) => void;
   deckSummaries: TrainingDeckSummary[];
   onGoCreateDeck: () => void;
   onSaveReviewCard: () => void;
@@ -801,13 +779,6 @@ function ReviewSaveDeckPanel({
 
   return (
     <section className={`${styles.card} ${styles.emptyStateCard}`}>
-      <div className={styles.panelHeader}>
-        <h2 className={styles.sectionTitle}>Add to deck</h2>
-        <span className={styles.statusText}>
-          {positionLoading ? 'analyzing' : reviewSaveMoveSan ?? 'waiting'}
-        </span>
-      </div>
-
       {positionLoading ? (
         <p className={styles.copy}>Engine is finding the best move for this position.</p>
       ) : reviewSaveMoveSan ? (
@@ -837,8 +808,6 @@ function ReviewSaveDeckPanel({
       ) : (
         <p className={styles.copy}>Create a personal deck in Train, then come back here to save this position.</p>
       )}
-
-      <SaveFullGameToggle checked={saveReplayFromStart} onChange={onSaveReplayFromStartChange} />
 
       {hasOwnedDeck ? (
         <button
@@ -1366,29 +1335,6 @@ function DeckLibraryItem({
   );
 }
 
-function SaveFullGameToggle({
-  checked,
-  onChange,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className={styles.settingRow}>
-      <span className={styles.settingRowLabel}>Save Full Game</span>
-      <span className={styles.settingSwitch}>
-        <input
-          checked={checked}
-          className={styles.settingSwitchInput}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.checked)}
-          type="checkbox"
-        />
-        <span aria-hidden="true" className={styles.settingSwitchTrack} />
-      </span>
-    </label>
-  );
-}
-
 function DeckMoreIcon() {
   return (
     <svg className={styles.deckMenuIcon} viewBox="0 0 24 24" aria-hidden="true">
@@ -1412,12 +1358,10 @@ export function LearnPanel({
   onCreateDeckFocusHandled,
   onGenerateRecentDeck,
   onNewDeckTitleChange,
-  onSaveReplayFromStartChange,
   onTrainDeck,
   onTrainAll,
   onRenameDeck,
   onDeleteDeck,
-  saveReplayFromStart,
   selectedDeckId,
 }: {
   deckActionError: string;
@@ -1432,12 +1376,10 @@ export function LearnPanel({
   onCreateDeckFocusHandled: () => void;
   onGenerateRecentDeck: () => void;
   onNewDeckTitleChange: (value: string) => void;
-  onSaveReplayFromStartChange: (value: boolean) => void;
   onTrainDeck: (deckId: string) => void;
   onTrainAll: () => void;
   onRenameDeck: (deckId: string, name: string) => void;
   onDeleteDeck: (deckId: string) => void;
-  saveReplayFromStart: boolean;
   selectedDeckId: string | null;
 }) {
   const createDeckInputRef = useRef<HTMLInputElement | null>(null);
@@ -1492,7 +1434,6 @@ export function LearnPanel({
           </div>
         )}
         {deckLoadError ? <p className={styles.error}>{deckLoadError}</p> : null}
-        <SaveFullGameToggle checked={saveReplayFromStart} onChange={onSaveReplayFromStartChange} />
         {deckSummaries.length > 0 ? (
           <button
             className={`${styles.action} ${styles.fullWidthAction}`}
