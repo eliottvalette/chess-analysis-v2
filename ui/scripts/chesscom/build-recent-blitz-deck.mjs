@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { fetchArchives, fetchRecentGames, extractTag } from './api.mjs';
-import { isMoveInOpeningBook, qualifiesAsLineRootMistake } from './deck-mistake-filter.mjs';
+import { isMoveInOpeningBook, dedupeTrainingCards, qualifiesAsLineRootMistake } from './deck-mistake-filter.mjs';
 import { loadLocalEnv, requireAdminKey, requireEnv } from '../supabase/env.mjs';
 
 const DEFAULT_COUNT = 10;
@@ -89,7 +89,12 @@ async function main() {
   results.sort((left, right) => left.gameIndex - right.gameIndex);
 
   const openingLines = results.map(result => result.line);
-  const cards = results.flatMap(result => result.cards);
+  const rawCards = results.flatMap(result => result.cards);
+  const cards = dedupeTrainingCards(rawCards);
+
+  if (rawCards.length !== cards.length) {
+    logProgress(`deduped ${rawCards.length} cards down to ${cards.length} unique training positions`);
+  }
 
   if (options.writeSupabase) {
     logProgress('writing deck to Supabase');
@@ -106,7 +111,7 @@ async function main() {
       id: ownerProfileId ? `${DECK_ID}-${ownerUsername}` : DECK_ID,
       owner_profile_id: ownerProfileId,
       name: ownerProfileId ? `Recent Blitz Trainer · ${ownerUsername}` : 'Recent Blitz Trainer',
-      description: `Personalized fix and punish cards built from recent public ${options.timeClass} games for ${username}.`,
+      description: `Personalized fix cards built from recent public ${options.timeClass} games for ${username}.`,
       version: 1,
       is_active: true,
     };
@@ -286,7 +291,6 @@ async function buildCardsForGame({
 }) {
   const cards = [];
   const playerColor = inferPlayerColor(game, username);
-  const trainingSide = oppositeSide(playerColor);
   const gameDate = extractTag(game.pgn, 'UTCDate') ?? '';
   const opponent = playerColor === 'white' ? game.black?.username : game.white?.username;
   const eco = extractTag(game.pgn, 'ECO') ?? line.eco;
@@ -313,7 +317,6 @@ async function buildCardsForGame({
       moveHistory.push(move.san);
 
       const fenAfter = chess.fen();
-      const setupMovesThroughMistake = [...moveHistory];
       candidates.push({
         index,
         move,
@@ -321,9 +324,7 @@ async function buildCardsForGame({
         fenBefore,
         fenAfter,
         contextBeforeMove,
-        contextAfterMove: moveHistory.join(' '),
         setupMovesBeforeMistake,
-        setupMovesThroughMistake,
       });
       continue;
     }
@@ -336,7 +337,7 @@ async function buildCardsForGame({
     return cards;
   }
 
-  logProgress(`[${gameIndex + 1}/${totalGames}] batching ${candidates.length * 2} positions for ${candidates.length} candidate moves`);
+  logProgress(`[${gameIndex + 1}/${totalGames}] batching ${candidates.length * 2} positions for ${candidates.length} of your moves`);
   const positions = candidates.flatMap(candidate => [
     {
       fen: candidate.fenBefore,
@@ -358,13 +359,12 @@ async function buildCardsForGame({
   for (const [candidateIndex, candidate] of candidates.entries()) {
     const beforeAnalysis = analyses[candidateIndex * 2];
     const afterAnalysis = analyses[candidateIndex * 2 + 1];
-    const { index, move, moveUci, fenBefore, fenAfter, contextBeforeMove, contextAfterMove, setupMovesBeforeMistake, setupMovesThroughMistake } = candidate;
+    const { index, move, moveUci, fenBefore, contextBeforeMove, setupMovesBeforeMistake } = candidate;
     logProgress(`[${gameIndex + 1}/${totalGames}] ply ${index + 1}: checking your move ${move.san}`);
     const bestScore = scoreToCpForSide(beforeAnalysis?.whitePerspective, playerColor);
     const afterScore = scoreToCpForSide(afterAnalysis?.whitePerspective, playerColor);
-    const punishmentScore = scoreToCpForSide(afterAnalysis?.whitePerspective, trainingSide);
 
-    if (bestScore == null || afterScore == null || punishmentScore == null || !beforeAnalysis?.bestMove || !afterAnalysis?.bestMove) {
+    if (bestScore == null || afterScore == null || !beforeAnalysis?.bestMove) {
       logProgress(`[${gameIndex + 1}/${totalGames}] ply ${index + 1}: skipped ${move.san} (missing eval/best move)`);
       continue;
     }
@@ -394,7 +394,7 @@ async function buildCardsForGame({
 
     firstMistakePly = index + 1;
     logProgress(
-      `[${gameIndex + 1}/${totalGames}] ply ${index + 1}: first line mistake ${move.san} loss=${scoreSwingCp}cp book=${inBook ? 'yes' : 'no'} -> +2 cards`,
+      `[${gameIndex + 1}/${totalGames}] ply ${index + 1}: first line mistake ${move.san} loss=${scoreSwingCp}cp book=${inBook ? 'yes' : 'no'} -> +1 card`,
     );
 
     cards.push({
@@ -409,7 +409,7 @@ async function buildCardsForGame({
       fen: fenBefore,
       answer_uci: beforeAnalysis.bestMove,
       answer_san: moveFromFen(fenBefore, beforeAnalysis.bestMove)?.san ?? beforeAnalysis.bestMove,
-      prompt: `In your game vs ${opponent ?? 'opponent'}, before ${move.san}, find your best move.`,
+      prompt: `In your game vs ${opponent ?? 'opponent'}, you played ${move.san}. Find what you should have played instead.`,
       context: `${gameDate} · ${eco} · result ${gameResult} · line ${contextBeforeMove}`,
       source_type: 'recent_game',
       validation_mode: 'within_eval_loss',
@@ -421,32 +421,6 @@ async function buildCardsForGame({
       replay_from_start: setupMovesBeforeMistake.length > 0,
       initial_fen: null,
       setup_moves: setupMovesBeforeMistake,
-    });
-
-    cards.push({
-      id: `${line.id}-ply-${index + 1}-punish`,
-      deck_id: DECK_ID,
-      line_id: line.id,
-      kind: 'punish_mistake',
-      line_name: line.name,
-      eco,
-      side: trainingSide,
-      ply: index + 1,
-      fen: fenAfter,
-      answer_uci: afterAnalysis.bestMove,
-      answer_san: moveFromFen(fenAfter, afterAnalysis.bestMove)?.san ?? afterAnalysis.bestMove,
-      prompt: `In your game vs ${opponent ?? 'opponent'}, you played ${move.san}. Find the opponent's best punishment.`,
-      context: `${gameDate} · ${eco} · result ${gameResult} · line ${contextAfterMove}`,
-      source_type: 'recent_game',
-      validation_mode: 'within_eval_loss',
-      reference_eval_cp: Math.round(punishmentScore),
-      max_eval_loss_cp: acceptableLossCp,
-      opponent_move_uci: moveUci,
-      opponent_move_san: move.san,
-      score_swing_cp: scoreSwingCp,
-      replay_from_start: setupMovesThroughMistake.length > 0,
-      initial_fen: null,
-      setup_moves: setupMovesThroughMistake,
     });
   }
 

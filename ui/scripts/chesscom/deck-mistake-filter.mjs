@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,4 +44,32 @@ export function qualifiesAsLineRootMistake({
   }
 
   return false;
+}
+
+export function buildTrainingCardIdentity(card) {
+  const setupKey = Array.isArray(card.setup_moves) ? card.setup_moves.join(' ') : '';
+
+  return `${card.side}|${card.fen}|${card.answer_uci}|${setupKey}`;
+}
+
+function createShortHash(value) {
+  return createHash('sha256').update(value).digest('hex').slice(0, 12);
+}
+
+export function dedupeTrainingCards(cards) {
+  const bestByKey = new Map();
+
+  for (const card of cards) {
+    const key = buildTrainingCardIdentity(card);
+    const existing = bestByKey.get(key);
+
+    if (!existing || (card.score_swing_cp ?? 0) > (existing.score_swing_cp ?? 0)) {
+      bestByKey.set(key, {
+        ...card,
+        id: `recent-fix-${createShortHash(key)}`,
+      });
+    }
+  }
+
+  return [...bestByKey.values()].sort((left, right) => (right.score_swing_cp ?? 0) - (left.score_swing_cp ?? 0));
 }

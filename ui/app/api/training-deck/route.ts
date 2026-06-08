@@ -196,6 +196,7 @@ async function generateRecentDeck(profile: TrainingProfileCookie, body: Record<s
         '--time-class',
         timeClass,
         '--write-supabase',
+        '--set-active',
         '--concurrency',
         '4',
       ],
