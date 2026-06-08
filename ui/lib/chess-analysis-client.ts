@@ -1100,19 +1100,27 @@ function isReviewKeyMoment(category: ReviewCategory | null, expectedPointsLost: 
     return false;
   }
 
-  if (category === 'brilliant' || category === 'great' || category === 'mistake' || category === 'blunder') {
+  if (category === 'brilliant' || category === 'great') {
     return true;
   }
 
-  if (category === 'inaccuracy') {
-    return (cpLossCp ?? 0) >= 120 || (expectedPointsLost ?? 0) >= 0.12;
+  if (afterMate != null && afterMate < 0) {
+    return true;
+  }
+
+  if (category === 'blunder') {
+    return (cpLossCp ?? 0) >= 260 || (expectedPointsLost ?? 0) >= 0.18;
+  }
+
+  if (category === 'mistake') {
+    return (cpLossCp ?? 0) >= 220 || (expectedPointsLost ?? 0) >= 0.16;
   }
 
   if (category === 'miss') {
-    return (cpLossCp ?? 0) >= 140 || (expectedPointsLost ?? 0) >= 0.14;
+    return (cpLossCp ?? 0) >= 200 || (expectedPointsLost ?? 0) >= 0.14;
   }
 
-  return afterMate != null && afterMate < 0;
+  return false;
 }
 
 function buildCoachText({
@@ -1196,21 +1204,25 @@ function calculateGameRating(rating: number | null, accuracy: number | null) {
 }
 
 function extractKeyMoments(reviews: TimelineReview[]) {
-  const directMoments = reviews.filter(review => review.isKeyMoment);
-  const selected = directMoments.length > 0 ? directMoments : reviews.filter(review => review.category && review.category !== 'book');
+  const lastBookMoment = [...reviews].reverse().find(review => review.category === 'book') ?? null;
+  const directMoments = reviews.filter(review => review.category !== 'book' && review.isKeyMoment);
+  const selected = [
+    ...(lastBookMoment ? [lastBookMoment] : []),
+    ...directMoments
+      .sort((left, right) => {
+        const leftRank = getKeyMomentRank(left);
+        const rightRank = getKeyMomentRank(right);
+
+        if (leftRank !== rightRank) {
+          return rightRank - leftRank;
+        }
+
+        return getKeyMomentLossScore(right) - getKeyMomentLossScore(left);
+      })
+      .slice(0, lastBookMoment ? 7 : 8),
+  ];
 
   return selected
-    .sort((left, right) => {
-      const leftRank = getKeyMomentRank(left);
-      const rightRank = getKeyMomentRank(right);
-
-      if (leftRank !== rightRank) {
-        return rightRank - leftRank;
-      }
-
-      return getKeyMomentLossScore(right) - getKeyMomentLossScore(left);
-    })
-    .slice(0, 16)
     .sort((left, right) => left.ply - right.ply);
 }
 

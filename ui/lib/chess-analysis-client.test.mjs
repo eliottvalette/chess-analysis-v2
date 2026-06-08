@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { classifyReviewCategory, getCpLoss, getMateForColor, getScoreCpForColor, isBookCandidate } from './chess-analysis-client.ts';
+import { buildGameReview, classifyReviewCategory, getCpLoss, getMateForColor, getScoreCpForColor, isBookCandidate } from './chess-analysis-client.ts';
 
 test('isBookCandidate treats small early opening losses as book and stops after the opening window', () => {
   assert.equal(isBookCandidate(5, 60, 'd6'), true);
@@ -131,3 +131,55 @@ test('classifyReviewCategory treats mate swings against the player as blunders',
     'blunder',
   );
 });
+
+test('buildGameReview keeps key moments sparse and includes only the last book move', () => {
+  const reviews = [
+    makeReview({ ply: 1, category: 'book' }),
+    makeReview({ ply: 2, category: 'book' }),
+    makeReview({ ply: 3, category: 'inaccuracy', isKeyMoment: false, cpLossCp: 130, expectedPointsLost: 0.13 }),
+    makeReview({ ply: 4, category: 'mistake', isKeyMoment: false, cpLossCp: 150, expectedPointsLost: 0.11 }),
+    makeReview({ ply: 5, category: 'great', isKeyMoment: true }),
+    makeReview({ ply: 6, category: 'blunder', isKeyMoment: true, cpLossCp: 360, expectedPointsLost: 0.32 }),
+    makeReview({ ply: 7, category: 'miss', isKeyMoment: true, cpLossCp: 230, expectedPointsLost: 0.16 }),
+  ];
+
+  const review = buildGameReview(reviews, null);
+
+  assert.deepEqual(review.keyMoments.map(moment => moment.ply), [2, 5, 6, 7]);
+  assert.equal(review.opening.lastBookPly, 2);
+});
+
+function makeReview({
+  ply,
+  category,
+  isKeyMoment = category === 'great' || category === 'brilliant',
+  cpLossCp = 0,
+  expectedPointsLost = 0,
+}) {
+  return {
+    ply,
+    color: ply % 2 === 1 ? 'w' : 'b',
+    category,
+    label: category,
+    colorHex: null,
+    pointStyle: 'circle',
+    moveLabel: `${Math.ceil(ply / 2)}${ply % 2 === 1 ? '.' : '...'}`,
+    san: 'e4',
+    playedMove: 'e2e4',
+    bestMove: null,
+    bestMoveSan: null,
+    beforeExpected: 0.5,
+    afterExpected: 0.5 - expectedPointsLost,
+    expectedPointsLost,
+    beforeCp: 0,
+    afterCp: -cpLossCp,
+    cpLossCp,
+    beforeMate: null,
+    afterMate: null,
+    moveAccuracy: null,
+    isKeyMoment,
+    coachText: '',
+    fenBefore: 'start',
+    fenAfter: 'after',
+  };
+}
