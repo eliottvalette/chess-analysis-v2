@@ -783,7 +783,6 @@ function ReviewSaveDeckPanel({
   const activeDeckId = selectedDeckId && ownedDecks.some(deck => deck.id === selectedDeckId)
     ? selectedDeckId
     : ownedDecks[0]?.id ?? '';
-  const activeDeck = ownedDecks.find(deck => deck.id === activeDeckId) ?? null;
   const saveButtonLabel = reviewDeckSaveStatus === 'Saving'
     ? 'Adding'
     : reviewDeckSaveStatus === 'Saved'
@@ -838,12 +837,6 @@ function ReviewSaveDeckPanel({
       ) : (
         <p className={styles.copy}>Create a personal deck in Train, then come back here to save this position.</p>
       )}
-
-      {activeDeck ? (
-        <p className={styles.support}>
-          Goes into <strong>{activeDeck.name}</strong> · {activeDeck.cardCount} cards
-        </p>
-      ) : null}
 
       <SaveFullGameToggle checked={saveReplayFromStart} onChange={onSaveReplayFromStartChange} />
 

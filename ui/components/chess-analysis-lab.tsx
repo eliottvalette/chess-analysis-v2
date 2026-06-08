@@ -945,18 +945,6 @@ export function ChessAnalysisLab() {
     }
   }, []);
 
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const stored = window.localStorage.getItem(REVIEW_SAVE_REPLAY_STORAGE_KEY);
-
-    if (stored === '0') {
-      setSaveReplayFromStart(false);
-    }
-  }, []);
-
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
