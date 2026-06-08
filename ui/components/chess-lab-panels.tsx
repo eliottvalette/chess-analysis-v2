@@ -7,6 +7,7 @@ import {
   filterReviewMoments,
   formatBestMove,
   formatPrincipalVariation,
+  reviewCategoryMeta,
   toChartScore,
   type ReviewCategory,
   type StoredMove,
@@ -888,17 +889,21 @@ function ReviewMoveButton({
   }
 
   const isActive = activePly === ply;
-  const dotColor = getReviewDotColor(review);
+  const moveColor = getReviewMoveColor(review);
+  const badgeSrc = getReviewBadgeSrc(review);
 
   return (
     <button
-      className={`${styles.reviewMoveCell} ${isActive ? styles.activeReviewMoveCell : ''}`}
+      className={`${styles.reviewMoveCell} ${badgeSrc ? styles.reviewMoveCellWithBadge : ''} ${isActive ? styles.activeReviewMoveCell : ''}`}
       onClick={() => jumpToIndex(ply)}
       ref={isActive ? activeMoveButtonRef : undefined}
-      style={dotColor ? { ['--move-dot-color' as string]: dotColor } : undefined}
+      style={{
+        ...(moveColor ? { ['--move-dot-color' as string]: moveColor } : {}),
+        ...(badgeSrc ? { ['--review-badge-url' as string]: `url(${badgeSrc})` } : {}),
+      }}
       type="button"
     >
-      {dotColor ? <span className={styles.reviewMoveDot} aria-hidden="true" /> : null}
+      {badgeSrc ? <span className={styles.reviewMoveBadge} aria-hidden="true" /> : null}
       <span>{move.san}</span>
     </button>
   );
@@ -1036,7 +1041,23 @@ function getReviewDotColor(review: TimelineReview | null) {
   return review.colorHex ?? '#b8f7a1';
 }
 
-const REVIEW_DOT_CATEGORIES = new Set<ReviewCategory>(['inaccuracy', 'miss', 'mistake', 'blunder']);
+function getReviewMoveColor(review: TimelineReview | null) {
+  if (!review?.category || review.category === 'book') {
+    return null;
+  }
+
+  return review.colorHex ?? reviewCategoryMeta[review.category]?.color ?? null;
+}
+
+function getReviewBadgeSrc(review: TimelineReview | null) {
+  if (!review?.category || review.category === 'book') {
+    return null;
+  }
+
+  return reviewCategoryMeta[review.category]?.badge ?? null;
+}
+
+const REVIEW_DOT_CATEGORIES = new Set<ReviewCategory>(['brilliant', 'great', 'inaccuracy', 'mistake', 'miss', 'blunder']);
 
 function formatRecentGamePlayers(game: ChessComRecentGameSummary) {
   const player = game.playerUsername ?? 'You';

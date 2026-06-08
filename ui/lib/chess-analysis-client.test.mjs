@@ -21,7 +21,7 @@ test('cp helpers normalize centipawns and mate from the player perspective', () 
   assert.equal(getMateForColor(mate, 'b'), -12);
 });
 
-test('classifyReviewCategory uses cp loss for mistakes and blunders', () => {
+test('classifyReviewCategory uses expected points loss for mistakes and blunders', () => {
   assert.equal(
     classifyReviewCategory({
       index: 23,
@@ -40,7 +40,7 @@ test('classifyReviewCategory uses cp loss for mistakes and blunders', () => {
       secondBestGapCp: 20,
       ratingFlex: 0.02,
     }),
-    'mistake',
+    'blunder',
   );
 
   assert.equal(
@@ -61,7 +61,7 @@ test('classifyReviewCategory uses cp loss for mistakes and blunders', () => {
       secondBestGapCp: 40,
       ratingFlex: 0.02,
     }),
-    'mistake',
+    'blunder',
   );
 
   assert.equal(
@@ -83,6 +83,29 @@ test('classifyReviewCategory uses cp loss for mistakes and blunders', () => {
       ratingFlex: 0.02,
     }),
     'blunder',
+  );
+});
+
+test('classifyReviewCategory falls back to cp loss when expected points are unavailable', () => {
+  assert.equal(
+    classifyReviewCategory({
+      index: 23,
+      san: 'Qg5',
+      bestMovePlayed: false,
+      sacrifice: false,
+      afterWinning: false,
+      beforeCompletelyWinning: false,
+      decisiveMove: false,
+      expectedPointsLost: null,
+      beforeExpected: null,
+      afterExpected: null,
+      cpLossCp: 197,
+      beforeMate: null,
+      afterMate: null,
+      secondBestGapCp: 20,
+      ratingFlex: 0.02,
+    }),
+    'mistake',
   );
 });
 

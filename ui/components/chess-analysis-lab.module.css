@@ -1069,6 +1069,7 @@
 }
 
 .reviewMoveCell {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -1083,6 +1084,14 @@
   font-weight: 720;
   text-align: left;
   cursor: pointer;
+}
+
+.reviewMoveCellWithBadge {
+  border-color: color-mix(in srgb, var(--move-dot-color, rgba(198, 215, 255, 0.6)) 38%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--move-dot-color, rgba(198, 215, 255, 0.6)) 14%, transparent), transparent 70%),
+    rgba(255, 255, 255, 0.018);
+  padding-left: 22px;
 }
 
 .reviewMoveCell span:last-child {
@@ -1103,12 +1112,18 @@
   color: var(--text);
 }
 
-.reviewMoveDot {
-  width: 7.2px;
-  height: 7.2px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--move-dot-color, rgba(198, 215, 255, 0.6)) 62%, white);
+.reviewMoveBadge {
+  position: absolute;
+  top: -6px;
+  left: -4px;
+  width: 18px;
+  height: 18px;
+  background-image: var(--review-badge-url);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.28));
+  pointer-events: none;
 }
 
 .reviewTimeline {

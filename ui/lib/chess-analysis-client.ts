@@ -102,8 +102,8 @@ export const reviewCategoryOrder: ReviewCategory[] = [
   'excellent',
   'good',
   'inaccuracy',
-  'miss',
   'mistake',
+  'miss',
   'blunder',
 ];
 
@@ -112,12 +112,14 @@ export const reviewCategoryMeta: Record<
   {
     label: string;
     color: string;
+    badge?: string;
     pointStyle: PointStyle;
   }
 > = {
   brilliant: {
     label: 'Brilliant',
-    color: '#b8f7a1',
+    color: '#26C2A3',
+    badge: '/review-badges/brilliant.svg',
     pointStyle: 'star',
   },
   book: {
@@ -127,42 +129,50 @@ export const reviewCategoryMeta: Record<
   },
   great: {
     label: 'Great',
-    color: '#b8f7a1',
+    color: '#749BBF',
+    badge: '/review-badges/great.svg',
     pointStyle: 'triangle',
   },
   best: {
     label: 'Best',
-    color: '#b8f7a1',
+    color: '#81B64C',
+    badge: '/review-badges/best.svg',
     pointStyle: 'rectRounded',
   },
   excellent: {
     label: 'Excellent',
-    color: '#cfd5dc',
+    color: '#81B64C',
+    badge: '/review-badges/excellent.png',
     pointStyle: 'circle',
   },
   good: {
     label: 'Good',
-    color: '#a8b1bd',
+    color: '#95B776',
+    badge: '/review-badges/good.png',
     pointStyle: 'circle',
   },
   inaccuracy: {
     label: 'Inaccuracy',
-    color: '#ffd66e',
+    color: '#F7C631',
+    badge: '/review-badges/inaccuracy.png',
     pointStyle: 'rect',
   },
   miss: {
     label: 'Miss',
-    color: '#ff954a',
+    color: '#FF7769',
+    badge: '/review-badges/miss.svg',
     pointStyle: 'rectRot',
   },
   mistake: {
     label: 'Mistake',
-    color: '#ff954a',
+    color: '#FFA459',
+    badge: '/review-badges/mistake.svg',
     pointStyle: 'crossRot',
   },
   blunder: {
     label: 'Blunder',
-    color: '#ff4444',
+    color: '#FA412D',
+    badge: '/review-badges/blunder.svg',
     pointStyle: 'cross',
   },
 };
@@ -549,6 +559,7 @@ export function classifyTimelineMoves(
       decisiveMove,
       beforeExpected,
       afterExpected,
+      expectedPointsLost,
       cpLossCp,
       beforeMate,
       afterMate,
@@ -930,6 +941,7 @@ export function classifyReviewCategory({
   decisiveMove,
   beforeExpected,
   afterExpected,
+  expectedPointsLost,
   cpLossCp,
   beforeMate,
   afterMate,
@@ -945,6 +957,7 @@ export function classifyReviewCategory({
   decisiveMove: boolean;
   beforeExpected: number | null;
   afterExpected: number | null;
+  expectedPointsLost: number | null;
   cpLossCp: number | null;
   beforeMate: number | null;
   afterMate: number | null;
@@ -979,33 +992,58 @@ export function classifyReviewCategory({
     return 'great';
   }
 
+  const missedWinningChance =
+    !bestMovePlayed &&
+    beforeExpected != null &&
+    afterExpected != null &&
+    beforeExpected >= Math.max(0.66, 0.72 - ratingFlex * 3) &&
+    afterExpected <= Math.min(0.64, beforeExpected - 0.18);
+
+  if (expectedPointsLost != null) {
+    if (bestMovePlayed || expectedPointsLost <= 0.0005) {
+      return 'best';
+    }
+
+    if (expectedPointsLost <= 0.02 + ratingFlex) {
+      return 'excellent';
+    }
+
+    if (expectedPointsLost <= 0.05 + ratingFlex) {
+      return 'good';
+    }
+
+    if (expectedPointsLost <= 0.10 + ratingFlex) {
+      return 'inaccuracy';
+    }
+
+    if (expectedPointsLost <= 0.20 + ratingFlex) {
+      return missedWinningChance ? 'miss' : 'mistake';
+    }
+
+    return missedWinningChance ? 'miss' : 'blunder';
+  }
+
   if (cpLossCp == null) {
     return bestMovePlayed ? 'best' : null;
   }
 
-  const bestThresholdCp = 12 + Math.round(ratingFlex * 200);
-  const excellentThresholdCp = 28 + Math.round(ratingFlex * 250);
-  const goodThresholdCp = 55 + Math.round(ratingFlex * 300);
-  const inaccuracyThresholdCp = 100 + Math.round(ratingFlex * 500);
-  const mistakeThresholdCp = 320 + Math.round(ratingFlex * 500);
-
-  if (bestMovePlayed || cpLossCp <= bestThresholdCp) {
+  if (bestMovePlayed || cpLossCp <= 12 + Math.round(ratingFlex * 200)) {
     return 'best';
   }
 
-  if (cpLossCp <= excellentThresholdCp) {
+  if (cpLossCp <= 28 + Math.round(ratingFlex * 250)) {
     return 'excellent';
   }
 
-  if (cpLossCp <= goodThresholdCp) {
+  if (cpLossCp <= 55 + Math.round(ratingFlex * 300)) {
     return 'good';
   }
 
-  if (cpLossCp < inaccuracyThresholdCp) {
+  if (cpLossCp < 100 + Math.round(ratingFlex * 500)) {
     return 'inaccuracy';
   }
 
-  if (cpLossCp < mistakeThresholdCp) {
+  if (cpLossCp < 320 + Math.round(ratingFlex * 500)) {
     return 'mistake';
   }
 
