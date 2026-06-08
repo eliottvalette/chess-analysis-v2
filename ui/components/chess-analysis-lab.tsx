@@ -127,8 +127,8 @@ function getBoardSquareCenter(square: string, orientation: 'white' | 'black', bo
   const squareSize = boardWidth / 8;
 
   return {
-    left: visualFile * squareSize + squareSize / 2,
-    top: visualRank * squareSize + squareSize / 2,
+    left: visualFile * squareSize + squareSize * 0.78,
+    top: visualRank * squareSize + squareSize * 0.22,
     squareSize,
   };
 }
