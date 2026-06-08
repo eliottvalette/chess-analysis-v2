@@ -44,6 +44,7 @@ export type TrainingDeckSummary = {
   dueCount: number;
   ignoredCount: number;
   isOwned: boolean;
+  canManage: boolean;
 };
 
 export function getModeLabel(mode: WorkspaceMode) {
@@ -1328,7 +1329,7 @@ function DeckLibraryItem({
         </span>
       </button>
 
-      {deck.isOwned ? (
+      {deck.canManage ? (
         <div className={styles.deckLibraryMenuAnchor} ref={menuRef}>
           <button
             aria-expanded={menuOpen}

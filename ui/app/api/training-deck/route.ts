@@ -347,20 +347,22 @@ async function renameDeck(profile: TrainingProfileCookie, body: Record<string, u
     return NextResponse.json({ error: 'Deck title is required.' }, { status: 400 });
   }
 
-  const ownedDeck = await getOwnedDeck(profile, deckId);
+  const manageableDeck = await getManageableDeck(profile, deckId);
 
-  if (!ownedDeck) {
-    return NextResponse.json({ error: 'You can only rename your own decks.' }, { status: 403 });
+  if (!manageableDeck) {
+    return NextResponse.json({ error: 'Deck not found or not manageable.' }, { status: 403 });
   }
 
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from('decks')
-    .update({ name })
-    .eq('id', deckId)
-    .eq('owner_profile_id', profile.id)
-    .select(DECK_SELECT)
-    .single();
+  let updateQuery = supabase.from('decks').update({ name }).eq('id', deckId);
+
+  if (manageableDeck.owner_profile_id) {
+    updateQuery = updateQuery.eq('owner_profile_id', profile.id);
+  } else {
+    updateQuery = updateQuery.is('owner_profile_id', null);
+  }
+
+  const { data, error } = await updateQuery.select(DECK_SELECT).single();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -381,10 +383,10 @@ async function deleteDeck(profile: TrainingProfileCookie, body: Record<string, u
     return NextResponse.json({ error: 'Deck is required.' }, { status: 400 });
   }
 
-  const ownedDeck = await getOwnedDeck(profile, deckId);
+  const manageableDeck = await getManageableDeck(profile, deckId);
 
-  if (!ownedDeck) {
-    return NextResponse.json({ error: 'You can only delete your own decks.' }, { status: 403 });
+  if (!manageableDeck) {
+    return NextResponse.json({ error: 'Deck not found or not manageable.' }, { status: 403 });
   }
 
   const supabase = createAdminClient();
@@ -408,7 +410,15 @@ async function deleteDeck(profile: TrainingProfileCookie, body: Record<string, u
     }
   }
 
-  const { error: deleteError } = await supabase.from('decks').delete().eq('id', deckId).eq('owner_profile_id', profile.id);
+  let deleteDeckQuery = supabase.from('decks').delete().eq('id', deckId);
+
+  if (manageableDeck.owner_profile_id) {
+    deleteDeckQuery = deleteDeckQuery.eq('owner_profile_id', profile.id);
+  } else {
+    deleteDeckQuery = deleteDeckQuery.is('owner_profile_id', null);
+  }
+
+  const { error: deleteError } = await deleteDeckQuery;
 
   if (deleteError) {
     return NextResponse.json({ error: deleteError.message }, { status: 500 });
@@ -419,6 +429,25 @@ async function deleteDeck(profile: TrainingProfileCookie, body: Record<string, u
 
 function isDeckAccessibleToProfile(ownerProfileId: string | null | undefined, profileId: string) {
   return ownerProfileId == null || ownerProfileId === profileId;
+}
+
+async function getManageableDeck(profile: TrainingProfileCookie, deckId: string) {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from('decks')
+    .select('id,owner_profile_id,is_active')
+    .eq('id', deckId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data || !data.is_active || !isDeckAccessibleToProfile(data.owner_profile_id, profile.id)) {
+    return null;
+  }
+
+  return data;
 }
 
 async function getOwnedDeck(profile: TrainingProfileCookie, deckId: string) {
@@ -535,6 +564,7 @@ function summarizeDeck(
     dueCount,
     ignoredCount,
     isOwned: Boolean(profileId && deck.owner_profile_id === profileId),
+    canManage: Boolean(profileId && isDeckAccessibleToProfile(deck.owner_profile_id ? String(deck.owner_profile_id) : null, profileId)),
   };
 }
 

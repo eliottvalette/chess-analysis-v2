@@ -29,13 +29,15 @@ function logProgress(message) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const username = options.username;
+  const env = loadLocalEnv();
+  const username = (options.username || env.CHESSCOM_USERNAME || env.CHESSCOM_DECK_USERNAME || '').trim().toLowerCase();
 
   if (!username) {
-    throw new Error('Usage: node scripts/chesscom/build-recent-blitz-deck.mjs --username <chesscom-username> [--profile <training-profile>] [--count 10] [--write-supabase] [--set-active]');
+    throw new Error(
+      'Missing Chess.com username. Pass --username <chesscom-username> or set CHESSCOM_USERNAME in .env.local. Example: npm run chesscom:build:deck -- --username yourname --write-supabase --set-active',
+    );
   }
 
-  const env = loadLocalEnv();
   const ownerUsername = (options.profile || env.CHESSCOM_DECK_PROFILE || username).trim().toLowerCase();
   const analyzeBaseUrl = env.ANALYZE_BASE_URL?.trim() || 'http://localhost:3000';
   const depth = Number(env.CHESSCOM_DECK_DEPTH || DEFAULT_DEPTH);
@@ -304,11 +306,13 @@ async function buildCardsForGame({
 
     if (sideToMove === playerColor) {
       const contextBeforeMove = moveHistory.length > 0 ? moveHistory.join(' ') : 'starting position';
+      const setupMovesBeforeMistake = [...moveHistory];
 
       chess.move(move);
       moveHistory.push(move.san);
 
       const fenAfter = chess.fen();
+      const setupMovesThroughMistake = [...moveHistory];
       candidates.push({
         index,
         move,
@@ -317,6 +321,8 @@ async function buildCardsForGame({
         fenAfter,
         contextBeforeMove,
         contextAfterMove: moveHistory.join(' '),
+        setupMovesBeforeMistake,
+        setupMovesThroughMistake,
       });
       continue;
     }
@@ -349,7 +355,7 @@ async function buildCardsForGame({
   for (const [candidateIndex, candidate] of candidates.entries()) {
     const beforeAnalysis = analyses[candidateIndex * 2];
     const afterAnalysis = analyses[candidateIndex * 2 + 1];
-    const { index, move, moveUci, fenBefore, fenAfter, contextBeforeMove, contextAfterMove } = candidate;
+    const { index, move, moveUci, fenBefore, fenAfter, contextBeforeMove, contextAfterMove, setupMovesBeforeMistake, setupMovesThroughMistake } = candidate;
     logProgress(`[${gameIndex + 1}/${totalGames}] ply ${index + 1}: checking your move ${move.san}`);
     const bestScore = scoreToCpForSide(beforeAnalysis?.whitePerspective, playerColor);
     const afterScore = scoreToCpForSide(afterAnalysis?.whitePerspective, playerColor);
@@ -392,6 +398,9 @@ async function buildCardsForGame({
       opponent_move_uci: null,
       opponent_move_san: null,
       score_swing_cp: scoreSwingCp,
+      replay_from_start: setupMovesBeforeMistake.length > 0,
+      initial_fen: null,
+      setup_moves: setupMovesBeforeMistake,
     });
 
     cards.push({
@@ -415,6 +424,9 @@ async function buildCardsForGame({
       opponent_move_uci: moveUci,
       opponent_move_san: move.san,
       score_swing_cp: scoreSwingCp,
+      replay_from_start: setupMovesThroughMistake.length > 0,
+      initial_fen: null,
+      setup_moves: setupMovesThroughMistake,
     });
   }
 
