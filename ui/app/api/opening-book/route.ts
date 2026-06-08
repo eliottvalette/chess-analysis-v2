@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
+import { Chess } from 'chess.js';
 
+import { toStoredMove } from '@/lib/chess-analysis-client';
 import {
   buildOpeningBookPositions,
   resolveOpeningBookBatch,
@@ -31,17 +33,8 @@ export async function POST(request: Request) {
       : [];
 
     if (positions.length === 0 && Array.isArray(body.moves) && body.moves.length > 0) {
-      positions = buildOpeningBookPositions(
-        body.moves.map(move => ({
-          color: 'w',
-          from: String(move.from ?? ''),
-          to: String(move.to ?? ''),
-          san: '',
-          uci: String(move.uci ?? `${move.from ?? ''}${move.to ?? ''}${move.promotion ?? ''}`),
-          ...(move.promotion ? { promotion: move.promotion } : {}),
-        })),
-        typeof body.initialFen === 'string' ? body.initialFen : null,
-      );
+      const storedMoves = buildStoredMovesFromRequest(body.moves, typeof body.initialFen === 'string' ? body.initialFen : null);
+      positions = buildOpeningBookPositions(storedMoves, typeof body.initialFen === 'string' ? body.initialFen : null);
     }
 
     if (positions.length === 0) {
@@ -58,4 +51,28 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : 'Unable to resolve opening book positions.';
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function buildStoredMovesFromRequest(
+  moves: NonNullable<OpeningBookRequestBody['moves']>,
+  initialFen: string | null,
+) {
+  const chess = initialFen ? new Chess(initialFen) : new Chess();
+  const storedMoves = [];
+
+  for (const move of moves) {
+    const played = chess.move({
+      from: String(move.from ?? ''),
+      to: String(move.to ?? ''),
+      ...(move.promotion ? { promotion: move.promotion } : {}),
+    });
+
+    if (!played) {
+      break;
+    }
+
+    storedMoves.push(toStoredMove(played));
+  }
+
+  return storedMoves;
 }

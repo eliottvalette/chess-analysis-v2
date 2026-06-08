@@ -38,7 +38,13 @@ import {
   type StoredMove,
   type TimelineReview,
 } from '@/lib/chess-analysis-client';
-import { cardMoveReviewsFromTimeline, parseCardMoveReviews, resolveTrainBoardMoveReview } from '@/lib/card-move-reviews';
+import {
+  buildLiveTrainMoveReview,
+  cardMoveReviewsFromTimeline,
+  parseCardMoveReviews,
+  resolveTrainBoardMoveReview,
+  shouldUseLiveTrainMoveReview,
+} from '@/lib/card-move-reviews';
 import { resolveOpeningBookFlagsLocal } from '@/lib/opening-book';
 import { CHESS_SOUND_URLS, getMoveSoundSequence, getPrimaryMoveSound, type ChessSoundKey } from '@/lib/chess-sounds';
 import {
@@ -510,6 +516,7 @@ export function ChessAnalysisLab() {
   const [focusTrainCreateDeck, setFocusTrainCreateDeck] = useState(false);
   const saveReplayFromStart = true;
   const [deckPlaybackBusy, setDeckPlaybackBusy] = useState(false);
+  const [trainAnalysisTick, setTrainAnalysisTick] = useState(0);
 
   const boardStageRef = useRef<HTMLDivElement | null>(null);
   const evalRailRef = useRef<HTMLDivElement | null>(null);
@@ -558,31 +565,65 @@ export function ChessAnalysisLab() {
   }, [historyIndex, moveHistory, variationBaseIndex, variationMoves]);
   const currentMoveList = useMemo(() => buildMoveUciHistory(currentMoves), [currentMoves]);
   const currentLineKey = currentMoveList.join(' ');
-  const activeTrainMoveReview = useMemo(() => {
-    if (!activeDeckCard || historyIndex <= 0) {
-      return null;
-    }
-
-    const answerFeedback =
+  const trainAnswerFeedback = useMemo(
+    () =>
       deckFeedback && !deckFeedback.pending
         ? {
             correct: deckFeedback.correct,
             playedUci: deckFeedback.playedUci,
             evalLossCp: deckFeedback.evalLossCp,
           }
-        : null;
+        : null,
+    [deckFeedback],
+  );
+  const trainPositionAnalyses = useMemo(() => {
+    const analyses: Array<AnalysisResult | null> = [];
+
+    for (let moveCount = 0; moveCount <= currentMoves.length; moveCount += 1) {
+      const moveList = buildMoveUciHistory(currentMoves.slice(0, moveCount));
+      const cacheKey = getPositionCacheKey(initialFen, moveList);
+      analyses[moveCount] = positionCacheRef.current.get(cacheKey) ?? null;
+    }
+
+    if (positionAnalysis) {
+      analyses[historyIndex] = positionAnalysis;
+    }
+
+    return analyses;
+  }, [currentMoves, historyIndex, initialFen, positionAnalysis, trainAnalysisTick]);
+  const activeTrainMoveReview = useMemo(() => {
+    if (!activeDeckCard || historyIndex <= 0) {
+      return null;
+    }
+
+    const moveIndex = historyIndex - 1;
+
+    if (shouldUseLiveTrainMoveReview(activeDeckCard, currentMoves, moveIndex, trainAnswerFeedback)) {
+      return buildLiveTrainMoveReview(moveIndex, currentMoves, trainPositionAnalyses, initialFen);
+    }
 
     return resolveTrainBoardMoveReview(
       activeDeckCard,
-      historyIndex - 1,
+      moveIndex,
       currentMoves,
       initialFen,
-      answerFeedback,
+      trainAnswerFeedback,
     );
-  }, [activeDeckCard, currentMoves, deckFeedback, historyIndex, initialFen]);
+  }, [activeDeckCard, currentMoves, historyIndex, initialFen, trainAnswerFeedback, trainPositionAnalyses]);
+  const trainUsesLivePositionEval = useMemo(() => {
+    if (!activeDeckCard || historyIndex <= 0) {
+      return false;
+    }
+
+    return shouldUseLiveTrainMoveReview(activeDeckCard, currentMoves, historyIndex - 1, trainAnswerFeedback);
+  }, [activeDeckCard, currentMoves, historyIndex, trainAnswerFeedback]);
   const whiteAdvantage = useMemo(() => {
-    if (activeTrainMoveReview?.whiteEvalCp != null) {
+    if (!trainUsesLivePositionEval && activeTrainMoveReview?.whiteEvalCp != null) {
       return getAdvantageMeterFromEvalCp(activeTrainMoveReview.whiteEvalCp);
+    }
+
+    if (positionAnalysis) {
+      return getAdvantageMeter(positionAnalysis);
     }
 
     if (activeDeckCard && historyIndex > 0) {
@@ -594,10 +635,14 @@ export function ChessAnalysisLab() {
     }
 
     return getAdvantageMeter(positionAnalysis);
-  }, [activeDeckCard, activeTrainMoveReview, historyIndex, positionAnalysis]);
+  }, [activeDeckCard, activeTrainMoveReview, historyIndex, positionAnalysis, trainUsesLivePositionEval]);
   const boardScoreLabel = useMemo(() => {
-    if (activeTrainMoveReview?.whiteEvalCp != null) {
+    if (!trainUsesLivePositionEval && activeTrainMoveReview?.whiteEvalCp != null) {
       return formatEvalCpLabel(activeTrainMoveReview.whiteEvalCp, orientation);
+    }
+
+    if (positionAnalysis) {
+      return formatScoreLabel(positionAnalysis, orientation);
     }
 
     if (activeDeckCard && historyIndex > 0) {
@@ -609,7 +654,7 @@ export function ChessAnalysisLab() {
     }
 
     return formatScoreLabel(positionAnalysis, orientation);
-  }, [activeDeckCard, activeTrainMoveReview, historyIndex, orientation, positionAnalysis]);
+  }, [activeDeckCard, activeTrainMoveReview, historyIndex, orientation, positionAnalysis, trainUsesLivePositionEval]);
   const isViewingDeckFailurePosition =
     activeDeckCard != null &&
     deckFeedback != null &&
@@ -1720,6 +1765,43 @@ export function ChessAnalysisLab() {
 
     return undefined;
   }, [currentFen, currentLineKey, currentMoveList, fetchCachedPositionAnalysis, initialFen]);
+
+  useEffect(() => {
+    if (!activeDeckCard || historyIndex <= 0) {
+      return undefined;
+    }
+
+    const moveIndex = historyIndex - 1;
+    const answerFeedback =
+      deckFeedback && !deckFeedback.pending
+        ? {
+            correct: deckFeedback.correct,
+            playedUci: deckFeedback.playedUci,
+            evalLossCp: deckFeedback.evalLossCp,
+          }
+        : null;
+
+    if (!shouldUseLiveTrainMoveReview(activeDeckCard, currentMoves, moveIndex, answerFeedback)) {
+      return undefined;
+    }
+
+    const beforeMoveList = buildMoveUciHistory(currentMoves.slice(0, moveIndex));
+    const beforeKey = getPositionCacheKey(initialFen, beforeMoveList);
+
+    if (positionCacheRef.current.has(beforeKey)) {
+      return undefined;
+    }
+
+    const beforeGame = restoreGameFromHistory(currentMoves, initialFen, moveIndex);
+
+    void fetchCachedPositionAnalysis(beforeKey, beforeGame.fen(), beforeMoveList)
+      .then(() => {
+        setTrainAnalysisTick(tick => tick + 1);
+      })
+      .catch(() => undefined);
+
+    return undefined;
+  }, [activeDeckCard, currentMoves, deckFeedback, fetchCachedPositionAnalysis, historyIndex, initialFen]);
 
   useEffect(() => {
     if (moveHistory.length === 0 || historyIndex >= moveHistory.length) {

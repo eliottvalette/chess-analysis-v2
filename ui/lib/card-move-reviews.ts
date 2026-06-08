@@ -254,3 +254,85 @@ export function resolveTrainBoardMoveReview(
 
   return buildTrainBoardMoveReview(move, moveIndex, 'good', null);
 }
+
+export function shouldUseLiveTrainMoveReview(
+  card: DeckCard,
+  moves: StoredMove[],
+  moveIndex: number,
+  answerFeedback?: TrainBoardAnswerFeedback | null,
+) {
+  const move = moves[moveIndex];
+
+  if (!move) {
+    return false;
+  }
+
+  const moveUci = moveUciFromStoredMove(move);
+
+  if (answerFeedback && moveUci === answerFeedback.playedUci) {
+    return !answerFeedback.correct;
+  }
+
+  if (answerFeedback) {
+    const answerMoveIndex = moves.findIndex(candidate => moveUciFromStoredMove(candidate) === answerFeedback.playedUci);
+
+    if (answerMoveIndex >= 0 && moveIndex > answerMoveIndex) {
+      return true;
+    }
+  }
+
+  const stored = card.moveReviews[moveIndex];
+
+  if (stored && stored.san === move.san) {
+    return false;
+  }
+
+  if (moveIndex >= card.moveReviews.length || !stored || stored.san !== move.san) {
+    return true;
+  }
+
+  return false;
+}
+
+export function buildLiveTrainMoveReview(
+  moveIndex: number,
+  moves: StoredMove[],
+  analysesByMoveCount: Array<AnalysisResult | null | undefined>,
+  initialFen: string | null,
+): CardMoveReview | null {
+  const move = moves[moveIndex];
+
+  if (!move) {
+    return null;
+  }
+
+  const subset = moves.slice(0, moveIndex + 1);
+  const preMoveAnalyses = subset.map((_, index) => analysesByMoveCount[index] ?? null);
+  const postMoveAnalyses = subset.map((_, index) => analysesByMoveCount[index + 1] ?? null);
+
+  if (preMoveAnalyses.some(analysis => analysis == null) || postMoveAnalyses.some(analysis => analysis == null)) {
+    return null;
+  }
+
+  const openingBookFlags = resolveOpeningBookFlagsLocal(subset, initialFen);
+  const reviews = classifyTimelineMoves(
+    subset,
+    preMoveAnalyses as AnalysisResult[],
+    postMoveAnalyses as AnalysisResult[],
+    initialFen,
+    null,
+    openingBookFlags,
+  );
+  const review = reviews[moveIndex];
+
+  if (!review?.category) {
+    return null;
+  }
+
+  return {
+    ply: moveIndex + 1,
+    san: move.san,
+    category: review.category,
+    whiteEvalCp: toWhiteEvalCp(review.afterCp, review.color),
+  };
+}
