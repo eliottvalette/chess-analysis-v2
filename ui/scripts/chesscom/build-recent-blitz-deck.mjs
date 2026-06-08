@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { fetchArchives, fetchRecentGames, extractTag } from './api.mjs';
+import { isMoveInOpeningBook, qualifiesAsLineRootMistake } from './deck-mistake-filter.mjs';
 import { loadLocalEnv, requireAdminKey, requireEnv } from '../supabase/env.mjs';
 
 const DEFAULT_COUNT = 10;
@@ -352,6 +353,8 @@ async function buildCardsForGame({
     movetimeMs,
   });
 
+  let firstMistakePly = null;
+
   for (const [candidateIndex, candidate] of candidates.entries()) {
     const beforeAnalysis = analyses[candidateIndex * 2];
     const afterAnalysis = analyses[candidateIndex * 2 + 1];
@@ -367,14 +370,31 @@ async function buildCardsForGame({
     }
 
     const scoreSwingCp = Math.round(bestScore - afterScore);
+    const inBook = isMoveInOpeningBook(fenBefore, moveUci);
+    const qualifies = qualifiesAsLineRootMistake({
+      scoreSwingCp,
+      thresholdCp,
+      acceptableLossCp,
+      inBook,
+      playedUci: moveUci,
+      bestMoveUci: beforeAnalysis.bestMove,
+    });
 
-    if (scoreSwingCp < thresholdCp) {
-      logProgress(`[${gameIndex + 1}/${totalGames}] ply ${index + 1}: ok ${move.san} loss=${scoreSwingCp}cp`);
+    if (!qualifies) {
+      logProgress(`[${gameIndex + 1}/${totalGames}] ply ${index + 1}: ok ${move.san} loss=${scoreSwingCp}cp book=${inBook ? 'yes' : 'no'}`);
       continue;
     }
 
+    if (firstMistakePly != null) {
+      logProgress(
+        `[${gameIndex + 1}/${totalGames}] ply ${index + 1}: skipped ${move.san} loss=${scoreSwingCp}cp (later mistake after first error at ply ${firstMistakePly})`,
+      );
+      continue;
+    }
+
+    firstMistakePly = index + 1;
     logProgress(
-      `[${gameIndex + 1}/${totalGames}] ply ${index + 1}: found mistake ${move.san} loss=${scoreSwingCp}cp -> +2 cards`,
+      `[${gameIndex + 1}/${totalGames}] ply ${index + 1}: first line mistake ${move.san} loss=${scoreSwingCp}cp book=${inBook ? 'yes' : 'no'} -> +2 cards`,
     );
 
     cards.push({
