@@ -114,6 +114,25 @@ function getReviewMoveStyle(category: ReviewCategory | null | undefined): CSSPro
   };
 }
 
+function getBoardSquareCenter(square: string, orientation: 'white' | 'black', boardWidth: number) {
+  const fileIndex = square.charCodeAt(0) - 97;
+  const rank = Number(square[1]);
+
+  if (fileIndex < 0 || fileIndex > 7 || !Number.isInteger(rank) || rank < 1 || rank > 8) {
+    return null;
+  }
+
+  const visualFile = orientation === 'white' ? fileIndex : 7 - fileIndex;
+  const visualRank = orientation === 'white' ? 8 - rank : rank - 1;
+  const squareSize = boardWidth / 8;
+
+  return {
+    left: visualFile * squareSize + squareSize / 2,
+    top: visualRank * squareSize + squareSize / 2,
+    squareSize,
+  };
+}
+
 function mapTrainingDeckCard(card: TrainingDeckCardRow): DeckCard {
   return {
     id: String(card.id),
@@ -525,6 +544,31 @@ export function ChessAnalysisLab() {
       ...squareStyles,
     };
   }, [currentMoves, hasLoadedGame, historyIndex, squareStyles, timelineReviews, variationBaseIndex]);
+  const boardReviewBadge = useMemo(() => {
+    if (!hasLoadedGame || variationBaseIndex != null || historyIndex <= 0) {
+      return null;
+    }
+
+    const lastMove = currentMoves[currentMoves.length - 1];
+    const category = timelineReviews[historyIndex - 1]?.category;
+
+    if (!lastMove || !category) {
+      return null;
+    }
+
+    const meta = reviewCategoryMeta[category];
+    const placement = getBoardSquareCenter(lastMove.to, orientation, boardWidth);
+
+    if (!meta?.badge || !placement) {
+      return null;
+    }
+
+    return {
+      badge: meta.badge,
+      color: meta.color,
+      ...placement,
+    };
+  }, [boardWidth, currentMoves, hasLoadedGame, historyIndex, orientation, timelineReviews, variationBaseIndex]);
 
   const movePairs = useMemo(() => {
     const pairs: Array<{
@@ -2745,6 +2789,21 @@ export function ChessAnalysisLab() {
                     showNotation: true,
                   }}
                 />
+                {boardReviewBadge ? (
+                  <span
+                    aria-hidden="true"
+                    className={styles.boardReviewBadge}
+                    style={
+                      {
+                        '--board-review-badge-url': `url(${boardReviewBadge.badge})`,
+                        '--board-review-badge-color': boardReviewBadge.color,
+                        '--board-square-size': `${boardReviewBadge.squareSize}px`,
+                        left: `${boardReviewBadge.left}px`,
+                        top: `${boardReviewBadge.top}px`,
+                      } as CSSProperties
+                    }
+                  />
+                ) : null}
               </div>
               <div className={styles.boardStageSpacer} aria-hidden="true" />
             </div>
