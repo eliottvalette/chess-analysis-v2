@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { fetchArchives, fetchRecentGames, toGameSummary } from '@/lib/chesscom';
+import { fetchArchives, fetchPlayerProfiles, fetchRecentGames, toGameSummary } from '@/lib/chesscom';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -25,10 +25,12 @@ export async function GET(request: Request) {
       timeClass,
     });
     const games = page.games.slice(0, count);
+    const profileUsernames = games.flatMap(game => [game.white?.username, game.black?.username]).filter(Boolean) as string[];
+    const profiles = await fetchPlayerProfiles(profileUsernames);
 
     return NextResponse.json({
       username,
-      games: games.map(game => toGameSummary(game, username)),
+      games: games.map(game => toGameSummary(game, username, profiles)),
       hasMore: page.hasMore || page.games.length > count,
       nextCursor: page.nextCursor,
       nextOffset: page.nextOffset,

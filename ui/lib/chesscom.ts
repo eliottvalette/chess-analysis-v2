@@ -11,6 +11,8 @@ export type ChessComRecentGameSummary = {
   playerRating: number | null;
   opponentUsername: string | null;
   opponentRating: number | null;
+  whiteAvatar: string | null;
+  blackAvatar: string | null;
   result: string | null;
   termination: string | null;
   eco: string | null;
@@ -34,6 +36,10 @@ type RawChessComPlayer = {
   username?: string;
   rating?: number;
   result?: string;
+};
+
+type ChessComPlayerProfile = {
+  avatar: string | null;
 };
 
 export type RawChessComGame = {
@@ -115,7 +121,29 @@ export async function fetchRecentGames({
   };
 }
 
-export function toGameSummary(game: RawChessComGame, username: string): ChessComRecentGameSummary {
+export async function fetchPlayerProfiles(usernames: string[]) {
+  const uniqueUsernames = [...new Set(usernames.map(value => value.trim().toLowerCase()).filter(Boolean))];
+  const entries = await Promise.all(
+    uniqueUsernames.map(async playerUsername => {
+      try {
+        const profile = await fetchJson(`https://api.chess.com/pub/player/${playerUsername}`);
+        const avatar = typeof profile.avatar === 'string' ? profile.avatar : null;
+
+        return [playerUsername, { avatar }] as const;
+      } catch {
+        return [playerUsername, { avatar: null }] as const;
+      }
+    }),
+  );
+
+  return new Map<string, ChessComPlayerProfile>(entries);
+}
+
+export function toGameSummary(
+  game: RawChessComGame,
+  username: string,
+  profiles = new Map<string, ChessComPlayerProfile>(),
+): ChessComRecentGameSummary {
   const playerColor =
     game.white?.username?.toLowerCase() === game.black?.username?.toLowerCase() ? 'unknown' : inferPlayerColor(game, username);
   const player = playerColor === 'white' ? game.white : game.black;
@@ -132,6 +160,8 @@ export function toGameSummary(game: RawChessComGame, username: string): ChessCom
     playerRating: typeof player?.rating === 'number' ? player.rating : null,
     opponentUsername: opponent?.username ?? null,
     opponentRating: typeof opponent?.rating === 'number' ? opponent.rating : null,
+    whiteAvatar: game.white?.username ? profiles.get(game.white.username.toLowerCase())?.avatar ?? null : null,
+    blackAvatar: game.black?.username ? profiles.get(game.black.username.toLowerCase())?.avatar ?? null : null,
     result: extractTag(game.pgn, 'Result'),
     termination: extractTag(game.pgn, 'Termination'),
     eco: extractTag(game.pgn, 'ECO'),

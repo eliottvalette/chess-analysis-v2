@@ -132,6 +132,70 @@ function getBoardSquareCenter(square: string, orientation: 'white' | 'black', bo
   };
 }
 
+type BoardPlayerSummary = {
+  color: 'white' | 'black';
+  name: string;
+  elo: string;
+  avatarUrl: string | null;
+  captured: string[];
+  materialAdvantage: number;
+};
+
+const CAPTURED_PIECE_ORDER = ['q', 'r', 'b', 'n', 'p'] as const;
+const CAPTURED_PIECE_VALUES: Record<string, number> = {
+  p: 1,
+  n: 3,
+  b: 3,
+  r: 5,
+  q: 9,
+};
+const CAPTURED_PIECE_ICONS: Record<'white' | 'black', Record<string, string>> = {
+  white: {
+    p: '♙',
+    n: '♘',
+    b: '♗',
+    r: '♖',
+    q: '♕',
+  },
+  black: {
+    p: '♟',
+    n: '♞',
+    b: '♝',
+    r: '♜',
+    q: '♛',
+  },
+};
+
+function buildCapturedPieces(moves: StoredMove[], playerColor: 'white' | 'black') {
+  const playerMoveColor = playerColor === 'white' ? 'w' : 'b';
+  const capturedColor = playerColor === 'white' ? 'black' : 'white';
+  const counts = new Map<string, number>();
+
+  for (const move of moves) {
+    if (move.color !== playerMoveColor || !move.captured) {
+      continue;
+    }
+
+    counts.set(move.captured, (counts.get(move.captured) ?? 0) + 1);
+  }
+
+  return CAPTURED_PIECE_ORDER.flatMap(piece => (
+    Array.from({ length: counts.get(piece) ?? 0 }, () => CAPTURED_PIECE_ICONS[capturedColor][piece] ?? '')
+  )).filter(Boolean);
+}
+
+function getCapturedMaterialValue(moves: StoredMove[], playerColor: 'white' | 'black') {
+  const playerMoveColor = playerColor === 'white' ? 'w' : 'b';
+
+  return moves.reduce((total, move) => {
+    if (move.color !== playerMoveColor || !move.captured) {
+      return total;
+    }
+
+    return total + (CAPTURED_PIECE_VALUES[move.captured] ?? 0);
+  }, 0);
+}
+
 function mapTrainingDeckCard(card: TrainingDeckCardRow): DeckCard {
   return {
     id: String(card.id),
@@ -157,6 +221,31 @@ function mapTrainingDeckCard(card: TrainingDeckCardRow): DeckCard {
     initialFen: card.initial_fen ? String(card.initial_fen) : null,
     setupMoves: Array.isArray(card.setup_moves) ? card.setup_moves.map(move => String(move)) : [],
   };
+}
+
+function BoardPlayerBar({ player }: { player: BoardPlayerSummary }) {
+  return (
+    <div className={styles.boardPlayerBar}>
+      <span className={`${styles.boardPlayerAvatar} ${player.color === 'black' ? styles.boardPlayerAvatarDark : ''}`} aria-hidden="true">
+        {player.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img alt="" className={styles.boardPlayerAvatarImage} src={player.avatarUrl} />
+        ) : (
+          player.color === 'white' ? '♙' : '♟'
+        )}
+      </span>
+      <span className={styles.boardPlayerIdentity}>
+        <strong className={styles.boardPlayerName}>{player.name}</strong>
+        {player.elo ? <span className={styles.boardPlayerElo}>({player.elo})</span> : null}
+      </span>
+      <span className={styles.boardCapturedPieces} aria-label={`${player.name} captured pieces`}>
+        {player.captured.map((piece, index) => (
+          <span className={styles.boardCapturedPiece} key={`${piece}-${index}`}>{piece}</span>
+        ))}
+        {player.materialAdvantage > 0 ? <span className={styles.boardMaterialAdvantage}>+{player.materialAdvantage}</span> : null}
+      </span>
+    </div>
+  );
 }
 
 function getRecentGameCacheKey(game: ChessComRecentGameSummary) {
@@ -310,6 +399,8 @@ type WorkspaceSnapshot = {
   variationBaseIndex: number | null;
   variationMoves: StoredMove[];
   metadata: GameMetadata | null;
+  whiteAvatarUrl: string | null;
+  blackAvatarUrl: string | null;
   fileName: string;
   orientation: 'white' | 'black';
   showArrow: boolean;
@@ -343,6 +434,8 @@ export function ChessAnalysisLab() {
   const [reviewSide] = useState<ReviewSide>('both');
   const [reviewIndex, setReviewIndex] = useState(0);
   const [metadata, setMetadata] = useState<GameMetadata | null>(null);
+  const [whiteAvatarUrl, setWhiteAvatarUrl] = useState<string | null>(null);
+  const [blackAvatarUrl, setBlackAvatarUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState('');
   const [pgnDraft, setPgnDraft] = useState('');
   const [pgnDialogOpen, setPgnDialogOpen] = useState(false);
@@ -463,6 +556,30 @@ export function ChessAnalysisLab() {
   const boardArrows = activeDeckCard ? dedupeBoardArrows([...deckAnswerArrow, ...deckOpponentArrow]) : bestMoveArrow;
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
+  const whiteBoardPlayer = useMemo(
+    () => ({
+      color: 'white' as const,
+      name: whiteReviewName,
+      elo: metadata?.whiteElo ?? '',
+      avatarUrl: whiteAvatarUrl,
+      captured: buildCapturedPieces(currentMoves, 'white'),
+      materialAdvantage: Math.max(0, getCapturedMaterialValue(currentMoves, 'white') - getCapturedMaterialValue(currentMoves, 'black')),
+    }),
+    [currentMoves, metadata?.whiteElo, whiteAvatarUrl, whiteReviewName],
+  );
+  const blackBoardPlayer = useMemo(
+    () => ({
+      color: 'black' as const,
+      name: blackReviewName,
+      elo: metadata?.blackElo ?? '',
+      avatarUrl: blackAvatarUrl,
+      captured: buildCapturedPieces(currentMoves, 'black'),
+      materialAdvantage: Math.max(0, getCapturedMaterialValue(currentMoves, 'black') - getCapturedMaterialValue(currentMoves, 'white')),
+    }),
+    [blackAvatarUrl, blackReviewName, currentMoves, metadata?.blackElo],
+  );
+  const topBoardPlayer = orientation === 'white' ? blackBoardPlayer : whiteBoardPlayer;
+  const bottomBoardPlayer = orientation === 'white' ? whiteBoardPlayer : blackBoardPlayer;
   const sortedDeckCards = useMemo(
     () => sortCardsForReview(deckCards, deckProgress),
     [deckCards, deckProgress],
@@ -739,7 +856,8 @@ export function ChessAnalysisLab() {
       const railHeight = railRect?.height ?? 0;
       const isHorizontalRail = railWidth > railHeight * 1.6;
       const availableWidth = isHorizontalRail ? stageWidth - 12 : stageWidth - railWidth - gap;
-      const availableHeight = isHorizontalRail ? stageHeight - railHeight - gap : stageHeight - 12;
+      const playerChromeHeight = 84;
+      const availableHeight = (isHorizontalRail ? stageHeight - railHeight - gap : stageHeight - 12) - playerChromeHeight;
 
       setBoardWidth(Math.max(188, Math.floor(Math.min(availableWidth, availableHeight))));
     });
@@ -1564,6 +1682,8 @@ export function ChessAnalysisLab() {
     setVariationMoves(snapshot.variationMoves);
     setGame(nextGame);
     setMetadata(snapshot.metadata);
+    setWhiteAvatarUrl(snapshot.whiteAvatarUrl);
+    setBlackAvatarUrl(snapshot.blackAvatarUrl);
     setFileName(snapshot.fileName);
     setOrientation(snapshot.orientation);
     setShowArrow(snapshot.showArrow);
@@ -1799,6 +1919,8 @@ export function ChessAnalysisLab() {
     setHistoryIndex(0);
     clearVariation();
     setMetadata(null);
+    setWhiteAvatarUrl(null);
+    setBlackAvatarUrl(null);
     setFileName('');
     setPositionAnalysis(null);
     setPreMoveAnalyses([]);
@@ -2256,6 +2378,8 @@ export function ChessAnalysisLab() {
       cacheKey?: string | null;
       gameLink?: string | null;
       skipAnalysis?: boolean;
+      whiteAvatarUrl?: string | null;
+      blackAvatarUrl?: string | null;
     },
   ) {
     persistTrainWorkspaceSnapshot();
@@ -2285,6 +2409,8 @@ export function ChessAnalysisLab() {
       clearVariation();
       setGame(nextGame);
       setMetadata(extractMetadataFromGame(loadedGame));
+      setWhiteAvatarUrl(options?.whiteAvatarUrl ?? null);
+      setBlackAvatarUrl(options?.blackAvatarUrl ?? null);
       setFileName(name);
       setMode('review');
       modeRef.current = 'review';
@@ -2360,6 +2486,8 @@ export function ChessAnalysisLab() {
         cacheKey,
         gameLink: gameSummary.link || gameSummary.url,
         skipAnalysis: !memoryCachedAnalysis,
+        whiteAvatarUrl: gameSummary.whiteAvatar,
+        blackAvatarUrl: gameSummary.blackAvatar,
       },
     );
 
@@ -2646,6 +2774,8 @@ export function ChessAnalysisLab() {
     variationBaseIndex,
     variationMoves,
     metadata,
+    whiteAvatarUrl,
+    blackAvatarUrl,
     fileName,
     orientation,
     showArrow,
@@ -2668,29 +2798,11 @@ export function ChessAnalysisLab() {
     <main className={styles.page}>
       <div className={styles.appShell}>
         <section className={`${styles.panel} ${styles.boardPanel}`}>
-          <div className={styles.topBar}>
-            <div className={styles.titleBlock}>
-              <h1 className={styles.appTitle}>Chess Lab</h1>
-              {hasLoadedGame ? (
-                <span className={styles.contextLine}>{whiteReviewName} vs {blackReviewName} · {moveHistory.length} plies</span>
-              ) : null}
-            </div>
-            <div className={styles.topActions}>
-              <button className={`${styles.action} ${styles.compactAction}`} onClick={() => setPgnDialogOpen(true)}>
-                Import PGN
-              </button>
-              <span
-                className={`${styles.statusPill} ${
-                  serverError ? styles.statusError : positionLoading ? styles.statusPending : styles.statusReady
-                }`}
-              >
-                {serverError ? 'engine issue' : positionLoading ? 'analyzing' : 'ready'}
-              </span>
-            </div>
-          </div>
-
           <div className={styles.boardWorkspace}>
             <div className={styles.boardTools} aria-label="Board tools">
+              <button className={styles.iconButton} onClick={() => setPgnDialogOpen(true)} title="Import PGN">
+                <ImportIcon />
+              </button>
               <button className={styles.iconButton} onClick={() => setOrientation(value => (value === 'white' ? 'black' : 'white'))} title="Flip board">
                 <FlipIcon />
               </button>
@@ -2725,64 +2837,68 @@ export function ChessAnalysisLab() {
                 </div>
               </div>
 
-              <div className={styles.boardFrame} style={{ width: `${boardWidth}px`, height: `${boardWidth}px` }}>
-                <Chessboard
-                  options={{
-                    id: 'analysis-board',
-                    position: currentFen,
-                    boardOrientation: orientation,
-                    boardStyle: {
-                      width: `${boardWidth}px`,
-                      maxWidth: '100%',
-                      height: `${boardWidth}px`,
-                      borderRadius: '10px',
-                    },
-                    onPieceDrop: ({ sourceSquare, targetSquare }) =>
-                      targetSquare ? tryMove(sourceSquare, targetSquare) : false,
-                    onSquareClick: ({ square }) => {
-                      if (selectedSquare) {
-                        const movePlayed = tryMove(selectedSquare, square);
+              <div className={styles.boardStack} style={{ width: `${boardWidth}px` }}>
+                <BoardPlayerBar player={topBoardPlayer} />
+                <div className={styles.boardFrame} style={{ width: `${boardWidth}px`, height: `${boardWidth}px` }}>
+                  <Chessboard
+                    options={{
+                      id: 'analysis-board',
+                      position: currentFen,
+                      boardOrientation: orientation,
+                      boardStyle: {
+                        width: `${boardWidth}px`,
+                        maxWidth: '100%',
+                        height: `${boardWidth}px`,
+                        borderRadius: '10px',
+                      },
+                      onPieceDrop: ({ sourceSquare, targetSquare }) =>
+                        targetSquare ? tryMove(sourceSquare, targetSquare) : false,
+                      onSquareClick: ({ square }) => {
+                        if (selectedSquare) {
+                          const movePlayed = tryMove(selectedSquare, square);
 
-                        if (!movePlayed) {
-                          clearSelection();
+                          if (!movePlayed) {
+                            clearSelection();
+                          }
+
+                          return;
                         }
 
-                        return;
-                      }
+                        const piece = game.get(square as Square);
 
-                      const piece = game.get(square as Square);
+                        if (!piece || piece.color !== game.turn()) {
+                          return;
+                        }
 
-                      if (!piece || piece.color !== game.turn()) {
-                        return;
-                      }
-
-                      setSelectedSquare(square);
-                      highlightMoves(square);
-                    },
-                    onSquareRightClick: () => clearSelection(),
-                    squareStyles: boardSquareStyles,
-                    arrows: boardArrows,
-                    lightSquareStyle: { backgroundColor: '#728092' },
-                    darkSquareStyle: { backgroundColor: '#253140' },
-                    animationDurationInMs: 180,
-                    showNotation: true,
-                  }}
-                />
-                {boardReviewBadge ? (
-                  <span
-                    aria-hidden="true"
-                    className={styles.boardReviewBadge}
-                    style={
-                      {
-                        '--board-review-badge-url': `url(${boardReviewBadge.badge})`,
-                        '--board-review-badge-color': boardReviewBadge.color,
-                        '--board-square-size': `${boardReviewBadge.squareSize}px`,
-                        left: `${boardReviewBadge.left}px`,
-                        top: `${boardReviewBadge.top}px`,
-                      } as CSSProperties
-                    }
+                        setSelectedSquare(square);
+                        highlightMoves(square);
+                      },
+                      onSquareRightClick: () => clearSelection(),
+                      squareStyles: boardSquareStyles,
+                      arrows: boardArrows,
+                      lightSquareStyle: { backgroundColor: '#728092' },
+                      darkSquareStyle: { backgroundColor: '#253140' },
+                      animationDurationInMs: 180,
+                      showNotation: true,
+                    }}
                   />
-                ) : null}
+                  {boardReviewBadge ? (
+                    <span
+                      aria-hidden="true"
+                      className={styles.boardReviewBadge}
+                      style={
+                        {
+                          '--board-review-badge-url': `url(${boardReviewBadge.badge})`,
+                          '--board-review-badge-color': boardReviewBadge.color,
+                          '--board-square-size': `${boardReviewBadge.squareSize}px`,
+                          left: `${boardReviewBadge.left}px`,
+                          top: `${boardReviewBadge.top}px`,
+                        } as CSSProperties
+                      }
+                    />
+                  ) : null}
+                </div>
+                <BoardPlayerBar player={bottomBoardPlayer} />
               </div>
               <div className={styles.boardStageSpacer} aria-hidden="true" />
             </div>
@@ -3014,6 +3130,8 @@ function createEmptyWorkspaceSnapshot(): WorkspaceSnapshot {
     variationBaseIndex: null,
     variationMoves: [],
     metadata: null,
+    whiteAvatarUrl: null,
+    blackAvatarUrl: null,
     fileName: '',
     orientation: 'white',
     showArrow: true,
@@ -3162,6 +3280,16 @@ function deleteCookie(name: string) {
 
 function delay(ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function ImportIcon() {
+  return (
+    <svg className={styles.toolIcon} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3v10" />
+      <path d="m8 9 4 4 4-4" />
+      <path d="M5 15v4h14v-4" />
+    </svg>
+  );
 }
 
 function FlipIcon() {
