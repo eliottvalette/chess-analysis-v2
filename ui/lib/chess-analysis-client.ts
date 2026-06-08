@@ -511,6 +511,7 @@ export function classifyTimelineMoves(
   postMoveAnalyses: AnalysisResult[],
   initialFen: string | null,
   metadata?: GameMetadata | null,
+  openingBookFlags?: boolean[],
 ) {
   if (moves.length === 0 || preMoveAnalyses.length !== moves.length || postMoveAnalyses.length !== moves.length) {
     return [] satisfies TimelineReview[];
@@ -551,7 +552,7 @@ export function classifyTimelineMoves(
     const secondBestGapCp = getSecondBestGapCp(beforeAnalysis, color);
 
     const category = classifyReviewCategory({
-      index,
+      openingBookMove: openingBookFlags?.[index] === true,
       san: move.san,
       bestMovePlayed,
       sacrifice,
@@ -933,7 +934,7 @@ export function getSecondBestGapCp(analysis: AnalysisResult | null | undefined, 
 }
 
 export function classifyReviewCategory({
-  index,
+  openingBookMove = false,
   san,
   bestMovePlayed,
   sacrifice,
@@ -949,7 +950,7 @@ export function classifyReviewCategory({
   secondBestGapCp,
   ratingFlex,
 }: {
-  index: number;
+  openingBookMove?: boolean;
   san: string;
   bestMovePlayed: boolean;
   sacrifice: boolean;
@@ -965,7 +966,7 @@ export function classifyReviewCategory({
   secondBestGapCp: number | null;
   ratingFlex: number;
 }): ReviewCategory | null {
-  if (isBookCandidate(index, cpLossCp, san)) {
+  if (openingBookMove && !san.includes('+') && !san.includes('#')) {
     return 'book';
   }
 
@@ -1057,14 +1058,6 @@ export function classifyReviewCategory({
   }
 
   return 'blunder';
-}
-
-export function isBookCandidate(index: number, cpLossCp: number | null, san: string) {
-  if (index > 5 || san.includes('+') || san.includes('#')) {
-    return false;
-  }
-
-  return cpLossCp != null && cpLossCp <= 70;
 }
 
 function cpLossToAccuracy(cpLossCp: number) {

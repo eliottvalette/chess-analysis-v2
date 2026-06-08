@@ -1,12 +1,75 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildGameReview, classifyReviewCategory, getCpLoss, getMateForColor, getScoreCpForColor, isBookCandidate } from './chess-analysis-client.ts';
+import { buildGameReview, classifyReviewCategory, getCpLoss, getMateForColor, getScoreCpForColor } from './chess-analysis-client.ts';
 
-test('isBookCandidate treats small early opening losses as book and stops after the opening window', () => {
-  assert.equal(isBookCandidate(5, 60, 'd6'), true);
-  assert.equal(isBookCandidate(6, 60, 'Nf6'), false);
-  assert.equal(isBookCandidate(5, 90, 'd6'), false);
+test('classifyReviewCategory marks Scotch d4 as book from bundled opening data', () => {
+  assert.equal(
+    classifyReviewCategory({
+      openingBookMove: true,
+      san: 'd4',
+      bestMovePlayed: true,
+      sacrifice: false,
+      afterWinning: false,
+      beforeCompletelyWinning: false,
+      decisiveMove: false,
+      expectedPointsLost: 0,
+      beforeExpected: 0.5,
+      afterExpected: 0.5,
+      cpLossCp: 10,
+      beforeMate: null,
+      afterMate: null,
+      secondBestGapCp: 20,
+      ratingFlex: 0.02,
+    }),
+    'book',
+  );
+});
+
+test('classifyReviewCategory marks opening book moves from explorer lookup', () => {
+  assert.equal(
+    classifyReviewCategory({
+      openingBookMove: true,
+      san: 'Bb5',
+      bestMovePlayed: true,
+      sacrifice: false,
+      afterWinning: false,
+      beforeCompletelyWinning: false,
+      decisiveMove: false,
+      expectedPointsLost: 0,
+      beforeExpected: 0.5,
+      afterExpected: 0.5,
+      cpLossCp: 10,
+      beforeMate: null,
+      afterMate: null,
+      secondBestGapCp: 20,
+      ratingFlex: 0.02,
+    }),
+    'book',
+  );
+});
+
+test('classifyReviewCategory does not infer book from early ply alone', () => {
+  assert.equal(
+    classifyReviewCategory({
+      openingBookMove: false,
+      san: 'd6',
+      bestMovePlayed: true,
+      sacrifice: false,
+      afterWinning: false,
+      beforeCompletelyWinning: false,
+      decisiveMove: false,
+      expectedPointsLost: 0,
+      beforeExpected: 0.5,
+      afterExpected: 0.49,
+      cpLossCp: 20,
+      beforeMate: null,
+      afterMate: null,
+      secondBestGapCp: 20,
+      ratingFlex: 0.02,
+    }),
+    'best',
+  );
 });
 
 test('cp helpers normalize centipawns and mate from the player perspective', () => {
@@ -24,7 +87,7 @@ test('cp helpers normalize centipawns and mate from the player perspective', () 
 test('classifyReviewCategory uses expected points loss for mistakes and blunders', () => {
   assert.equal(
     classifyReviewCategory({
-      index: 23,
+      openingBookMove: false,
       san: 'Qg5',
       bestMovePlayed: false,
       sacrifice: false,
@@ -45,7 +108,7 @@ test('classifyReviewCategory uses expected points loss for mistakes and blunders
 
   assert.equal(
     classifyReviewCategory({
-      index: 43,
+      openingBookMove: false,
       san: 'Nxb1',
       bestMovePlayed: false,
       sacrifice: false,
@@ -66,7 +129,7 @@ test('classifyReviewCategory uses expected points loss for mistakes and blunders
 
   assert.equal(
     classifyReviewCategory({
-      index: 43,
+      openingBookMove: false,
       san: 'Qh4',
       bestMovePlayed: false,
       sacrifice: false,
@@ -89,7 +152,7 @@ test('classifyReviewCategory uses expected points loss for mistakes and blunders
 test('classifyReviewCategory falls back to cp loss when expected points are unavailable', () => {
   assert.equal(
     classifyReviewCategory({
-      index: 23,
+      openingBookMove: false,
       san: 'Qg5',
       bestMovePlayed: false,
       sacrifice: false,
@@ -112,7 +175,7 @@ test('classifyReviewCategory falls back to cp loss when expected points are unav
 test('classifyReviewCategory treats mate swings against the player as blunders', () => {
   assert.equal(
     classifyReviewCategory({
-      index: 45,
+      openingBookMove: false,
       san: 'Rxc2',
       bestMovePlayed: true,
       sacrifice: false,

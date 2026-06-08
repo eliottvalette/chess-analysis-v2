@@ -34,7 +34,9 @@ import {
   type ReviewCategory,
   type ReviewSide,
   type StoredMove,
+  type TimelineReview,
 } from '@/lib/chess-analysis-client';
+import { resolveOpeningBookFlagsFromApi, resolveOpeningBookFlagsLocal } from '@/lib/opening-book';
 import { CHESS_SOUND_URLS, getMoveSoundSequence, getPrimaryMoveSound, type ChessSoundKey } from '@/lib/chess-sounds';
 import {
   buildDeckCardStartState,
@@ -633,10 +635,50 @@ export function ChessAnalysisLab() {
     return null;
   }, [chesscomUsername, metadata]);
 
-  const timelineReviews = useMemo(
-    () => classifyTimelineMoves(moveHistory, preMoveAnalyses, timelineAnalyses, initialFen, metadata),
-    [initialFen, metadata, moveHistory, preMoveAnalyses, timelineAnalyses],
-  );
+  const [timelineReviews, setTimelineReviews] = useState<TimelineReview[]>([]);
+
+  useEffect(() => {
+    if (
+      moveHistory.length === 0 ||
+      preMoveAnalyses.length !== moveHistory.length ||
+      timelineAnalyses.length !== moveHistory.length
+    ) {
+      setTimelineReviews([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      let openingBookFlags: boolean[] = [];
+
+      try {
+        openingBookFlags = await resolveOpeningBookFlagsFromApi(moveHistory, initialFen);
+      } catch {
+        openingBookFlags = resolveOpeningBookFlagsLocal(moveHistory, initialFen);
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      setTimelineReviews(
+        classifyTimelineMoves(
+          moveHistory,
+          preMoveAnalyses,
+          timelineAnalyses,
+          initialFen,
+          metadata,
+          openingBookFlags,
+        ),
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialFen, metadata, moveHistory, preMoveAnalyses, timelineAnalyses]);
+
   const gameReview = useMemo(() => buildGameReview(timelineReviews, metadata), [metadata, timelineReviews]);
   const reviewMoments = useMemo(
     () => filterReviewMoments(gameReview.keyMoments, reviewSide),
