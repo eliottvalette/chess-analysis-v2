@@ -682,28 +682,38 @@ export function GameReviewPanel({
         </div>
       </div>
 
-      <div className={styles.reviewMoveTable} role="list" aria-label="Reviewed moves">
-        {movePairs.map(pair => (
-          <div className={styles.reviewMoveRow} key={pair.moveNumber} role="listitem">
-            <span className={styles.reviewMoveNumber}>{pair.moveNumber}.</span>
-            <ReviewMoveButton
-              activeMoveButtonRef={activeMoveButtonRef}
-              activePly={displayActivePly}
-              jumpToIndex={jumpToIndex}
-              move={pair.white}
-              ply={pair.whitePly}
-              review={timelineReviews[pair.whitePly - 1] ?? null}
-            />
-            <ReviewMoveButton
-              activeMoveButtonRef={activeMoveButtonRef}
-              activePly={displayActivePly}
-              jumpToIndex={jumpToIndex}
-              move={pair.black}
-              ply={pair.blackPly}
-              review={timelineReviews[pair.blackPly - 1] ?? null}
-            />
-          </div>
-        ))}
+      <div className={styles.reviewMoveTableScroller}>
+        <table className={styles.reviewMoveTable} aria-label="Reviewed moves">
+          <tbody>
+            {movePairs.map(pair => (
+              <tr className={styles.reviewMoveRow} key={pair.moveNumber}>
+                <th className={styles.reviewMoveNumber} scope="row">{pair.moveNumber}.</th>
+                <ReviewMoveBadgeCell review={timelineReviews[pair.whitePly - 1] ?? null} />
+                <td className={styles.reviewMoveColumn}>
+                  <ReviewMoveButton
+                    activeMoveButtonRef={activeMoveButtonRef}
+                    activePly={displayActivePly}
+                    jumpToIndex={jumpToIndex}
+                    move={pair.white}
+                    ply={pair.whitePly}
+                    review={timelineReviews[pair.whitePly - 1] ?? null}
+                  />
+                </td>
+                <ReviewMoveBadgeCell review={timelineReviews[pair.blackPly - 1] ?? null} />
+                <td className={styles.reviewMoveColumn}>
+                  <ReviewMoveButton
+                    activeMoveButtonRef={activeMoveButtonRef}
+                    activePly={displayActivePly}
+                    jumpToIndex={jumpToIndex}
+                    move={pair.black}
+                    ply={pair.blackPly}
+                    review={timelineReviews[pair.blackPly - 1] ?? null}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <ReviewTimelineStrip
@@ -852,22 +862,35 @@ function ReviewMoveButton({
 
   const isActive = activePly === ply;
   const moveColor = getReviewMoveColor(review);
-  const badgeSrc = getReviewBadgeSrc(review);
 
   return (
     <button
-      className={`${styles.reviewMoveCell} ${badgeSrc ? styles.reviewMoveCellWithBadge : ''} ${isActive ? styles.activeReviewMoveCell : ''}`}
+      className={`${styles.reviewMoveCell} ${moveColor ? styles.reviewMoveCellClassified : ''} ${isActive ? styles.activeReviewMoveCell : ''}`}
       onClick={() => jumpToIndex(ply)}
       ref={isActive ? activeMoveButtonRef : undefined}
       style={{
         ...(moveColor ? { ['--move-dot-color' as string]: moveColor } : {}),
-        ...(badgeSrc ? { ['--review-badge-url' as string]: `url(${badgeSrc})` } : {}),
       }}
       type="button"
     >
-      {badgeSrc ? <span className={styles.reviewMoveBadge} aria-hidden="true" /> : null}
-      <span>{move.san}</span>
+      <span className={styles.reviewMoveSan}>{renderMoveFigurine(move.san)}</span>
     </button>
+  );
+}
+
+function ReviewMoveBadgeCell({ review }: { review: TimelineReview | null }) {
+  const badgeSrc = getReviewBadgeSrc(review);
+
+  return (
+    <td className={styles.reviewMoveBadgeColumn}>
+      {badgeSrc ? (
+        <span
+          aria-hidden="true"
+          className={styles.reviewMoveBadge}
+          style={{ ['--review-badge-url' as string]: `url(${badgeSrc})` }}
+        />
+      ) : null}
+    </td>
   );
 }
 

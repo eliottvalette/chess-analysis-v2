@@ -84,7 +84,7 @@
 .engineLines,
 .moveList,
 .momentList,
-.reviewMoveTable,
+.reviewMoveTableScroller,
 .openingList,
 .pgnInput {
   -ms-overflow-style: none;
@@ -95,7 +95,7 @@
 .engineLines::-webkit-scrollbar,
 .moveList::-webkit-scrollbar,
 .momentList::-webkit-scrollbar,
-.reviewMoveTable::-webkit-scrollbar,
+.reviewMoveTableScroller::-webkit-scrollbar,
 .openingList::-webkit-scrollbar,
 .pgnInput::-webkit-scrollbar {
   display: none;
@@ -1053,22 +1053,20 @@
   font-weight: 760;
 }
 
-.reviewMoveTable {
+.reviewMoveTableScroller {
   min-height: 0;
   overflow: hidden auto;
-  display: flex;
-  flex-direction: column;
   padding: 0 2px;
 }
 
+.reviewMoveTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
 .reviewMoveRow {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  min-height: 38px;
-  border-radius: 7px;
-  padding: 0 6px;
+  height: 38px;
 }
 
 .reviewMoveRow:nth-child(even) {
@@ -1080,10 +1078,26 @@
   font-size: 12px;
   font-weight: 760;
   text-align: right;
+  width: 34px;
+  padding: 0 8px 0 2px;
+  vertical-align: middle;
+}
+
+.reviewMoveBadgeColumn {
+  width: 24px;
+  padding: 0;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.reviewMoveColumn {
+  padding: 0;
+  vertical-align: middle;
 }
 
 .reviewMoveCell,
 .reviewMoveEmpty {
+  width: 100%;
   min-width: 0;
   min-height: 30px;
 }
@@ -1098,23 +1112,20 @@
   border-radius: 7px;
   background: transparent;
   color: var(--text-muted);
-  padding: 0 8px;
+  padding: 0 8px 0 2px;
   font: inherit;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 720;
   text-align: left;
   cursor: pointer;
 }
 
-.reviewMoveCellWithBadge {
-  border-color: color-mix(in srgb, var(--move-dot-color, rgba(198, 215, 255, 0.6)) 38%, transparent);
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--move-dot-color, rgba(198, 215, 255, 0.6)) 14%, transparent), transparent 70%),
-    rgba(255, 255, 255, 0.018);
-  padding-left: 22px;
+.reviewMoveCellClassified {
+  color: var(--move-dot-color, var(--text));
 }
 
-.reviewMoveCell span:last-child {
+.reviewMoveSan {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1122,8 +1133,7 @@
 }
 
 .reviewMoveCell:hover {
-  border-color: rgba(214, 226, 244, 0.16);
-  background: rgba(255, 255, 255, 0.044);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
 }
 
@@ -1133,11 +1143,10 @@
 }
 
 .reviewMoveBadge {
-  position: absolute;
-  top: -6px;
-  left: -4px;
-  width: 18px;
-  height: 18px;
+  display: inline-block;
+  width: 17px;
+  height: 17px;
+  vertical-align: middle;
   background-image: var(--review-badge-url);
   background-position: center;
   background-repeat: no-repeat;
