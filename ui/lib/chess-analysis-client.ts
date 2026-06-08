@@ -467,10 +467,28 @@ export function getAdvantageMeter(analysis: AnalysisResult | null) {
     return 50;
   }
 
-  const normalized = score.type === 'mate' ? Math.sign(score.value) * 12 : score.value / 100;
+  if (score.type === 'mate') {
+    const normalized = Math.sign(score.value) * 12;
+    const percentage = 100 / (1 + Math.exp(-normalized / 1.35));
+
+    return Math.max(0, Math.min(100, percentage));
+  }
+
+  return getAdvantageMeterFromEvalCp(score.value);
+}
+
+export function getAdvantageMeterFromEvalCp(whiteEvalCp: number) {
+  const normalized = whiteEvalCp / 100;
   const percentage = 100 / (1 + Math.exp(-normalized / 1.35));
 
   return Math.max(0, Math.min(100, percentage));
+}
+
+export function formatEvalCpLabel(whiteEvalCp: number, perspective: 'white' | 'black' = 'white') {
+  const perspectiveValue = perspective === 'white' ? whiteEvalCp : -whiteEvalCp;
+  const pawns = perspectiveValue / 100;
+
+  return `${pawns > 0 ? '+' : ''}${pawns.toFixed(2)}`;
 }
 
 export function toChartScore(analysis: AnalysisResult) {

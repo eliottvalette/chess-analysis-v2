@@ -14,6 +14,7 @@
     "supabase:migrate": "node scripts/supabase/migrate.mjs",
     "supabase:seed": "node scripts/supabase/seed-decks.mjs",
     "supabase:seed:cards": "node scripts/supabase/seed-punish-cards.mjs",
+    "supabase:backfill:card-reviews": "node scripts/supabase/backfill-card-move-reviews.mjs",
     "supabase:smoke": "node scripts/supabase/smoke.mjs"
   },
   "dependencies": {

@@ -18,6 +18,12 @@ drop table if exists public.decks cascade;
 `;
 
 export async function main() {
+  if (!process.argv.includes('--confirm-destructive')) {
+    throw new Error(
+      'supabase:migrate drops ALL deck/training tables and deletes every deck, card, and training profile. Re-run with: npm run supabase:migrate -- --confirm-destructive',
+    );
+  }
+
   const migrations = readMigrationFiles('supabase/migrations');
   const sql = buildCanonicalResetSql(migrations.map(migration => migration.sql).join('\n\n'));
   const client = new Client(getPgConfig(loadLocalEnv()));

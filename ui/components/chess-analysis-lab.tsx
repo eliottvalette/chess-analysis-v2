@@ -24,8 +24,10 @@ import {
   extractMetadataFromGame,
   filterReviewMoments,
   formatBestMove,
+  formatEvalCpLabel,
   formatScoreLabel,
   getAdvantageMeter,
+  getAdvantageMeterFromEvalCp,
   getBestMoveArrow,
   reviewCategoryMeta,
   restoreGameFromHistory,
@@ -36,7 +38,8 @@ import {
   type StoredMove,
   type TimelineReview,
 } from '@/lib/chess-analysis-client';
-import { resolveOpeningBookFlagsFromApi, resolveOpeningBookFlagsLocal } from '@/lib/opening-book';
+import { cardMoveReviewsFromTimeline, parseCardMoveReviews, resolveTrainBoardMoveReview } from '@/lib/card-move-reviews';
+import { resolveOpeningBookFlagsLocal } from '@/lib/opening-book';
 import { CHESS_SOUND_URLS, getMoveSoundSequence, getPrimaryMoveSound, type ChessSoundKey } from '@/lib/chess-sounds';
 import {
   buildDeckCardStartState,
@@ -69,6 +72,7 @@ const POSITION_DEPTH = 20;
 const POSITION_MOVETIME_MS = 400;
 const POSITION_MULTIPV = 3;
 const TIMELINE_ANALYSIS_BATCH_SIZE = 4;
+const TIMELINE_ENGINE_PROGRESS_WEIGHT = 0.92;
 const PRELOAD_AHEAD = 15;
 const LAST_MOVE_STYLE = {
   backgroundColor: 'rgba(84, 173, 255, 0.26)',
@@ -222,6 +226,7 @@ function mapTrainingDeckCard(card: TrainingDeckCardRow): DeckCard {
     replayFromStart: Boolean(card.replay_from_start),
     initialFen: card.initial_fen ? String(card.initial_fen) : null,
     setupMoves: Array.isArray(card.setup_moves) ? card.setup_moves.map(move => String(move)) : [],
+    moveReviews: parseCardMoveReviews(card.move_reviews),
   };
 }
 
@@ -272,6 +277,22 @@ function formatRecentGameLogLabel(game: ChessComRecentGameSummary) {
   const player = game.playerUsername ?? 'You';
   const opponent = game.opponentUsername ?? 'opponent';
   return game.playerColor === 'black' ? `${opponent} vs ${player}` : `${player} vs ${opponent}`;
+}
+
+function parseJsonResponse<T>(response: Response, bodyText: string): T {
+  if (!bodyText.trim()) {
+    throw new Error(`Empty response from ${response.url || 'API'} (HTTP ${response.status}).`);
+  }
+
+  try {
+    return JSON.parse(bodyText) as T;
+  } catch {
+    throw new Error(`Invalid JSON from ${response.url || 'API'} (HTTP ${response.status}).`);
+  }
+}
+
+async function readJsonResponse<T>(response: Response) {
+  return parseJsonResponse<T>(response, await response.text());
 }
 
 async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimelineAnalysis | null> {
@@ -381,11 +402,12 @@ type TrainingDeckCardRow = {
   reference_eval_cp?: number | null;
   max_eval_loss_cp?: number | null;
   opponent_move_uci?: string | null;
-    opponent_move_san?: string | null;
-    score_swing_cp?: number | null;
-    replay_from_start?: boolean | null;
-    initial_fen?: string | null;
-    setup_moves?: string[] | null;
+  opponent_move_san?: string | null;
+  score_swing_cp?: number | null;
+  replay_from_start?: boolean | null;
+  initial_fen?: string | null;
+  setup_moves?: string[] | null;
+  move_reviews?: unknown;
 };
 
 type TrainSessionStats = {
@@ -536,7 +558,58 @@ export function ChessAnalysisLab() {
   }, [historyIndex, moveHistory, variationBaseIndex, variationMoves]);
   const currentMoveList = useMemo(() => buildMoveUciHistory(currentMoves), [currentMoves]);
   const currentLineKey = currentMoveList.join(' ');
-  const whiteAdvantage = getAdvantageMeter(positionAnalysis);
+  const activeTrainMoveReview = useMemo(() => {
+    if (!activeDeckCard || historyIndex <= 0) {
+      return null;
+    }
+
+    const answerFeedback =
+      deckFeedback && !deckFeedback.pending
+        ? {
+            correct: deckFeedback.correct,
+            playedUci: deckFeedback.playedUci,
+            evalLossCp: deckFeedback.evalLossCp,
+          }
+        : null;
+
+    return resolveTrainBoardMoveReview(
+      activeDeckCard,
+      historyIndex - 1,
+      currentMoves,
+      initialFen,
+      answerFeedback,
+    );
+  }, [activeDeckCard, currentMoves, deckFeedback, historyIndex, initialFen]);
+  const whiteAdvantage = useMemo(() => {
+    if (activeTrainMoveReview?.whiteEvalCp != null) {
+      return getAdvantageMeterFromEvalCp(activeTrainMoveReview.whiteEvalCp);
+    }
+
+    if (activeDeckCard && historyIndex > 0) {
+      const whiteEvalCp = activeDeckCard.moveReviews[historyIndex - 1]?.whiteEvalCp;
+
+      if (whiteEvalCp != null) {
+        return getAdvantageMeterFromEvalCp(whiteEvalCp);
+      }
+    }
+
+    return getAdvantageMeter(positionAnalysis);
+  }, [activeDeckCard, activeTrainMoveReview, historyIndex, positionAnalysis]);
+  const boardScoreLabel = useMemo(() => {
+    if (activeTrainMoveReview?.whiteEvalCp != null) {
+      return formatEvalCpLabel(activeTrainMoveReview.whiteEvalCp, orientation);
+    }
+
+    if (activeDeckCard && historyIndex > 0) {
+      const whiteEvalCp = activeDeckCard.moveReviews[historyIndex - 1]?.whiteEvalCp;
+
+      if (whiteEvalCp != null) {
+        return formatEvalCpLabel(whiteEvalCp, orientation);
+      }
+    }
+
+    return formatScoreLabel(positionAnalysis, orientation);
+  }, [activeDeckCard, activeTrainMoveReview, historyIndex, orientation, positionAnalysis]);
   const isViewingDeckFailurePosition =
     activeDeckCard != null &&
     deckFeedback != null &&
@@ -637,48 +710,6 @@ export function ChessAnalysisLab() {
 
   const [timelineReviews, setTimelineReviews] = useState<TimelineReview[]>([]);
 
-  useEffect(() => {
-    if (
-      moveHistory.length === 0 ||
-      preMoveAnalyses.length !== moveHistory.length ||
-      timelineAnalyses.length !== moveHistory.length
-    ) {
-      setTimelineReviews([]);
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    void (async () => {
-      let openingBookFlags: boolean[] = [];
-
-      try {
-        openingBookFlags = await resolveOpeningBookFlagsFromApi(moveHistory, initialFen);
-      } catch {
-        openingBookFlags = resolveOpeningBookFlagsLocal(moveHistory, initialFen);
-      }
-
-      if (cancelled) {
-        return;
-      }
-
-      setTimelineReviews(
-        classifyTimelineMoves(
-          moveHistory,
-          preMoveAnalyses,
-          timelineAnalyses,
-          initialFen,
-          metadata,
-          openingBookFlags,
-        ),
-      );
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [initialFen, metadata, moveHistory, preMoveAnalyses, timelineAnalyses]);
-
   const gameReview = useMemo(() => buildGameReview(timelineReviews, metadata), [metadata, timelineReviews]);
   const reviewMoments = useMemo(
     () => filterReviewMoments(gameReview.keyMoments, reviewSide),
@@ -688,8 +719,11 @@ export function ChessAnalysisLab() {
   const boardSquareStyles = useMemo(() => {
     const nextStyles: Record<string, CSSProperties> = {};
     const lastMove = currentMoves[currentMoves.length - 1];
-    const reviewCategory =
-      hasLoadedGame && variationBaseIndex == null && historyIndex > 0 ? timelineReviews[historyIndex - 1]?.category : null;
+    const reviewCategory = activeDeckCard
+      ? activeTrainMoveReview?.category ?? null
+      : hasLoadedGame && variationBaseIndex == null && historyIndex > 0
+        ? timelineReviews[historyIndex - 1]?.category
+        : null;
     const lastMoveStyle = getReviewMoveStyle(reviewCategory);
 
     if (lastMove) {
@@ -701,14 +735,18 @@ export function ChessAnalysisLab() {
       ...nextStyles,
       ...squareStyles,
     };
-  }, [currentMoves, hasLoadedGame, historyIndex, squareStyles, timelineReviews, variationBaseIndex]);
+  }, [activeDeckCard, activeTrainMoveReview, currentMoves, hasLoadedGame, historyIndex, squareStyles, timelineReviews, variationBaseIndex]);
   const boardReviewBadge = useMemo(() => {
-    if (!hasLoadedGame || variationBaseIndex != null || historyIndex <= 0) {
+    if (historyIndex <= 0 || variationBaseIndex != null) {
       return null;
     }
 
     const lastMove = currentMoves[currentMoves.length - 1];
-    const category = timelineReviews[historyIndex - 1]?.category;
+    const category = activeDeckCard
+      ? activeTrainMoveReview?.category ?? null
+      : hasLoadedGame
+        ? timelineReviews[historyIndex - 1]?.category
+        : null;
 
     if (!lastMove || !category) {
       return null;
@@ -726,7 +764,7 @@ export function ChessAnalysisLab() {
       color: meta.color,
       ...placement,
     };
-  }, [boardWidth, currentMoves, hasLoadedGame, historyIndex, orientation, timelineReviews, variationBaseIndex]);
+  }, [activeDeckCard, activeTrainMoveReview, boardWidth, currentMoves, hasLoadedGame, historyIndex, orientation, timelineReviews, variationBaseIndex]);
 
   const movePairs = useMemo(() => {
     const pairs: Array<{
@@ -1527,13 +1565,21 @@ export function ChessAnalysisLab() {
     try {
       const query = options?.allDecks ? '?scope=all' : resolvedDeckId ? `?deckId=${encodeURIComponent(resolvedDeckId)}` : '';
       const response = await fetch(`/api/training-deck${query}`, { credentials: 'same-origin' });
-      const payload = (await response.json()) as TrainingDeckPayload;
+      const payload = await readJsonResponse<TrainingDeckPayload>(response);
 
       if (!response.ok) {
         throw new Error(payload.error ?? `Training deck fetch failed: HTTP ${response.status}`);
       }
 
       setDeckSummaries(payload.decks ?? []);
+
+      if (
+        typeof window !== 'undefined' &&
+        resolvedDeckId &&
+        !(payload.decks ?? []).some(deck => deck.id === resolvedDeckId)
+      ) {
+        window.localStorage.removeItem(LAST_TRAINING_DECK_STORAGE_KEY);
+      }
 
       const lines = (payload.lines ?? []).map(line => ({
         id: String(line.id),
@@ -1740,6 +1786,15 @@ export function ChessAnalysisLab() {
     setPositionAnalysis(snapshot.positionAnalysis);
     setPreMoveAnalyses(snapshot.preMoveAnalyses);
     setTimelineAnalyses(snapshot.timelineAnalyses);
+    setTimelineReviews(
+      buildTimelineReviews(
+        snapshot.moveHistory,
+        snapshot.preMoveAnalyses,
+        snapshot.timelineAnalyses,
+        snapshot.initialFen,
+        snapshot.metadata,
+      ),
+    );
     setPositionLoading(false);
     setTimelineLoading(false);
     setServerError(snapshot.serverError);
@@ -2072,11 +2127,6 @@ export function ChessAnalysisLab() {
       return;
     }
 
-    if (!selectedDeck?.isOwned) {
-      setDeckActionError('You can only delete cards from your own decks.');
-      return;
-    }
-
     setDeckActionLoading(true);
     setDeckActionError('');
 
@@ -2138,7 +2188,6 @@ export function ChessAnalysisLab() {
     loadDeckCard,
     loadTrainingDeck,
     nextDeckCard,
-    selectedDeck?.isOwned,
     selectedDeckId,
   ]);
 
@@ -2353,13 +2402,18 @@ export function ChessAnalysisLab() {
     }
   }
 
-  async function runTimelineAnalysis(nextMoves = moveHistory, nextInitialFen = initialFen) {
+  async function runTimelineAnalysis(
+    nextMoves = moveHistory,
+    nextInitialFen = initialFen,
+    nextMetadata: GameMetadata | null = metadata,
+  ) {
     const requestId = ++timelineRequestIdRef.current;
     timelineRefineRequestIdRef.current += 1;
 
     if (nextMoves.length === 0) {
       setPreMoveAnalyses([]);
       setTimelineAnalyses([]);
+      setTimelineReviews([]);
       setTimelineError('');
       setTimelineLoading(false);
       setTimelineProgress(null);
@@ -2373,7 +2427,7 @@ export function ChessAnalysisLab() {
     try {
       const sequence = await analyzeTimelineDeep(nextMoves, nextInitialFen, progress => {
         if (timelineRequestIdRef.current === requestId) {
-          setTimelineProgress(progress);
+          setTimelineProgress(progress * TIMELINE_ENGINE_PROGRESS_WEIGHT);
         }
       });
 
@@ -2385,6 +2439,18 @@ export function ChessAnalysisLab() {
       const nextTimelineAnalyses = sequence.slice(1);
       setPreMoveAnalyses(nextPreMoveAnalyses);
       setTimelineAnalyses(nextTimelineAnalyses);
+
+      if (timelineRequestIdRef.current === requestId) {
+        setTimelineProgress(96);
+      }
+
+      setTimelineReviews(
+        buildTimelineReviews(nextMoves, nextPreMoveAnalyses, nextTimelineAnalyses, nextInitialFen, nextMetadata),
+      );
+
+      if (timelineRequestIdRef.current === requestId) {
+        setTimelineProgress(100);
+      }
 
       if (activeRecentGameCacheKeyRef.current) {
         void saveCachedTimelineAnalysis({
@@ -2402,6 +2468,7 @@ export function ChessAnalysisLab() {
 
       setPreMoveAnalyses([]);
       setTimelineAnalyses([]);
+      setTimelineReviews([]);
       setTimelineError(error instanceof Error ? error.message : 'Unable to analyze the line.');
     } finally {
       if (timelineRequestIdRef.current === requestId) {
@@ -2445,12 +2512,14 @@ export function ChessAnalysisLab() {
           ? options.cachedAnalysis
           : null;
 
+      const nextMetadata = extractMetadataFromGame(loadedGame);
+
       setInitialFen(nextInitialFen);
       setMoveHistory(nextHistory);
       setHistoryIndex(0);
       clearVariation();
       setGame(nextGame);
-      setMetadata(extractMetadataFromGame(loadedGame));
+      setMetadata(nextMetadata);
       setWhiteAvatarUrl(options?.whiteAvatarUrl ?? null);
       setBlackAvatarUrl(options?.blackAvatarUrl ?? null);
       setFileName(name);
@@ -2472,11 +2541,25 @@ export function ChessAnalysisLab() {
       clearSelection();
       playSound('game-start');
 
+      if (cachedAnalysis) {
+        setTimelineReviews(
+          buildTimelineReviews(
+            nextHistory,
+            cachedAnalysis.preMoveAnalyses,
+            cachedAnalysis.timelineAnalyses,
+            nextInitialFen,
+            nextMetadata,
+          ),
+        );
+      } else {
+        setTimelineReviews([]);
+      }
+
       if (!cachedAnalysis && options?.skipAnalysis) {
         setTimelineLoading(false);
         setTimelineProgress(null);
       } else if (!cachedAnalysis) {
-        await runTimelineAnalysis(nextHistory, nextInitialFen);
+        await runTimelineAnalysis(nextHistory, nextInitialFen, nextMetadata);
       }
     } catch (error) {
       setTimelineAnalyses([]);
@@ -2518,6 +2601,7 @@ export function ChessAnalysisLab() {
     parsedGame.loadPgn(gameSummary.pgn);
     const nextInitialFen = parsedGame.header().FEN ?? null;
     const nextHistory = parsedGame.history({ verbose: true }).map(toStoredMove);
+    const nextMetadata = extractMetadataFromGame(parsedGame);
 
     await loadPgnText(
       gameSummary.link,
@@ -2550,11 +2634,20 @@ export function ChessAnalysisLab() {
         ) {
           setPreMoveAnalyses(analysis.preMoveAnalyses);
           setTimelineAnalyses(analysis.timelineAnalyses);
+          setTimelineReviews(
+            buildTimelineReviews(
+              nextHistory,
+              analysis.preMoveAnalyses,
+              analysis.timelineAnalyses,
+              nextInitialFen,
+              nextMetadata,
+            ),
+          );
           setTimelineProgress(100);
           return;
         }
 
-        await runTimelineAnalysis(nextHistory, nextInitialFen);
+        await runTimelineAnalysis(nextHistory, nextInitialFen, nextMetadata);
       })().finally(() => {
           if (activeRecentGameCacheKeyRef.current === cacheKey) {
             setTimelineLoading(false);
@@ -2737,6 +2830,7 @@ export function ChessAnalysisLab() {
 
       const setupMoves = saveReplayFromStart ? currentMoves.map(move => move.san) : [];
       const replayFromStart = saveReplayFromStart && setupMoves.length > 0;
+      const moveReviews = replayFromStart ? cardMoveReviewsFromTimeline(timelineReviews, setupMoves.length) : [];
 
       const response = await fetch('/api/training-deck', {
         method: 'POST',
@@ -2759,6 +2853,7 @@ export function ChessAnalysisLab() {
             replayFromStart,
             initialFen: replayFromStart ? initialFen : null,
             setupMoves,
+            moveReviews,
           },
         }),
       });
@@ -2875,7 +2970,7 @@ export function ChessAnalysisLab() {
                   <div className={styles.evalDivider} />
                 </div>
                 <div className={styles.evalCopy}>
-                  <span className={styles.score}>{formatScoreLabel(positionAnalysis, orientation)}</span>
+                  <span className={styles.score}>{boardScoreLabel}</span>
                 </div>
               </div>
 
@@ -3086,7 +3181,8 @@ export function ChessAnalysisLab() {
                 trainSessionCardCurrent={trainSessionCardCurrent}
                 trainSessionCardTotal={trainSessionCardTotal}
                 trainSessionStats={trainSessionStats}
-                canDeleteCard={Boolean(selectedDeck?.isOwned)}
+                canDeleteCard={Boolean(trainingProfile && (activeDeckCard ?? nextDeckCard))}
+                deleteCardLabel="Delete"
                 newDeckTitle={newDeckTitle}
                 nextCard={nextDeckCard}
                 onBack={() => {
@@ -3205,6 +3301,33 @@ function normalizeWorkspaceSnapshot(snapshot: WorkspaceSnapshot): WorkspaceSnaps
   };
 }
 
+function buildTimelineReviews(
+  moves: StoredMove[],
+  preMoveAnalyses: AnalysisResult[],
+  timelineAnalyses: AnalysisResult[],
+  requestInitialFen: string | null,
+  requestMetadata: GameMetadata | null,
+): TimelineReview[] {
+  if (
+    moves.length === 0 ||
+    preMoveAnalyses.length !== moves.length ||
+    timelineAnalyses.length !== moves.length
+  ) {
+    return [];
+  }
+
+  const openingBookFlags = resolveOpeningBookFlagsLocal(moves, requestInitialFen);
+
+  return classifyTimelineMoves(
+    moves,
+    preMoveAnalyses,
+    timelineAnalyses,
+    requestInitialFen,
+    requestMetadata,
+    openingBookFlags,
+  );
+}
+
 function getPositionCacheKey(initialFen: string | null, moves: string[]) {
   return `${initialFen ?? 'startpos'}|${moves.join(' ')}`;
 }
@@ -3247,7 +3370,8 @@ function normalizeDeckLoadError(message: string) {
     message.includes('deck_cards.max_eval_loss_cp') ||
     message.includes('deck_cards.replay_from_start') ||
     message.includes('deck_cards.initial_fen') ||
-    message.includes('deck_cards.setup_moves')
+    message.includes('deck_cards.setup_moves') ||
+    message.includes('deck_cards.move_reviews')
   ) {
     return 'Supabase deck schema is outdated. Recreate the canonical deck tables and reseed.';
   }

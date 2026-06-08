@@ -5,46 +5,84 @@ import { promisify } from 'node:util';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
-import { TRAINING_SESSION_COOKIE, hashTrainingSessionToken, parseTrainingSessionCookie } from '@/lib/training-profile';
+import { parseCardMoveReviews } from '@/lib/card-move-reviews';
 import { getDeckCardState, type DeckProgressEntry } from '@/lib/deck-progress';
+import { TRAINING_SESSION_COOKIE, hashTrainingSessionToken, parseTrainingSessionCookie } from '@/lib/training-profile';
 import { createAdminClient } from '@/utils/supabase/admin';
 
 const execFileAsync = promisify(execFile);
 const DECK_CARD_SELECT =
-  'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp,replay_from_start,initial_fen,setup_moves';
+  'id,kind,line_id,line_name,eco,side,ply,fen,answer_uci,answer_san,prompt,context,source_type,validation_mode,reference_eval_cp,max_eval_loss_cp,opponent_move_uci,opponent_move_san,score_swing_cp,replay_from_start,initial_fen,setup_moves,move_reviews';
 const DECK_SELECT = 'id,name,description,version,is_active,owner_profile_id,created_at,updated_at';
 
 export async function GET(request: Request) {
-  const supabase = createAdminClient();
-  const profile = await getTrainingProfileFromCookie();
-  const requestUrl = new URL(request.url);
-  const scope = requestUrl.searchParams.get('scope');
-  const selectedDeckId = requestUrl.searchParams.get('deckId');
+  try {
+    const supabase = createAdminClient();
+    const profile = await getTrainingProfileFromCookie();
+    const requestUrl = new URL(request.url);
+    const scope = requestUrl.searchParams.get('scope');
+    const selectedDeckId = requestUrl.searchParams.get('deckId');
 
-  const { data: decks, error: deckError } = await fetchAccessibleDecks(supabase, profile?.id ?? null);
-  if (deckError) {
-    return NextResponse.json({ error: deckError.message }, { status: 500 });
-  }
+    const { data: decks, error: deckError } = await fetchAccessibleDecks(supabase, profile?.id ?? null);
+    if (deckError) {
+      return NextResponse.json({ error: deckError.message }, { status: 500 });
+    }
 
-  const accessibleDecks = decks ?? [];
-  const accessibleIds = accessibleDecks.map(deck => String(deck.id));
-  const [deckCounts, progressByCardId] = await Promise.all([
-    fetchDeckCounts(supabase, accessibleIds),
-    profile ? fetchProgressByCardId(supabase, profile.id) : Promise.resolve(new Map<string, ProgressRow>()),
-  ]);
-  const summaries = accessibleDecks.map(deck => summarizeDeck(deck, deckCounts.get(deck.id) ?? [], progressByCardId, profile?.id ?? null));
+    const accessibleDecks = decks ?? [];
+    const accessibleIds = accessibleDecks.map(deck => String(deck.id));
+    const [deckCounts, progressByCardId] = await Promise.all([
+      fetchDeckCounts(supabase, accessibleIds),
+      profile ? fetchProgressByCardId(supabase, profile.id) : Promise.resolve(new Map<string, ProgressRow>()),
+    ]);
+    const summaries = accessibleDecks.map(deck => summarizeDeck(deck, deckCounts.get(deck.id) ?? [], progressByCardId, profile?.id ?? null));
 
-  if (scope === 'all') {
-    if (accessibleIds.length === 0) {
+    if (scope === 'all') {
+      if (accessibleIds.length === 0) {
+        return NextResponse.json({ decks: summaries, deck: null, lines: [], cards: [] });
+      }
+
+      const [{ data: lines, error: linesError }, { data: cards, error: cardsError }] = await Promise.all([
+        supabase.from('opening_lines').select('id,name,eco,side,moves').in('deck_id', accessibleIds).order('id'),
+        supabase
+          .from('deck_cards')
+          .select(DECK_CARD_SELECT)
+          .in('deck_id', accessibleIds)
+          .lte('ply', 80)
+          .order('score_swing_cp', { ascending: false, nullsFirst: false }),
+      ]);
+
+      if (linesError) {
+        return NextResponse.json({ error: linesError.message }, { status: 500 });
+      }
+
+      if (cardsError) {
+        return NextResponse.json({ error: cardsError.message }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        decks: summaries,
+        deck: null,
+        lines: lines ?? [],
+        cards: cards ?? [],
+      });
+    }
+
+    const selectedDeck =
+      (selectedDeckId && accessibleDecks.find(deck => deck.id === selectedDeckId)) ||
+      (profile ? accessibleDecks.find(deck => deck.owner_profile_id === profile.id) : null) ||
+      accessibleDecks[0] ||
+      null;
+
+    if (!selectedDeck) {
       return NextResponse.json({ decks: summaries, deck: null, lines: [], cards: [] });
     }
 
     const [{ data: lines, error: linesError }, { data: cards, error: cardsError }] = await Promise.all([
-      supabase.from('opening_lines').select('id,name,eco,side,moves').in('deck_id', accessibleIds).order('id'),
+      supabase.from('opening_lines').select('id,name,eco,side,moves').eq('deck_id', selectedDeck.id).order('id'),
       supabase
         .from('deck_cards')
         .select(DECK_CARD_SELECT)
-        .in('deck_id', accessibleIds)
+        .eq('deck_id', selectedDeck.id)
         .lte('ply', 80)
         .order('score_swing_cp', { ascending: false, nullsFirst: false }),
     ]);
@@ -59,46 +97,14 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       decks: summaries,
-      deck: null,
+      deck: summarizeDeck(selectedDeck, deckCounts.get(selectedDeck.id) ?? [], progressByCardId, profile?.id ?? null),
       lines: lines ?? [],
       cards: cards ?? [],
     });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to load training decks.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  const selectedDeck =
-    (selectedDeckId && accessibleDecks.find(deck => deck.id === selectedDeckId)) ||
-    (profile ? accessibleDecks.find(deck => deck.owner_profile_id === profile.id) : null) ||
-    accessibleDecks[0] ||
-    null;
-
-  if (!selectedDeck) {
-    return NextResponse.json({ decks: summaries, deck: null, lines: [], cards: [] });
-  }
-
-  const [{ data: lines, error: linesError }, { data: cards, error: cardsError }] = await Promise.all([
-    supabase.from('opening_lines').select('id,name,eco,side,moves').eq('deck_id', selectedDeck.id).order('id'),
-    supabase
-      .from('deck_cards')
-      .select(DECK_CARD_SELECT)
-      .eq('deck_id', selectedDeck.id)
-      .lte('ply', 80)
-      .order('score_swing_cp', { ascending: false, nullsFirst: false }),
-  ]);
-
-  if (linesError) {
-    return NextResponse.json({ error: linesError.message }, { status: 500 });
-  }
-
-  if (cardsError) {
-    return NextResponse.json({ error: cardsError.message }, { status: 500 });
-  }
-
-  return NextResponse.json({
-    decks: summaries,
-    deck: summarizeDeck(selectedDeck, deckCounts.get(selectedDeck.id) ?? [], progressByCardId, profile?.id ?? null),
-    lines: lines ?? [],
-    cards: cards ?? [],
-  });
 }
 
 export async function POST(request: Request) {
@@ -260,6 +266,7 @@ async function addReviewCard(profile: TrainingProfileCookie, body: Record<string
       replay_from_start: card.replayFromStart,
       initial_fen: card.initialFen,
       setup_moves: card.setupMoves,
+      move_reviews: card.moveReviews,
     },
     { onConflict: 'id' },
   );
@@ -290,8 +297,8 @@ async function deleteDeckCard(profile: TrainingProfileCookie, body: Record<strin
     return NextResponse.json({ error: deckError.message }, { status: 500 });
   }
 
-  if (!deck || deck.owner_profile_id !== profile.id) {
-    return NextResponse.json({ error: 'Cards can only be deleted from your own decks.' }, { status: 403 });
+  if (!deck || !isDeckAccessibleToProfile(deck.owner_profile_id, profile.id)) {
+    return NextResponse.json({ error: 'Deck not found or not accessible.' }, { status: 403 });
   }
 
   const { data: card, error: cardError } = await supabase
@@ -408,6 +415,10 @@ async function deleteDeck(profile: TrainingProfileCookie, body: Record<string, u
   }
 
   return NextResponse.json({ deckId });
+}
+
+function isDeckAccessibleToProfile(ownerProfileId: string | null | undefined, profileId: string) {
+  return ownerProfileId == null || ownerProfileId === profileId;
 }
 
 async function getOwnedDeck(profile: TrainingProfileCookie, deckId: string) {
@@ -585,6 +596,7 @@ function sanitizeReviewCard(value: unknown) {
     replayFromStart,
     initialFen: typeof card.initialFen === 'string' && card.initialFen.trim() ? clampText(card.initialFen, 120) : null,
     setupMoves,
+    moveReviews: parseCardMoveReviews(card.moveReviews),
   };
 }
 

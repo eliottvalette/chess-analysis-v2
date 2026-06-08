@@ -218,6 +218,7 @@ export function TrainPanel({
   deckStats,
   deckLineMastery,
   canDeleteCard,
+  deleteCardLabel,
   newDeckTitle,
   nextCard,
   onBack,
@@ -251,6 +252,7 @@ export function TrainPanel({
   deckPlaybackBusy: boolean;
   deckStats: DeckProgressSummary;
   canDeleteCard: boolean;
+  deleteCardLabel: string;
   newDeckTitle: string;
   nextCard: DeckCard | null;
   onBack: () => void;
@@ -313,6 +315,7 @@ export function TrainPanel({
         deckPlaybackBusy={deckPlaybackBusy}
         deckStats={deckStats}
         canDeleteCard={canDeleteCard}
+        deleteCardLabel={deleteCardLabel}
         deckActionLoading={deckActionLoading}
         nextCard={nextCard}
         onDeleteCard={onDeleteCard}
@@ -1437,7 +1440,7 @@ export function LearnPanel({
             {deckLibraryLoading
               ? 'Loading decks.'
               : deckLoadError
-                ? 'Learning setup is not available.'
+                ? 'Learning setup is empty. Create a deck or reseed Supabase.'
                 : 'Create a deck, then add cards from Review.'}
           </p>
         ) : (
@@ -1512,6 +1515,7 @@ export function DeckPanel({
   deckPlaybackBusy,
   deckStats,
   canDeleteCard,
+  deleteCardLabel,
   deckActionLoading,
   nextCard,
   onNext,
@@ -1531,6 +1535,7 @@ export function DeckPanel({
   deckPlaybackBusy: boolean;
   deckStats: DeckProgressSummary;
   canDeleteCard: boolean;
+  deleteCardLabel: string;
   deckActionLoading: boolean;
   nextCard: DeckCard | null;
   onNext: () => void;
@@ -1602,7 +1607,7 @@ export function DeckPanel({
             ) : null}
             <div className={styles.deckActions}>
               <button className={`${styles.action} ${styles.deleteAction}`} disabled={!card || !canDeleteCard || deckActionLoading} onClick={onDeleteCard} type="button">
-                Delete
+                {deleteCardLabel}
               </button>
               <button className={`${styles.action} ${styles.primary}`} disabled={deckPlaybackBusy} onClick={onNext} type="button">
                 Next

@@ -1,6 +1,7 @@
 import { Chess } from 'chess.js';
 
 import type { AnalysisLine, AnalysisResult, PerspectiveScore } from '@/lib/analysis-types';
+import type { CardMoveReview } from '@/lib/card-move-reviews';
 import { buildStoredMovesFromSanList, restoreGameFromHistory, toStoredMove, type StoredMove } from '@/lib/chess-analysis-client';
 
 export type TrainingSide = 'white' | 'black';
@@ -66,6 +67,7 @@ export type GeneratedDeckCard = {
   replayFromStart: boolean;
   initialFen: string | null;
   setupMoves: string[];
+  moveReviews: CardMoveReview[];
 };
 
 export type DeckCard = GeneratedDeckCard;
@@ -131,6 +133,7 @@ export function buildDeckCards(lines: OpeningSeedLine[]) {
           replayFromStart: false,
           initialFen: null,
           setupMoves: [],
+          moveReviews: [],
         });
       }
 
@@ -244,6 +247,7 @@ export function buildPunishCardsFromAnalysis(
       replayFromStart: false,
       initialFen: null,
       setupMoves: [],
+      moveReviews: [],
     });
   }
 
