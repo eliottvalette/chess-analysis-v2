@@ -1042,7 +1042,7 @@ function getReviewDotColor(review: TimelineReview | null) {
 }
 
 function getReviewMoveColor(review: TimelineReview | null) {
-  if (!review?.category || review.category === 'book') {
+  if (!review?.category) {
     return null;
   }
 
@@ -1050,7 +1050,7 @@ function getReviewMoveColor(review: TimelineReview | null) {
 }
 
 function getReviewBadgeSrc(review: TimelineReview | null) {
-  if (!review?.category || review.category === 'book') {
+  if (!review?.category) {
     return null;
   }
 

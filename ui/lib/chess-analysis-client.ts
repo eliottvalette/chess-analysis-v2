@@ -124,7 +124,8 @@ export const reviewCategoryMeta: Record<
   },
   book: {
     label: 'Book',
-    color: '#b0814c',
+    color: '#D5A47D',
+    badge: '/review-badges/book.svg',
     pointStyle: 'rectRounded',
   },
   great: {
