@@ -141,24 +141,26 @@ function referenceWhiteEvalCp(card: DeckCard) {
   return card.side === 'white' ? card.referenceEvalCp : -card.referenceEvalCp;
 }
 
-function categoryFromEvalLossCp(evalLossCp: number): ReviewCategory {
-  if (evalLossCp <= 12) {
+export function categoryFromEvalLossCp(evalLossCp: number): ReviewCategory {
+  const normalizedLossCp = Math.max(0, Math.round(evalLossCp));
+
+  if (normalizedLossCp <= 12) {
     return 'best';
   }
 
-  if (evalLossCp <= 28) {
+  if (normalizedLossCp <= 28) {
     return 'excellent';
   }
 
-  if (evalLossCp <= 55) {
+  if (normalizedLossCp <= 55) {
     return 'good';
   }
 
-  if (evalLossCp < 100) {
+  if (normalizedLossCp < 100) {
     return 'inaccuracy';
   }
 
-  if (evalLossCp < 320) {
+  if (normalizedLossCp < 320) {
     return 'mistake';
   }
 

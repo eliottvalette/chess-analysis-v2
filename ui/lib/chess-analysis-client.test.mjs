@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildGameReview, classifyReviewCategory, getCpLoss, getMateForColor, getScoreCpForColor } from './chess-analysis-client.ts';
+import {
+  buildGameReview,
+  classifyReviewCategory,
+  classifyTimelineMoves,
+  getCpLoss,
+  getMateForColor,
+  getScoreCpForColor,
+} from './chess-analysis-client.ts';
 
 test('classifyReviewCategory marks Scotch d4 as book from bundled opening data', () => {
   assert.equal(
@@ -49,6 +56,29 @@ test('classifyReviewCategory marks opening book moves from explorer lookup', () 
   );
 });
 
+test('classifyReviewCategory does not let book status hide a significant engine loss', () => {
+  assert.equal(
+    classifyReviewCategory({
+      openingBookMove: true,
+      san: 'Nc6',
+      bestMovePlayed: false,
+      sacrifice: false,
+      afterWinning: false,
+      beforeCompletelyWinning: false,
+      decisiveMove: false,
+      expectedPointsLost: 0.184,
+      beforeExpected: 0.47,
+      afterExpected: 0.29,
+      cpLossCp: 69,
+      beforeMate: null,
+      afterMate: null,
+      secondBestGapCp: 21,
+      ratingFlex: 0.02,
+    }),
+    'mistake',
+  );
+});
+
 test('classifyReviewCategory does not infer book from early ply alone', () => {
   assert.equal(
     classifyReviewCategory({
@@ -82,6 +112,81 @@ test('cp helpers normalize centipawns and mate from the player perspective', () 
   assert.equal(getCpLoss(before, after, 'w'), 197);
   assert.equal(getMateForColor(mate, 'w'), 12);
   assert.equal(getMateForColor(mate, 'b'), -12);
+});
+
+test('cp loss ignores positive deltas that can be artifacts of score bounds', () => {
+  assert.equal(
+    getCpLoss(
+      { whitePerspective: { type: 'cp', value: 100, bound: 'upperbound' } },
+      { whitePerspective: { type: 'cp', value: 50, bound: 'exact' } },
+      'w',
+    ),
+    null,
+  );
+
+  assert.equal(
+    getCpLoss(
+      { whitePerspective: { type: 'cp', value: 100, bound: 'exact' } },
+      { whitePerspective: { type: 'cp', value: 50, bound: 'lowerbound' } },
+      'w',
+    ),
+    null,
+  );
+
+  assert.equal(
+    getCpLoss(
+      { whitePerspective: { type: 'cp', value: 50, bound: 'upperbound' } },
+      { whitePerspective: { type: 'cp', value: 100, bound: 'exact' } },
+      'w',
+    ),
+    0,
+  );
+
+  assert.equal(
+    getCpLoss(
+      { whitePerspective: { type: 'cp', value: -100, bound: 'lowerbound' } },
+      { whitePerspective: { type: 'cp', value: -50, bound: 'exact' } },
+      'b',
+    ),
+    null,
+  );
+});
+
+test('classifyTimelineMoves scores played moves against the pre-move MultiPV line when available', () => {
+  const beforeScotchCaptureFen = 'r1bqkb1r/pppp1ppp/2n2n2/4p3/3PP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 2 4';
+  const reviews = classifyTimelineMoves(
+    [
+      {
+        from: 'd4',
+        to: 'e5',
+        san: 'dxe5',
+        lan: 'd4e5',
+        promotion: null,
+        piece: 'p',
+        color: 'w',
+        flags: 'c',
+        captured: 'p',
+        uci: 'd4e5',
+      },
+    ],
+    [
+      makeAnalysis({
+        scoreCp: 142,
+        bestMove: 'd4b5',
+        lines: [
+          makeLine({ bestMove: 'd4b5', scoreCp: 142 }),
+          makeLine({ bestMove: 'd4e5', scoreCp: 130 }),
+        ],
+      }),
+    ],
+    [makeAnalysis({ scoreCp: 94, bestMove: 'c6e5' })],
+    beforeScotchCaptureFen,
+    null,
+    [false],
+  );
+
+  assert.equal(reviews[0]?.cpLossCp, 12);
+  assert.equal(reviews[0]?.category, 'best');
 });
 
 test('classifyReviewCategory uses expected points loss for mistakes and blunders', () => {
@@ -172,6 +277,50 @@ test('classifyReviewCategory falls back to cp loss when expected points are unav
   );
 });
 
+test('classifyReviewCategory treats non-worsening moves as best even when not engine top', () => {
+  assert.equal(
+    classifyReviewCategory({
+      openingBookMove: false,
+      san: 'Bc4',
+      bestMovePlayed: false,
+      sacrifice: false,
+      afterWinning: false,
+      beforeCompletelyWinning: false,
+      decisiveMove: false,
+      expectedPointsLost: -0.02,
+      beforeExpected: 0.54,
+      afterExpected: 0.56,
+      cpLossCp: 0,
+      beforeMate: null,
+      afterMate: null,
+      secondBestGapCp: 20,
+      ratingFlex: 0.02,
+    }),
+    'best',
+  );
+
+  assert.equal(
+    classifyReviewCategory({
+      openingBookMove: false,
+      san: 'Bc4',
+      bestMovePlayed: false,
+      sacrifice: false,
+      afterWinning: false,
+      beforeCompletelyWinning: false,
+      decisiveMove: false,
+      expectedPointsLost: null,
+      beforeExpected: null,
+      afterExpected: null,
+      cpLossCp: -35,
+      beforeMate: null,
+      afterMate: null,
+      secondBestGapCp: 20,
+      ratingFlex: 0.02,
+    }),
+    'best',
+  );
+});
+
 test('classifyReviewCategory treats mate swings against the player as blunders', () => {
   assert.equal(
     classifyReviewCategory({
@@ -244,5 +393,36 @@ function makeReview({
     coachText: '',
     fenBefore: 'start',
     fenAfter: 'after',
+  };
+}
+
+function makeAnalysis({ scoreCp, bestMove, lines = [] }) {
+  return {
+    bestMove,
+    ponder: null,
+    depth: 12,
+    seldepth: null,
+    timeMs: null,
+    nodes: null,
+    nps: null,
+    multipv: Math.max(1, lines.length),
+    pv: bestMove ? [bestMove] : [],
+    raw: [],
+    score: scoreCp == null ? null : { type: 'cp', value: scoreCp, bound: 'exact' },
+    whitePerspective: scoreCp == null ? null : { type: 'cp', value: scoreCp, bound: 'exact' },
+    wdl: null,
+    whitePerspectiveWdl: null,
+    lines,
+  };
+}
+
+function makeLine({ bestMove, scoreCp }) {
+  return {
+    multipv: 1,
+    bestMove,
+    depth: 12,
+    pv: bestMove ? [bestMove] : [],
+    score: { type: 'cp', value: scoreCp, bound: 'exact' },
+    whitePerspective: { type: 'cp', value: scoreCp, bound: 'exact' },
   };
 }

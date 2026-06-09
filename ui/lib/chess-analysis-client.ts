@@ -1,7 +1,7 @@
 import { Chess } from 'chess.js';
 import type { ChartOptions, PointStyle } from 'chart.js';
 
-import type { AnalysisResult, AnalyzeRequest, PerspectiveWdl } from '@/lib/analysis-types';
+import type { AnalysisResult, AnalyzeRequest, PerspectiveScore, PerspectiveWdl, ScoreBound } from '@/lib/analysis-types';
 
 export type StoredMove = {
   from: string;
@@ -552,13 +552,13 @@ export function classifyTimelineMoves(
     const moveLabel = formatTimelineMoveLabel(index, move);
     const playerRating = parsePlayerRating(color === 'w' ? metadata?.whiteElo : metadata?.blackElo);
     const ratingFlex = getRatingFlex(playerRating);
-    const beforeExpected = getExpectedPoints(beforeAnalysis, color);
-    const afterExpected = getExpectedPoints(afterAnalysis, color);
-    const expectedPointsLost =
-      beforeExpected == null || afterExpected == null ? null : Math.max(0, beforeExpected - afterExpected);
+    const expectedPointsDelta = getMoveExpectedPointsLoss(beforeAnalysis, afterAnalysis, color, move.uci);
+    const beforeExpected = expectedPointsDelta.before;
+    const afterExpected = expectedPointsDelta.after;
+    const expectedPointsLost = expectedPointsDelta.value;
     const beforeCp = getScoreCpForColor(beforeAnalysis, color);
     const afterCp = getScoreCpForColor(afterAnalysis, color);
-    const cpLossCp = getCpLoss(beforeAnalysis, afterAnalysis, color);
+    const cpLossCp = getMoveCpLoss(beforeAnalysis, afterAnalysis, color, move.uci);
     const beforeMate = getMateForColor(beforeAnalysis, color);
     const afterMate = getMateForColor(afterAnalysis, color);
     const bestMovePlayed = Boolean(beforeAnalysis?.bestMove && beforeAnalysis.bestMove === move.uci);
@@ -906,6 +906,70 @@ function getExpectedPoints(analysis: AnalysisResult | null | undefined, color: '
   return 1 / (1 + Math.exp(-perspectiveValue / 1.35));
 }
 
+function getExpectedPointsLoss(
+  beforeAnalysis: AnalysisResult | null | undefined,
+  afterAnalysis: AnalysisResult | null | undefined,
+  color: 'w' | 'b',
+) {
+  const before = getExpectedPoints(beforeAnalysis, color);
+  const after = getExpectedPoints(afterAnalysis, color);
+  const loss = normalizeBoundedLoss(
+    before,
+    after,
+    getScoreBoundForColor(beforeAnalysis?.whitePerspective ?? null, color),
+    getScoreBoundForColor(afterAnalysis?.whitePerspective ?? null, color),
+  );
+
+  return {
+    before,
+    after,
+    value: loss.value,
+    raw: loss.raw,
+    reliable: loss.reliable,
+  };
+}
+
+function getMoveExpectedPointsLoss(
+  beforeAnalysis: AnalysisResult | null | undefined,
+  afterAnalysis: AnalysisResult | null | undefined,
+  color: 'w' | 'b',
+  moveUci: string,
+) {
+  const bestLine = beforeAnalysis?.lines?.[0] ?? null;
+  const playedLine = findAnalysisLineForMove(beforeAnalysis, moveUci);
+
+  if (bestLine?.whitePerspective && playedLine?.whitePerspective) {
+    const before = getExpectedPointsFromScore(bestLine.whitePerspective, color);
+    const after = getExpectedPointsFromScore(playedLine.whitePerspective, color);
+    const loss = normalizeBoundedLoss(
+      before,
+      after,
+      getScoreBoundForColor(bestLine.whitePerspective, color),
+      getScoreBoundForColor(playedLine.whitePerspective, color),
+    );
+
+    return {
+      before: getExpectedPoints(beforeAnalysis, color),
+      after: getExpectedPoints(afterAnalysis, color),
+      value: loss.value,
+      raw: loss.raw,
+      reliable: loss.reliable,
+    };
+  }
+
+  return getExpectedPointsLoss(beforeAnalysis, afterAnalysis, color);
+}
+
+function getExpectedPointsFromScore(score: PerspectiveScore | null | undefined, color: 'w' | 'b') {
+  if (!score) {
+    return null;
+  }
+
+  const whiteChartValue = score.type === 'mate' ? Math.sign(score.value) * 12 : score.value / 100;
+  const perspectiveValue = color === 'w' ? whiteChartValue : -whiteChartValue;
+  return 1 / (1 + Math.exp(-perspectiveValue / 1.35));
+}
+
 export function getScoreCpForColor(analysis: AnalysisResult | null | undefined, color: 'w' | 'b') {
   const score = analysis?.whitePerspective;
 
@@ -915,6 +979,46 @@ export function getScoreCpForColor(analysis: AnalysisResult | null | undefined, 
 
   const whiteScore = score.type === 'mate' ? Math.sign(score.value) * 100000 : score.value;
   return color === 'w' ? whiteScore : -whiteScore;
+}
+
+function getScoreBoundForColor(score: PerspectiveScore | null | undefined, color: 'w' | 'b') {
+  const bound = score?.bound ?? 'exact';
+  return color === 'w' ? bound : invertScoreBound(bound);
+}
+
+function invertScoreBound(bound: ScoreBound): ScoreBound {
+  if (bound === 'lowerbound') {
+    return 'upperbound';
+  }
+
+  if (bound === 'upperbound') {
+    return 'lowerbound';
+  }
+
+  return bound;
+}
+
+function normalizeBoundedLoss(
+  before: number | null,
+  after: number | null,
+  beforeBound: ScoreBound,
+  afterBound: ScoreBound,
+) {
+  if (before == null || after == null) {
+    return { value: null, raw: null, reliable: false };
+  }
+
+  const raw = before - after;
+
+  if (raw <= 0) {
+    return { value: 0, raw, reliable: true };
+  }
+
+  if (beforeBound === 'upperbound' || afterBound === 'lowerbound') {
+    return { value: null, raw, reliable: false };
+  }
+
+  return { value: raw, raw, reliable: true };
 }
 
 export function getMateForColor(analysis: AnalysisResult | null | undefined, color: 'w' | 'b') {
@@ -930,12 +1034,39 @@ export function getMateForColor(analysis: AnalysisResult | null | undefined, col
 export function getCpLoss(beforeAnalysis: AnalysisResult | null | undefined, afterAnalysis: AnalysisResult | null | undefined, color: 'w' | 'b') {
   const before = getScoreCpForColor(beforeAnalysis, color);
   const after = getScoreCpForColor(afterAnalysis, color);
+  const loss = normalizeBoundedLoss(
+    before,
+    after,
+    getScoreBoundForColor(beforeAnalysis?.whitePerspective ?? null, color),
+    getScoreBoundForColor(afterAnalysis?.whitePerspective ?? null, color),
+  );
 
-  if (before == null || after == null) {
-    return null;
+  return loss.value;
+}
+
+function getMoveCpLoss(
+  beforeAnalysis: AnalysisResult | null | undefined,
+  afterAnalysis: AnalysisResult | null | undefined,
+  color: 'w' | 'b',
+  moveUci: string,
+) {
+  const bestLine = beforeAnalysis?.lines?.[0] ?? null;
+  const playedLine = findAnalysisLineForMove(beforeAnalysis, moveUci);
+
+  if (bestLine?.whitePerspective && playedLine?.whitePerspective) {
+    const bestScore = getScoreCpForColor({ ...beforeAnalysis, whitePerspective: bestLine.whitePerspective } as AnalysisResult, color);
+    const playedScore = getScoreCpForColor({ ...beforeAnalysis, whitePerspective: playedLine.whitePerspective } as AnalysisResult, color);
+    const loss = normalizeBoundedLoss(
+      bestScore,
+      playedScore,
+      getScoreBoundForColor(bestLine.whitePerspective, color),
+      getScoreBoundForColor(playedLine.whitePerspective, color),
+    );
+
+    return loss.value;
   }
 
-  return Math.max(0, before - after);
+  return getCpLoss(beforeAnalysis, afterAnalysis, color);
 }
 
 export function getSecondBestGapCp(analysis: AnalysisResult | null | undefined, color: 'w' | 'b') {
@@ -943,12 +1074,18 @@ export function getSecondBestGapCp(analysis: AnalysisResult | null | undefined, 
   const second = analysis?.lines?.[1];
   const firstScore = first ? getScoreCpForColor({ ...analysis, whitePerspective: first.whitePerspective } as AnalysisResult, color) : null;
   const secondScore = second ? getScoreCpForColor({ ...analysis, whitePerspective: second.whitePerspective } as AnalysisResult, color) : null;
+  const gap = normalizeBoundedLoss(
+    firstScore,
+    secondScore,
+    getScoreBoundForColor(first?.whitePerspective ?? null, color),
+    getScoreBoundForColor(second?.whitePerspective ?? null, color),
+  );
 
-  if (firstScore == null || secondScore == null) {
-    return null;
-  }
+  return gap.value;
+}
 
-  return Math.max(0, firstScore - secondScore);
+function findAnalysisLineForMove(analysis: AnalysisResult | null | undefined, moveUci: string) {
+  return analysis?.lines?.find(line => line.bestMove === moveUci || line.pv[0] === moveUci) ?? null;
 }
 
 export function classifyReviewCategory({
@@ -984,7 +1121,12 @@ export function classifyReviewCategory({
   secondBestGapCp: number | null;
   ratingFlex: number;
 }): ReviewCategory | null {
-  if (openingBookMove && !san.includes('+') && !san.includes('#')) {
+  if (
+    openingBookMove &&
+    !san.includes('+') &&
+    !san.includes('#') &&
+    isOpeningBookClassificationAllowed({ expectedPointsLost, cpLossCp, ratingFlex })
+  ) {
     return 'book';
   }
 
@@ -1020,7 +1162,11 @@ export function classifyReviewCategory({
     afterExpected <= Math.min(0.64, beforeExpected - 0.18);
 
   if (expectedPointsLost != null) {
-    if (bestMovePlayed || expectedPointsLost <= 0.0005) {
+    if (
+      bestMovePlayed ||
+      expectedPointsLost <= 0.0005 ||
+      (cpLossCp != null && cpLossCp <= 12 + Math.round(ratingFlex * 200))
+    ) {
       return 'best';
     }
 
@@ -1047,7 +1193,7 @@ export function classifyReviewCategory({
     return bestMovePlayed ? 'best' : null;
   }
 
-  if (bestMovePlayed || cpLossCp <= 12 + Math.round(ratingFlex * 200)) {
+  if (bestMovePlayed || cpLossCp <= 0 || cpLossCp <= 12 + Math.round(ratingFlex * 200)) {
     return 'best';
   }
 
@@ -1076,6 +1222,26 @@ export function classifyReviewCategory({
   }
 
   return 'blunder';
+}
+
+function isOpeningBookClassificationAllowed({
+  expectedPointsLost,
+  cpLossCp,
+  ratingFlex,
+}: {
+  expectedPointsLost: number | null;
+  cpLossCp: number | null;
+  ratingFlex: number;
+}) {
+  if (expectedPointsLost != null && expectedPointsLost > 0.05 + ratingFlex) {
+    return false;
+  }
+
+  if (cpLossCp != null && cpLossCp > 55 + Math.round(ratingFlex * 300)) {
+    return false;
+  }
+
+  return true;
 }
 
 function cpLossToAccuracy(cpLossCp: number) {

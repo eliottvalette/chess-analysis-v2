@@ -521,6 +521,7 @@ function parseInfoLine(line: string, fen: string | undefined, depthRequested: nu
         : turn === 'w'
           ? score.value
           : -score.value,
+    bound: turn === 'w' ? score.bound : invertScoreBound(score.bound),
   };
   const pv = pvSection ? pvSection.split(/\s+/) : [];
 
@@ -532,6 +533,18 @@ function parseInfoLine(line: string, fen: string | undefined, depthRequested: nu
     score,
     whitePerspective,
   };
+}
+
+function invertScoreBound(bound: RelativeScore['bound']) {
+  if (bound === 'lowerbound') {
+    return 'upperbound';
+  }
+
+  if (bound === 'upperbound') {
+    return 'lowerbound';
+  }
+
+  return bound;
 }
 
 function findBestInfoLine(lines: string[], multipv?: number) {

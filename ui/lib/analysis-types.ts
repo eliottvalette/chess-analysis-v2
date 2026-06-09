@@ -9,6 +9,7 @@ export type RelativeScore = {
 export type PerspectiveScore = {
   type: 'cp' | 'mate';
   value: number;
+  bound?: ScoreBound;
 };
 
 export type RawWdl = {
