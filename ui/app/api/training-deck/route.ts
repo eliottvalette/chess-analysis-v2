@@ -122,7 +122,7 @@ export async function POST(request: Request) {
   }
 
   if (action === 'generate_recent') {
-    return generateRecentDeck(profile, body);
+    return generateRecentDeck(profile, body, getRequestOrigin(request));
   }
 
   if (action === 'add_card') {
@@ -173,10 +173,11 @@ async function createDeck(profile: TrainingProfileCookie, body: Record<string, u
   return NextResponse.json({ deck: summarizeDeck(data, [], new Map(), profile.id) });
 }
 
-async function generateRecentDeck(profile: TrainingProfileCookie, body: Record<string, unknown>) {
+async function generateRecentDeck(profile: TrainingProfileCookie, body: Record<string, unknown>, requestOrigin: string) {
   const username = clampText(String(body.username ?? profile.username), 40).toLowerCase();
   const timeClass = normalizeTimeClass(body.timeClass);
   const count = Math.max(1, Math.min(100, Number.parseInt(String(body.count ?? 50), 10) || 50));
+  const analyzeBaseUrl = process.env.ANALYZE_BASE_URL?.trim() || requestOrigin;
 
   if (!username) {
     return NextResponse.json({ error: 'Chess.com username is required.' }, { status: 400 });
@@ -202,6 +203,10 @@ async function generateRecentDeck(profile: TrainingProfileCookie, body: Record<s
       ],
       {
         cwd: process.cwd(),
+        env: {
+          ...process.env,
+          ANALYZE_BASE_URL: analyzeBaseUrl,
+        },
         timeout: 12 * 60 * 1000,
         maxBuffer: 1024 * 1024 * 4,
       },
@@ -668,6 +673,18 @@ async function getTrainingProfileFromCookie(): Promise<TrainingProfileCookie | n
 
 function clampText(value: string, maxLength: number) {
   return value.trim().slice(0, maxLength);
+}
+
+function getRequestOrigin(request: Request) {
+  const url = new URL(request.url);
+  const forwardedHost = request.headers.get('x-forwarded-host')?.trim();
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.trim();
+
+  if (forwardedHost) {
+    return `${forwardedProto || url.protocol.replace(':', '')}://${forwardedHost}`;
+  }
+
+  return url.origin;
 }
 
 function clampInt(value: unknown, min: number, max: number) {
