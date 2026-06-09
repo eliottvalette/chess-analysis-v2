@@ -43,6 +43,7 @@ import {
   cardMoveReviewsFromTimeline,
   parseCardMoveReviews,
   resolveTrainBoardMoveReview,
+  resolveTrainReplayBestMoveUci,
   shouldUseLiveTrainMoveReview,
 } from '@/lib/card-move-reviews';
 import { resolveOpeningBookFlagsLocal } from '@/lib/opening-book';
@@ -671,16 +672,37 @@ export function ChessAnalysisLab() {
 
     return formatScoreLabel(displayAnalysis, orientation);
   }, [activeDeckCard, activeTrainMoveReview, displayAnalysis, historyIndex, orientation, trainUsesLivePositionEval]);
+  const isTrainCardFinished =
+    activeDeckCard != null && deckFeedback != null && !deckFeedback.pending;
   const isViewingDeckFailurePosition =
     activeDeckCard != null &&
+    isTrainCardFinished &&
     deckFeedback != null &&
-    !deckFeedback.pending &&
     !deckFeedback.correct &&
     historyIndex === moveHistory.length &&
     isOpponentTurnFromFen(currentFen, activeDeckCard.side);
-  const bestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(displayAnalysis?.bestMove ?? null) : [];
+  const trainReplayBestMoveUci = useMemo(() => {
+    if (!isTrainCardFinished || !activeDeckCard) {
+      return null;
+    }
+
+    return resolveTrainReplayBestMoveUci(
+      activeDeckCard,
+      historyIndex,
+      moveHistory,
+      trainPositionAnalyses,
+      positionAnalysis,
+    );
+  }, [activeDeckCard, historyIndex, isTrainCardFinished, moveHistory, positionAnalysis, trainPositionAnalyses]);
+  const reviewBestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(displayAnalysis?.bestMove ?? null) : [];
   const deckAnswerArrow =
-    deckFeedback && activeDeckCard && !deckFeedback.pending && !deckFeedback.correct ? getBestMoveArrow(activeDeckCard.answerUci) : [];
+    activeDeckCard != null && isTrainCardFinished && deckFeedback != null && !deckFeedback.correct
+      ? getBestMoveArrow(activeDeckCard.answerUci)
+      : [];
+  const trainBestMoveArrow =
+    showArrow && isTrainCardFinished && !isViewingDeckFailurePosition
+      ? getBestMoveArrow(trainReplayBestMoveUci)
+      : [];
   const deckOpponentArrow =
     isViewingDeckFailurePosition && !positionLoading && positionAnalysis?.bestMove
       ? getBestMoveArrow(positionAnalysis?.bestMove ?? null, '#ff456f')
@@ -689,7 +711,9 @@ export function ChessAnalysisLab() {
     isViewingDeckFailurePosition && !positionLoading && positionAnalysis?.bestMove
       ? formatBestMove(currentFen, positionAnalysis.bestMove)
       : null;
-  const boardArrows = activeDeckCard ? dedupeBoardArrows([...deckAnswerArrow, ...deckOpponentArrow]) : bestMoveArrow;
+  const boardArrows = activeDeckCard
+    ? dedupeBoardArrows([...trainBestMoveArrow, ...deckAnswerArrow, ...deckOpponentArrow])
+    : reviewBestMoveArrow;
   const whiteReviewName = metadata?.whitePlayer ?? 'White';
   const blackReviewName = metadata?.blackPlayer ?? 'Black';
   const whiteBoardPlayer = useMemo(
@@ -2046,6 +2070,7 @@ export function ChessAnalysisLab() {
         const nextFeedback = buildPendingDeckFeedback(activeDeckCard, move.uci, move.san);
         const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback);
         setDeckFeedback(gradedFeedback);
+        setShowArrow(true);
         if (!trainAllSession) {
           const promptStartedAt = deckCardPromptStartedAtRef.current;
           const responseMs = promptStartedAt == null ? null : Date.now() - promptStartedAt;
@@ -3062,10 +3087,16 @@ export function ChessAnalysisLab() {
               <button
                 className={styles.iconButton}
                 onClick={() => setShowArrow(value => !value)}
-                disabled={Boolean(activeDeckCard && !deckFeedback)}
-                title={activeDeckCard ? 'Best arrow hidden during deck review' : showArrow ? 'Hide best arrow' : 'Show best arrow'}
+                disabled={Boolean(activeDeckCard && !isTrainCardFinished)}
+                title={
+                  activeDeckCard && !isTrainCardFinished
+                    ? 'Best arrow hidden during deck review'
+                    : showArrow
+                      ? 'Hide best arrow'
+                      : 'Show best arrow'
+                }
               >
-                <ArrowIcon off={!showArrow || Boolean(activeDeckCard)} />
+                <ArrowIcon off={!showArrow || Boolean(activeDeckCard && !isTrainCardFinished)} />
               </button>
               <button className={styles.iconButton} onClick={() => void runTimelineAnalysis()} disabled={timelineLoading || moveHistory.length === 0} title="Refresh analysis">
                 <RefreshIcon />

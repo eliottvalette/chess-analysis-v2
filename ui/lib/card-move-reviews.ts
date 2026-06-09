@@ -257,6 +257,37 @@ export function resolveTrainBoardMoveReview(
   return buildTrainBoardMoveReview(move, moveIndex, 'good', null);
 }
 
+export function resolveTrainReplayBestMoveUci(
+  card: DeckCard,
+  historyIndex: number,
+  moveHistory: StoredMove[],
+  positionAnalysesByMoveCount: Array<AnalysisResult | null | undefined>,
+  currentPositionAnalysis: AnalysisResult | null | undefined,
+) {
+  const engineBest =
+    positionAnalysesByMoveCount[historyIndex]?.bestMove ??
+    currentPositionAnalysis?.bestMove ??
+    null;
+
+  if (engineBest) {
+    return engineBest;
+  }
+
+  const quizMoveIndex = moveHistory.length - 1;
+
+  if (historyIndex === quizMoveIndex) {
+    return card.answerUci;
+  }
+
+  const nextMove = moveHistory[historyIndex];
+
+  if (nextMove) {
+    return moveUciFromStoredMove(nextMove);
+  }
+
+  return null;
+}
+
 export function shouldUseLiveTrainMoveReview(
   card: DeckCard,
   moves: StoredMove[],
