@@ -189,6 +189,38 @@ test('classifyTimelineMoves scores played moves against the pre-move MultiPV lin
   assert.equal(reviews[0]?.category, 'best');
 });
 
+test('classifyTimelineMoves gives bounded-loss moves a visible fallback category', () => {
+  const reviews = classifyTimelineMoves(
+    [
+      {
+        from: 'g1',
+        to: 'f3',
+        san: 'Nf3',
+        lan: 'g1f3',
+        promotion: null,
+        piece: 'n',
+        color: 'w',
+        flags: 'n',
+        captured: null,
+        uci: 'g1f3',
+      },
+    ],
+    [makeAnalysis({ scoreCp: 120, bestMove: 'd2d4' })],
+    [
+      {
+        ...makeAnalysis({ scoreCp: -40, bestMove: 'd7d5' }),
+        whitePerspective: { type: 'cp', value: -40, bound: 'lowerbound' },
+      },
+    ],
+    null,
+    null,
+    [false],
+  );
+
+  assert.notEqual(reviews[0]?.category, null);
+  assert.equal(reviews[0]?.colorHex != null, true);
+});
+
 test('classifyReviewCategory uses expected points loss for mistakes and blunders', () => {
   assert.equal(
     classifyReviewCategory({

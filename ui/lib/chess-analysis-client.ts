@@ -569,7 +569,7 @@ export function classifyTimelineMoves(
     const bestMoveSan = beforeAnalysis?.bestMove ? formatBestMove(beforeFen, beforeAnalysis.bestMove) : null;
     const secondBestGapCp = getSecondBestGapCp(beforeAnalysis, color);
 
-    const category = classifyReviewCategory({
+    const reviewCategoryInput = {
       openingBookMove: openingBookFlags?.[index] === true,
       san: move.san,
       bestMovePlayed,
@@ -585,7 +585,18 @@ export function classifyTimelineMoves(
       afterMate,
       secondBestGapCp,
       ratingFlex,
-    });
+    };
+    let category = classifyReviewCategory(reviewCategoryInput);
+
+    if (!category) {
+      category = classifyReviewCategory({
+        ...reviewCategoryInput,
+        openingBookMove: false,
+        expectedPointsLost:
+          beforeExpected == null || afterExpected == null ? null : Math.max(0, beforeExpected - afterExpected),
+        cpLossCp: beforeCp == null || afterCp == null ? null : Math.max(0, beforeCp - afterCp),
+      });
+    }
 
     const moveAccuracy = getMoveAccuracy(category, expectedPointsLost, cpLossCp, afterMate);
     const isKeyMoment = isReviewKeyMoment(category, expectedPointsLost, cpLossCp, afterMate);

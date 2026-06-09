@@ -99,7 +99,7 @@ const RECENT_GAMES_PAGE_SIZE = 10;
 const RECENT_GAMES_AUTO_REFRESH_MS = 90_000;
 const RECENT_GAMES_INTERACTION_IDLE_MS = 2_500;
 const RECENT_GAMES_PRELOAD_SCAN_MS = 1_000;
-const GAME_ANALYSIS_CACHE_VERSION = 2;
+const GAME_ANALYSIS_CACHE_VERSION = 3;
 
 type CachedTimelineAnalysis = {
   quality: 'refined';
@@ -308,14 +308,15 @@ async function readJsonResponse<T>(response: Response) {
 async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimelineAnalysis | null> {
   const memoryHit = recentGameAnalysisMemoryCache.get(cacheKey);
 
-  if (memoryHit) {
+  if (memoryHit?.version === GAME_ANALYSIS_CACHE_VERSION) {
     return memoryHit;
   }
 
   const inFlightHit = recentGameAnalysisInFlightCache.get(cacheKey);
 
   if (inFlightHit) {
-    return inFlightHit;
+    const analysis = await inFlightHit;
+    return analysis?.version === GAME_ANALYSIS_CACHE_VERSION ? analysis : null;
   }
 
   try {
@@ -356,6 +357,7 @@ async function saveCachedTimelineAnalysis({
 }) {
   recentGameAnalysisMemoryCache.set(cacheKey, {
     quality: 'refined',
+    version: GAME_ANALYSIS_CACHE_VERSION,
     preMoveAnalyses,
     timelineAnalyses,
     updatedAt: new Date().toISOString(),
@@ -3443,7 +3445,7 @@ function buildTimelineReviews(
 }
 
 function getPositionCacheKey(initialFen: string | null, moves: string[]) {
-  return `${initialFen ?? 'startpos'}|${moves.join(' ')}`;
+  return `analysis:v${GAME_ANALYSIS_CACHE_VERSION}:${initialFen ?? 'startpos'}|${moves.join(' ')}`;
 }
 
 function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckProgressMap) {

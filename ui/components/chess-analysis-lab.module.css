@@ -1241,9 +1241,17 @@
   color: var(--text);
 }
 
+.reviewMoveCellClassified:hover {
+  color: var(--move-dot-color, var(--text));
+}
+
 .activeReviewMoveCell {
   background: rgba(198, 215, 255, 0.14);
   color: var(--text);
+}
+
+.activeReviewMoveCell.reviewMoveCellClassified {
+  color: var(--move-dot-color, var(--text));
 }
 
 .reviewMoveBadge {
