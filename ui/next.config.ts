@@ -14,6 +14,8 @@ const nextConfig: NextConfig = {
     '/api/training-deck': [
       './scripts/chesscom/**/*',
       './scripts/supabase/env.mjs',
+      './node_modules/@supabase/**/*',
+      './node_modules/chess.js/**/*',
     ],
   },
 };
