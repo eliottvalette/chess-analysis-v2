@@ -983,8 +983,19 @@ export function ChessAnalysisLab() {
       const availableWidth = isHorizontalRail ? stageWidth - 12 : stageWidth - railWidth - gap;
       const playerChromeHeight = 84;
       const availableHeight = (isHorizontalRail ? stageHeight - railHeight - gap : stageHeight - 12) - playerChromeHeight;
+      const viewportWidth = document.documentElement.clientWidth || window.innerWidth || stageWidth;
+      const isMobileViewport = viewportWidth <= 720;
+      const mobileWidthLimit = isMobileViewport ? viewportWidth - 16 : Number.POSITIVE_INFINITY;
+      const heightLimit = isMobileViewport ? Number.POSITIVE_INFINITY : Math.max(0, availableHeight);
 
-      setBoardWidth(Math.max(188, Math.floor(Math.min(availableWidth, availableHeight))));
+      setBoardWidth(Math.max(
+        188,
+        Math.floor(Math.min(
+          Math.max(0, availableWidth),
+          heightLimit,
+          mobileWidthLimit,
+        )),
+      ));
     });
 
     observer.observe(stage);
@@ -3013,8 +3024,14 @@ export function ChessAnalysisLab() {
     timelineError,
   };
 
+  const pageClassName = [
+    styles.page,
+    mode === 'train' ? styles.trainMode : '',
+    mode === 'train' && activeDeckCard ? styles.trainSessionMode : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <main className={styles.page}>
+    <main className={pageClassName}>
       <div className={styles.appShell}>
         <section className={`${styles.panel} ${styles.boardPanel}`}>
           <div className={styles.boardWorkspace}>
