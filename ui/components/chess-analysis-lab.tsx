@@ -1856,6 +1856,31 @@ export function ChessAnalysisLab() {
   }, [activeDeckCard, currentMoves, deckFeedback, fetchCachedPositionAnalysis, historyIndex, initialFen]);
 
   useEffect(() => {
+    if (!activeDeckCard || !deckFeedback || deckFeedback.pending) {
+      return undefined;
+    }
+
+    for (let index = 0; index <= moveHistory.length; index += 1) {
+      const moves = buildMoveUciHistory(moveHistory.slice(0, index));
+      const cacheKey = getPositionCacheKey(initialFen, moves);
+
+      if (positionCacheRef.current.has(cacheKey) || positionInFlightRef.current.has(cacheKey)) {
+        continue;
+      }
+
+      const game = restoreGameFromHistory(moveHistory, initialFen, index);
+
+      void fetchCachedPositionAnalysis(cacheKey, game.fen(), moves)
+        .then(() => {
+          setTrainAnalysisTick(tick => tick + 1);
+        })
+        .catch(() => undefined);
+    }
+
+    return undefined;
+  }, [activeDeckCard, deckFeedback, fetchCachedPositionAnalysis, initialFen, moveHistory]);
+
+  useEffect(() => {
     if (moveHistory.length === 0 || historyIndex >= moveHistory.length) {
       return;
     }
