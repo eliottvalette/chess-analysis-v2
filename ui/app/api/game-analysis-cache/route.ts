@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 
 type CachedAnalysisPayload = {
   quality?: 'refined';
+  version?: number;
   preMoveAnalyses?: AnalysisResult[];
   timelineAnalyses?: AnalysisResult[];
   updatedAt?: string;
@@ -101,6 +102,7 @@ function normalizeAnalysis(analysis: CachedAnalysisPayload | null | undefined) {
 
   return {
     quality: 'refined',
+    version: typeof analysis.version === 'number' ? analysis.version : undefined,
     preMoveAnalyses: analysis.preMoveAnalyses,
     timelineAnalyses: analysis.timelineAnalyses,
     updatedAt: new Date().toISOString(),

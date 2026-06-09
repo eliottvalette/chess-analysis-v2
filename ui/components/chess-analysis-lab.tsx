@@ -78,7 +78,9 @@ const POSITION_DEPTH = 20;
 const POSITION_MOVETIME_MS = 400;
 const POSITION_MULTIPV = 3;
 const TIMELINE_ANALYSIS_BATCH_SIZE = 4;
-const TIMELINE_ENGINE_PROGRESS_WEIGHT = 0.92;
+const TIMELINE_CACHE_PROGRESS = 4;
+const TIMELINE_ENGINE_PROGRESS_OFFSET = 8;
+const TIMELINE_ENGINE_PROGRESS_WEIGHT = 0.84;
 const PRELOAD_AHEAD = 15;
 const LAST_MOVE_STYLE = {
   backgroundColor: 'rgba(84, 173, 255, 0.26)',
@@ -97,9 +99,11 @@ const RECENT_GAMES_PAGE_SIZE = 10;
 const RECENT_GAMES_AUTO_REFRESH_MS = 90_000;
 const RECENT_GAMES_INTERACTION_IDLE_MS = 2_500;
 const RECENT_GAMES_PRELOAD_SCAN_MS = 1_000;
+const GAME_ANALYSIS_CACHE_VERSION = 2;
 
 type CachedTimelineAnalysis = {
   quality: 'refined';
+  version?: number;
   preMoveAnalyses: AnalysisResult[];
   timelineAnalyses: AnalysisResult[];
   updatedAt?: string;
@@ -262,7 +266,7 @@ function BoardPlayerBar({ player }: { player: BoardPlayerSummary }) {
 }
 
 function getRecentGameCacheKey(game: ChessComRecentGameSummary) {
-  return `chesscom:${game.link || game.url}`;
+  return `chesscom:v${GAME_ANALYSIS_CACHE_VERSION}:${game.link || game.url}`;
 }
 
 function getPgnHash(pgn: string) {
@@ -323,6 +327,7 @@ async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimel
       response.ok &&
       analysis &&
       analysis.quality === 'refined' &&
+      analysis.version === GAME_ANALYSIS_CACHE_VERSION &&
       Array.isArray(analysis.preMoveAnalyses) &&
       Array.isArray(analysis.timelineAnalyses)
     ) {
@@ -365,11 +370,12 @@ async function saveCachedTimelineAnalysis({
         key: cacheKey,
         gameLink,
         pgnHash: pgn ? getPgnHash(pgn) : null,
-        analysis: {
-          quality: 'refined',
-          preMoveAnalyses,
-          timelineAnalyses,
-        },
+      analysis: {
+        quality: 'refined',
+        version: GAME_ANALYSIS_CACHE_VERSION,
+        preMoveAnalyses,
+        timelineAnalyses,
+      },
       }),
     });
   } catch {
@@ -617,13 +623,21 @@ export function ChessAnalysisLab() {
 
     return shouldUseLiveTrainMoveReview(activeDeckCard, currentMoves, historyIndex - 1, trainAnswerFeedback);
   }, [activeDeckCard, currentMoves, historyIndex, trainAnswerFeedback]);
+  const reviewDisplayAnalysis = useMemo(() => {
+    if (!hasLoadedGame || activeDeckCard || variationBaseIndex != null) {
+      return null;
+    }
+
+    return preMoveAnalyses[historyIndex] ?? null;
+  }, [activeDeckCard, hasLoadedGame, historyIndex, preMoveAnalyses, variationBaseIndex]);
+  const displayAnalysis = reviewDisplayAnalysis ?? positionAnalysis;
   const whiteAdvantage = useMemo(() => {
     if (!trainUsesLivePositionEval && activeTrainMoveReview?.whiteEvalCp != null) {
       return getAdvantageMeterFromEvalCp(activeTrainMoveReview.whiteEvalCp);
     }
 
-    if (positionAnalysis) {
-      return getAdvantageMeter(positionAnalysis);
+    if (displayAnalysis) {
+      return getAdvantageMeter(displayAnalysis);
     }
 
     if (activeDeckCard && historyIndex > 0) {
@@ -634,15 +648,15 @@ export function ChessAnalysisLab() {
       }
     }
 
-    return getAdvantageMeter(positionAnalysis);
-  }, [activeDeckCard, activeTrainMoveReview, historyIndex, positionAnalysis, trainUsesLivePositionEval]);
+    return getAdvantageMeter(displayAnalysis);
+  }, [activeDeckCard, activeTrainMoveReview, displayAnalysis, historyIndex, trainUsesLivePositionEval]);
   const boardScoreLabel = useMemo(() => {
     if (!trainUsesLivePositionEval && activeTrainMoveReview?.whiteEvalCp != null) {
       return formatEvalCpLabel(activeTrainMoveReview.whiteEvalCp, orientation);
     }
 
-    if (positionAnalysis) {
-      return formatScoreLabel(positionAnalysis, orientation);
+    if (displayAnalysis) {
+      return formatScoreLabel(displayAnalysis, orientation);
     }
 
     if (activeDeckCard && historyIndex > 0) {
@@ -653,8 +667,8 @@ export function ChessAnalysisLab() {
       }
     }
 
-    return formatScoreLabel(positionAnalysis, orientation);
-  }, [activeDeckCard, activeTrainMoveReview, historyIndex, orientation, positionAnalysis, trainUsesLivePositionEval]);
+    return formatScoreLabel(displayAnalysis, orientation);
+  }, [activeDeckCard, activeTrainMoveReview, displayAnalysis, historyIndex, orientation, trainUsesLivePositionEval]);
   const isViewingDeckFailurePosition =
     activeDeckCard != null &&
     deckFeedback != null &&
@@ -662,7 +676,7 @@ export function ChessAnalysisLab() {
     !deckFeedback.correct &&
     historyIndex === moveHistory.length &&
     isOpponentTurnFromFen(currentFen, activeDeckCard.side);
-  const bestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(positionAnalysis?.bestMove ?? null) : [];
+  const bestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(displayAnalysis?.bestMove ?? null) : [];
   const deckAnswerArrow =
     deckFeedback && activeDeckCard && !deckFeedback.pending && !deckFeedback.correct ? getBestMoveArrow(activeDeckCard.answerUci) : [];
   const deckOpponentArrow =
@@ -1442,6 +1456,7 @@ export function ChessAnalysisLab() {
 
         const analysis = {
           quality: 'refined',
+          version: GAME_ANALYSIS_CACHE_VERSION,
           preMoveAnalyses: sequence.slice(0, -1),
           timelineAnalyses: sequence.slice(1),
         } satisfies CachedTimelineAnalysis;
@@ -2514,13 +2529,13 @@ export function ChessAnalysisLab() {
     }
 
     setTimelineLoading(true);
-    setTimelineProgress(0);
+    setTimelineProgress(TIMELINE_ENGINE_PROGRESS_OFFSET);
     setTimelineError('');
 
     try {
       const sequence = await analyzeTimelineDeep(nextMoves, nextInitialFen, progress => {
         if (timelineRequestIdRef.current === requestId) {
-          setTimelineProgress(progress * TIMELINE_ENGINE_PROGRESS_WEIGHT);
+          setTimelineProgress(TIMELINE_ENGINE_PROGRESS_OFFSET + progress * TIMELINE_ENGINE_PROGRESS_WEIGHT);
         }
       });
 
@@ -2713,7 +2728,7 @@ export function ChessAnalysisLab() {
     if (!memoryCachedAnalysis) {
       void (async () => {
         setTimelineLoading(true);
-        setTimelineProgress(0);
+        setTimelineProgress(TIMELINE_CACHE_PROGRESS);
         const analysis = await loadCachedTimelineAnalysis(cacheKey);
 
         if (activeRecentGameCacheKeyRef.current !== cacheKey) {
@@ -2913,9 +2928,9 @@ export function ChessAnalysisLab() {
     setDeckActionError('');
 
     try {
-      const bestMove = positionAnalysis?.bestMove;
+      const bestMove = displayAnalysis?.bestMove;
       const side = game.turn() === 'b' ? 'black' : 'white';
-      const referenceEvalCp = scoreToCpForSide(positionAnalysis?.whitePerspective, side);
+      const referenceEvalCp = scoreToCpForSide(displayAnalysis?.whitePerspective, side);
 
       if (!selectedDeckId || !bestMove) {
         throw new Error('Choose a deck and wait for analysis before saving.');
@@ -3223,8 +3238,8 @@ export function ChessAnalysisLab() {
                 deckSummaries={deckSummaries}
                 reviewDeckSaveStatus={reviewDeckSaveStatus}
                 reviewSaveMoveSan={
-                  positionAnalysis?.bestMove
-                    ? formatBestMove(currentFen, positionAnalysis.bestMove)
+                  displayAnalysis?.bestMove
+                    ? formatBestMove(currentFen, displayAnalysis.bestMove)
                     : null
                 }
                 positionLoading={positionLoading}
@@ -3232,7 +3247,7 @@ export function ChessAnalysisLab() {
                 canSaveReviewCard={Boolean(
                   trainingProfile &&
                   selectedDeck?.isOwned &&
-                  positionAnalysis?.bestMove &&
+                  displayAnalysis?.bestMove &&
                   !positionLoading &&
                   (!saveReplayFromStart || currentMoves.length > 0),
                 )}
