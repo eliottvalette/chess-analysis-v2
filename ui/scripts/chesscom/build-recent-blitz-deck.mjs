@@ -18,6 +18,7 @@ const DEFAULT_MAX_PLY = 16;
 const DEFAULT_CONCURRENCY = 2;
 const DECK_ID = 'recent-blitz-trainer-v1';
 const execFileAsync = promisify(execFile);
+const analysisCache = new Map();
 
 main().catch(error => {
   console.error(error instanceof Error ? error.message : error);
@@ -337,8 +338,7 @@ async function buildCardsForGame({
     return cards;
   }
 
-  logProgress(`[${gameIndex + 1}/${totalGames}] batching ${candidates.length * 2} positions for ${candidates.length} of your moves`);
-  const positions = candidates.flatMap(candidate => [
+  const requestedPositions = candidates.flatMap(candidate => [
     {
       fen: candidate.fenBefore,
       multipv,
@@ -348,10 +348,12 @@ async function buildCardsForGame({
       multipv: 1,
     },
   ]);
-  const analyses = await analyzePositions(analyzeBaseUrl, {
-    positions,
+  const analyses = await analyzePositionsCached(analyzeBaseUrl, {
+    positions: requestedPositions,
     depth,
     movetimeMs,
+    gameIndex,
+    totalGames,
   });
 
   let firstMistakePly = null;
@@ -483,6 +485,57 @@ async function analyzePositions(baseUrl, payload) {
   const response = await postAnalyzeRequest(baseUrl, '/api/analyze-game', payload);
   const parsed = JSON.parse(response);
   return Array.isArray(parsed.analyses) ? parsed.analyses : [];
+}
+
+async function analyzePositionsCached(baseUrl, { positions, depth, movetimeMs, gameIndex, totalGames }) {
+  const analyses = new Array(positions.length);
+  const missingPositions = [];
+  const missingIndexes = [];
+
+  positions.forEach((position, index) => {
+    const cacheKey = getDeckAnalysisCacheKey(position, depth, movetimeMs);
+    const cached = analysisCache.get(cacheKey);
+
+    if (cached) {
+      analyses[index] = cached;
+      return;
+    }
+
+    missingIndexes.push(index);
+    missingPositions.push(position);
+  });
+
+  logProgress(
+    `[${gameIndex + 1}/${totalGames}] batching ${missingPositions.length}/${positions.length} uncached positions (${positions.length - missingPositions.length} cache hits)`,
+  );
+
+  if (missingPositions.length > 0) {
+    const fetched = await analyzePositions(baseUrl, {
+      positions: missingPositions,
+      depth,
+      movetimeMs,
+    });
+
+    fetched.forEach((analysis, offset) => {
+      const index = missingIndexes[offset];
+      const position = positions[index];
+      const cacheKey = getDeckAnalysisCacheKey(position, depth, movetimeMs);
+
+      analysisCache.set(cacheKey, analysis);
+      analyses[index] = analysis;
+    });
+  }
+
+  return analyses;
+}
+
+function getDeckAnalysisCacheKey(position, depth, movetimeMs) {
+  return [
+    position.fen ?? '',
+    position.multipv ?? 1,
+    depth ?? '',
+    movetimeMs ?? '',
+  ].join('|');
 }
 
 async function postAnalyzeRequest(baseUrl, path, payload) {

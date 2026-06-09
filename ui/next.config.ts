@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/api/analyze-game': ['./bin/**/*'],
     '/api/analyze-position': ['./bin/**/*'],
+    '/api/training-deck': [
+      './scripts/chesscom/**/*',
+      './scripts/supabase/env.mjs',
+    ],
   },
 };
 
