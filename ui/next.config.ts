@@ -14,8 +14,12 @@ const nextConfig: NextConfig = {
     '/api/training-deck': [
       './scripts/chesscom/**/*',
       './scripts/supabase/env.mjs',
+      './lib/opening-book-keys.json',
       './node_modules/@supabase/**/*',
+      './node_modules/@supabase/phoenix/**/*',
       './node_modules/chess.js/**/*',
+      './node_modules/iceberg-js/**/*',
+      './node_modules/tslib/**/*',
     ],
   },
 };

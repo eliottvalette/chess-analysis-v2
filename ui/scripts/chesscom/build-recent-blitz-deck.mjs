@@ -1,7 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 import { Chess } from 'chess.js';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import { fetchArchives, fetchRecentGames, extractTag } from './api.mjs';
 import { isMoveInOpeningBook, dedupeTrainingCards, qualifiesAsLineRootMistake } from './deck-mistake-filter.mjs';
@@ -17,7 +15,6 @@ const DEFAULT_MULTIPV = 1;
 const DEFAULT_MAX_PLY = 16;
 const DEFAULT_CONCURRENCY = 2;
 const DECK_ID = 'recent-blitz-trainer-v1';
-const execFileAsync = promisify(execFile);
 const analysisCache = new Map();
 
 main().catch(error => {
@@ -540,18 +537,18 @@ function getDeckAnalysisCacheKey(position, depth, movetimeMs) {
 
 async function postAnalyzeRequest(baseUrl, path, payload) {
   try {
-    const { stdout } = await execFileAsync('curl', [
-      '-sS',
-      '-X',
-      'POST',
-      `${baseUrl}${path}`,
-      '-H',
-      'content-type: application/json',
-      '--data-binary',
-      JSON.stringify(payload),
-    ]);
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const text = await response.text();
 
-    return stdout;
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${text.slice(0, 500)}`);
+    }
+
+    return text;
   } catch (error) {
     const detail = error instanceof Error && error.message ? ` ${error.message}` : '';
     throw new Error(`Analyze API is unreachable at ${baseUrl}.${detail}`);
