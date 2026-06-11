@@ -548,6 +548,7 @@ export function ChessAnalysisLab() {
   const soundPlayersRef = useRef<Partial<Record<ChessSoundKey, HTMLAudioElement>>>({});
   const positionCacheRef = useRef(new Map<string, AnalysisResult>());
   const positionInFlightRef = useRef(new Map<string, Promise<AnalysisResult>>());
+  const timelineBatchInFlightRef = useRef(new Map<string, Promise<AnalysisResult[]>>());
   const recentFetchRequestIdRef = useRef(0);
   const recentAutoFetchStartedRef = useRef(false);
   const recentPreloadBusyRef = useRef(false);
@@ -1005,10 +1006,23 @@ export function ChessAnalysisLab() {
           continue;
         }
 
-        const batchPromise = analyzeGamePositions({
-          positions: needsBatchAnalysis.map(item => item.position),
-          depth: DETERMINISTIC_ANALYSIS_PROFILE.depth,
-        }).then(response => response.analyses ?? []);
+        const batchKey = needsBatchAnalysis.map(item => item.cacheKey).join('|');
+        let batchPromise = timelineBatchInFlightRef.current.get(batchKey);
+
+        if (!batchPromise) {
+          batchPromise = analyzeGamePositions({
+            positions: needsBatchAnalysis.map(item => item.position),
+            depth: DETERMINISTIC_ANALYSIS_PROFILE.depth,
+          })
+            .then(response => response.analyses ?? [])
+            .finally(() => {
+              if (timelineBatchInFlightRef.current.get(batchKey) === batchPromise) {
+                timelineBatchInFlightRef.current.delete(batchKey);
+              }
+            });
+
+          timelineBatchInFlightRef.current.set(batchKey, batchPromise);
+        }
 
         needsBatchAnalysis.forEach((item, index) => {
           const positionPromise = batchPromise
@@ -3136,6 +3150,7 @@ export function ChessAnalysisLab() {
     setDeckFeedbackArrowsVisible(false);
     positionCacheRef.current.clear();
     positionInFlightRef.current.clear();
+    timelineBatchInFlightRef.current.clear();
     clearSelection();
     playSound('game-start');
   }
@@ -3344,6 +3359,7 @@ export function ChessAnalysisLab() {
                   setDeckFeedbackArrowsVisible(false);
                   positionCacheRef.current.clear();
                   positionInFlightRef.current.clear();
+                  timelineBatchInFlightRef.current.clear();
                   clearSelection();
                 }}
                 onChesscomUsernameChange={value => {
@@ -3467,6 +3483,7 @@ export function ChessAnalysisLab() {
                   setTrainSessionStats(createEmptyTrainSessionStats());
                   positionCacheRef.current.clear();
                   positionInFlightRef.current.clear();
+                  timelineBatchInFlightRef.current.clear();
                   clearSelection();
 
                   if (wasTrainAllSession) {
