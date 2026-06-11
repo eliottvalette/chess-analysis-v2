@@ -9,6 +9,7 @@ import {
   DETERMINISTIC_ANALYSIS_PROFILE,
   buildDeterministicAnalyzeRequest,
 } from '@/lib/analysis-profile';
+import { runTimelineAnalysisDedupe } from '@/lib/timeline-analysis-runner';
 import {
   PgnImportDialog,
   ReviewPanel,
@@ -941,127 +942,26 @@ export function ChessAnalysisLab() {
       onProgress?: (progress: number) => void,
     ) => {
       const positions = buildTimelineSequencePositions(moves, requestInitialFen);
-      const sequence: AnalysisResult[] = new Array(positions.length);
-      const missing: Array<{
-        index: number;
-        cacheKey: string;
-        position: NonNullable<typeof positions[number]>;
-        inFlight?: Promise<AnalysisResult>;
-      }> = [];
-      let completed = 0;
-      const reportProgress = (completed: number) => {
-        onProgress?.((completed / Math.max(1, positions.length)) * 100);
-      };
-
-      reportProgress(0);
-
-      positions.forEach((position, index) => {
-        const positionMoves = position.moves ?? [];
-        const cacheKey = getPositionCacheKey(requestInitialFen, positionMoves);
-        const cachedAnalysis = positionCacheRef.current.get(cacheKey);
-
-        if (cachedAnalysis) {
-          sequence[index] = cachedAnalysis;
-          completed += 1;
-          reportProgress(completed);
-          return;
-        }
-
-        if (!position.fen) {
-          throw new Error('Missing timeline position.');
-        }
-
-        missing.push({
-          index,
-          cacheKey,
-          inFlight: positionInFlightRef.current.get(cacheKey),
-          position: buildDeterministicAnalyzeRequest({
-            ...position,
-            initialFen: requestInitialFen,
-          }),
-        });
-      });
-
-      for (let start = 0; start < missing.length; start += TIMELINE_ANALYSIS_BATCH_SIZE) {
-        const batch = missing.slice(start, start + TIMELINE_ANALYSIS_BATCH_SIZE);
-        const alreadyInFlight = batch.filter(item => item.inFlight);
-        const needsBatchAnalysis = batch.filter(item => !item.inFlight);
-
-        await Promise.all(
-          alreadyInFlight.map(async item => {
-            const analysis = await item.inFlight;
-
-            if (!analysis) {
-              throw new Error('Missing deep analysis result.');
-            }
-
-            positionCacheRef.current.set(item.cacheKey, analysis);
-            sequence[item.index] = analysis;
-            completed += 1;
-            reportProgress(completed);
-          }),
-        );
-
-        if (needsBatchAnalysis.length === 0) {
-          continue;
-        }
-
-        const batchKey = needsBatchAnalysis.map(item => item.cacheKey).join('|');
-        let batchPromise = timelineBatchInFlightRef.current.get(batchKey);
-
-        if (!batchPromise) {
-          batchPromise = analyzeGamePositions({
-            positions: needsBatchAnalysis.map(item => item.position),
+      return runTimelineAnalysisDedupe({
+        positions,
+        cache: positionCacheRef.current,
+        positionInFlight: positionInFlightRef.current,
+        batchInFlight: timelineBatchInFlightRef.current,
+        batchSize: TIMELINE_ANALYSIS_BATCH_SIZE,
+        getCacheKey: position => getPositionCacheKey(requestInitialFen, position.moves ?? []),
+        buildRequest: position => buildDeterministicAnalyzeRequest({
+          ...position,
+          initialFen: requestInitialFen,
+        }),
+        analyzeBatch: async batchPositions => {
+          const response = await analyzeGamePositions({
+            positions: batchPositions,
             depth: DETERMINISTIC_ANALYSIS_PROFILE.depth,
-          })
-            .then(response => response.analyses ?? [])
-            .finally(() => {
-              if (timelineBatchInFlightRef.current.get(batchKey) === batchPromise) {
-                timelineBatchInFlightRef.current.delete(batchKey);
-              }
-            });
-
-          timelineBatchInFlightRef.current.set(batchKey, batchPromise);
-        }
-
-        needsBatchAnalysis.forEach((item, index) => {
-          const positionPromise = batchPromise
-            .then(analyses => {
-              const analysis = analyses[index];
-
-              if (!analysis) {
-                throw new Error('Missing deep analysis result.');
-              }
-
-              positionCacheRef.current.set(item.cacheKey, analysis);
-              return analysis;
-            })
-            .finally(() => {
-              if (positionInFlightRef.current.get(item.cacheKey) === positionPromise) {
-                positionInFlightRef.current.delete(item.cacheKey);
-              }
-            });
-
-          positionInFlightRef.current.set(item.cacheKey, positionPromise);
-        });
-
-        await batchPromise;
-
-        needsBatchAnalysis.forEach(item => {
-          const analysis = positionCacheRef.current.get(item.cacheKey);
-
-          if (!analysis) {
-            throw new Error('Missing deep analysis result.');
-          }
-
-          sequence[item.index] = analysis;
-          completed += 1;
-          reportProgress(completed);
-        });
-      }
-
-      reportProgress(positions.length);
-      return sequence;
+          });
+          return response.analyses ?? [];
+        },
+        onProgress,
+      });
     },
     [],
   );
