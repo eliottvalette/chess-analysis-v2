@@ -307,7 +307,10 @@ async function readJsonResponse<T>(response: Response) {
   return parseJsonResponse<T>(response, await response.text());
 }
 
-async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimelineAnalysis | null> {
+async function loadCachedTimelineAnalysis(
+  cacheKey: string,
+  { includeInFlight = true }: { includeInFlight?: boolean } = {},
+): Promise<CachedTimelineAnalysis | null> {
   const memoryHit = recentGameAnalysisMemoryCache.get(cacheKey);
 
   if (memoryHit?.version === GAME_ANALYSIS_CACHE_VERSION) {
@@ -316,7 +319,7 @@ async function loadCachedTimelineAnalysis(cacheKey: string): Promise<CachedTimel
 
   const inFlightHit = recentGameAnalysisInFlightCache.get(cacheKey);
 
-  if (inFlightHit) {
+  if (includeInFlight && inFlightHit) {
     const analysis = await inFlightHit;
     return analysis?.version === GAME_ANALYSIS_CACHE_VERSION ? analysis : null;
   }
@@ -2805,7 +2808,7 @@ export function ChessAnalysisLab() {
       void (async () => {
         setTimelineLoading(true);
         setTimelineProgress(TIMELINE_CACHE_PROGRESS);
-        const analysis = await loadCachedTimelineAnalysis(cacheKey);
+        const analysis = await loadCachedTimelineAnalysis(cacheKey, { includeInFlight: false });
 
         if (activeRecentGameCacheKeyRef.current !== cacheKey) {
           return;
