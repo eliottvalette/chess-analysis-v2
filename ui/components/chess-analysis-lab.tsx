@@ -6,6 +6,10 @@ import { Chess, type Square } from 'chess.js';
 
 import type { AnalysisResult } from '@/lib/analysis-types';
 import {
+  DETERMINISTIC_ANALYSIS_PROFILE,
+  buildDeterministicAnalyzeRequest,
+} from '@/lib/analysis-profile';
+import {
   PgnImportDialog,
   ReviewPanel,
   TrainPanel,
@@ -75,9 +79,6 @@ const Chessboard = dynamic(() => import('@/components/chessboard-client'), {
   loading: () => <div className={styles.boardFallback}>Loading board...</div>,
 });
 
-const POSITION_DEPTH = 20;
-const POSITION_MOVETIME_MS = 400;
-const POSITION_MULTIPV = 3;
 const TIMELINE_ANALYSIS_BATCH_SIZE = 4;
 const TIMELINE_CACHE_PROGRESS = 4;
 const TIMELINE_ENGINE_PROGRESS_OFFSET = 8;
@@ -100,7 +101,7 @@ const RECENT_GAMES_PAGE_SIZE = 10;
 const RECENT_GAMES_AUTO_REFRESH_MS = 90_000;
 const RECENT_GAMES_INTERACTION_IDLE_MS = 2_500;
 const RECENT_GAMES_PRELOAD_SCAN_MS = 1_000;
-const GAME_ANALYSIS_CACHE_VERSION = 3;
+const GAME_ANALYSIS_CACHE_VERSION = DETERMINISTIC_ANALYSIS_PROFILE.version;
 
 type CachedTimelineAnalysis = {
   quality: 'refined';
@@ -494,6 +495,7 @@ export function ChessAnalysisLab() {
   const [trainSessionStats, setTrainSessionStats] = useState<TrainSessionStats>({ completed: 0, hits: 0, misses: 0 });
   const [activeDeckCard, setActiveDeckCard] = useState<DeckCard | null>(null);
   const [deckFeedback, setDeckFeedback] = useState<DeckFeedback | null>(null);
+  const [deckFeedbackArrowsVisible, setDeckFeedbackArrowsVisible] = useState(false);
   const [openingLines, setOpeningLines] = useState<OpeningSeedLine[]>([]);
   const [deckCards, setDeckCards] = useState<DeckCard[]>([]);
   const [deckSummaries, setDeckSummaries] = useState<TrainingDeckSummary[]>([]);
@@ -674,13 +676,15 @@ export function ChessAnalysisLab() {
   }, [activeDeckCard, activeTrainMoveReview, displayAnalysis, historyIndex, orientation, trainUsesLivePositionEval]);
   const isTrainCardFinished =
     activeDeckCard != null && deckFeedback != null && !deckFeedback.pending;
-  const isViewingDeckFailurePosition =
+  const isAtDeckFailureFeedbackView =
     activeDeckCard != null &&
     isTrainCardFinished &&
     deckFeedback != null &&
     !deckFeedback.correct &&
-    historyIndex === moveHistory.length &&
-    isOpponentTurnFromFen(currentFen, activeDeckCard.side);
+    deckFeedbackArrowsVisible &&
+    historyIndex === moveHistory.length;
+  const isViewingDeckFailurePosition =
+    isAtDeckFailureFeedbackView && isOpponentTurnFromFen(currentFen, activeDeckCard.side);
   const trainReplayBestMoveUci = useMemo(() => {
     if (!isTrainCardFinished || !activeDeckCard) {
       return null;
@@ -695,12 +699,9 @@ export function ChessAnalysisLab() {
     );
   }, [activeDeckCard, historyIndex, isTrainCardFinished, moveHistory, positionAnalysis, trainPositionAnalyses]);
   const reviewBestMoveArrow = showArrow && !activeDeckCard ? getBestMoveArrow(displayAnalysis?.bestMove ?? null) : [];
-  const deckAnswerArrow =
-    activeDeckCard != null && isTrainCardFinished && deckFeedback != null && !deckFeedback.correct
-      ? getBestMoveArrow(activeDeckCard.answerUci)
-      : [];
+  const deckAnswerArrow = isAtDeckFailureFeedbackView ? getBestMoveArrow(activeDeckCard.answerUci) : [];
   const trainBestMoveArrow =
-    showArrow && isTrainCardFinished && !isViewingDeckFailurePosition
+    isTrainCardFinished && !isAtDeckFailureFeedbackView
       ? getBestMoveArrow(trainReplayBestMoveUci)
       : [];
   const deckOpponentArrow =
@@ -908,14 +909,13 @@ export function ChessAnalysisLab() {
         return inFlight;
       }
 
-      const request = analyzeSinglePosition({
-        fen,
-        initialFen: requestInitialFen,
-        moves,
-        depth: POSITION_DEPTH,
-        movetimeMs: POSITION_MOVETIME_MS,
-        multipv: POSITION_MULTIPV,
-      })
+      const request = analyzeSinglePosition(
+        buildDeterministicAnalyzeRequest({
+          fen,
+          initialFen: requestInitialFen,
+          moves,
+        }),
+      )
         .then(analysis => {
           positionCacheRef.current.set(cacheKey, analysis);
           return analysis;
@@ -965,13 +965,10 @@ export function ChessAnalysisLab() {
         missing.push({
           index,
           cacheKey,
-          position: {
+          position: buildDeterministicAnalyzeRequest({
             ...position,
             initialFen: requestInitialFen,
-            depth: POSITION_DEPTH,
-            movetimeMs: POSITION_MOVETIME_MS,
-            multipv: POSITION_MULTIPV,
-          },
+          }),
         });
       });
 
@@ -979,8 +976,7 @@ export function ChessAnalysisLab() {
         const batch = missing.slice(start, start + TIMELINE_ANALYSIS_BATCH_SIZE);
         const response = await analyzeGamePositions({
           positions: batch.map(item => item.position),
-          depth: POSITION_DEPTH,
-          movetimeMs: POSITION_MOVETIME_MS,
+          depth: DETERMINISTIC_ANALYSIS_PROFILE.depth,
         });
 
         const analyses = response.analyses ?? [];
@@ -1562,6 +1558,7 @@ export function ChessAnalysisLab() {
     modeRef.current = 'train';
     setActiveDeckCard(card);
     setDeckFeedback(null);
+    setDeckFeedbackArrowsVisible(false);
     setOrientation(card.side);
     setShowArrow(false);
     setPositionAnalysis(null);
@@ -1617,6 +1614,7 @@ export function ChessAnalysisLab() {
       }
 
       setHistoryIndex(nextIndex);
+      setDeckFeedbackArrowsVisible(false);
       clearVariation();
       setGame(nextGame);
       clearSelection();
@@ -1937,6 +1935,7 @@ export function ChessAnalysisLab() {
     setReviewIndex(snapshot.reviewIndex);
     setActiveDeckCard(snapshot.activeDeckCard);
     setDeckFeedback(snapshot.deckFeedback);
+    setDeckFeedbackArrowsVisible(false);
     setDeckIndex(snapshot.deckIndex);
     setTrainAllSession(snapshot.trainAllSession);
     setTrainAllQueue([...(snapshot.trainAllQueue ?? [])]);
@@ -1990,6 +1989,7 @@ export function ChessAnalysisLab() {
 
     setActiveDeckCard(null);
     setDeckFeedback(null);
+    setDeckFeedbackArrowsVisible(false);
     setFocusTrainCreateDeck(true);
   }, [switchWorkspaceMode]);
 
@@ -2081,6 +2081,9 @@ export function ChessAnalysisLab() {
       setTimelineError('');
       setSelectedSquare(null);
       setSquareStyles({});
+      if (activeDeckCard && deckFeedback != null && !deckFeedback.pending) {
+        setDeckFeedbackArrowsVisible(false);
+      }
       playSoundSequence(
         getMoveSoundSequence({
           move,
@@ -2095,6 +2098,7 @@ export function ChessAnalysisLab() {
         const nextFeedback = buildPendingDeckFeedback(activeDeckCard, move.uci, move.san);
         const gradedFeedback = finalizeDeckFeedback(activeDeckCard, nextFeedback);
         setDeckFeedback(gradedFeedback);
+        setDeckFeedbackArrowsVisible(!gradedFeedback.correct);
         setShowArrow(true);
         if (!trainAllSession) {
           const promptStartedAt = deckCardPromptStartedAtRef.current;
@@ -2144,6 +2148,9 @@ export function ChessAnalysisLab() {
     const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
     setHistoryIndex(boundedIndex);
+    if (activeDeckCard) {
+      setDeckFeedbackArrowsVisible(false);
+    }
     clearVariation();
     setGame(nextGame);
     clearSelection();
@@ -2169,6 +2176,7 @@ export function ChessAnalysisLab() {
     setTrainSessionStats(createEmptyTrainSessionStats());
     setActiveDeckCard(null);
     setDeckFeedback(null);
+    setDeckFeedbackArrowsVisible(false);
     positionRequestIdRef.current += 1;
     setGame(new Chess());
     setInitialFen(null);
@@ -2202,6 +2210,7 @@ export function ChessAnalysisLab() {
     setTrainSessionStats(createEmptyTrainSessionStats());
     setActiveDeckCard(null);
     setDeckFeedback(null);
+    setDeckFeedbackArrowsVisible(false);
     setSelectedDeckId(deckId);
 
     if (typeof window !== 'undefined') {
@@ -2226,6 +2235,7 @@ export function ChessAnalysisLab() {
     setTrainAllSession(true);
     setActiveDeckCard(null);
     setDeckFeedback(null);
+    setDeckFeedbackArrowsVisible(false);
     await loadTrainingDeck(undefined, { autoStart: true, allDecks: true });
   }, [loadTrainingDeck]);
 
@@ -2315,6 +2325,7 @@ export function ChessAnalysisLab() {
       setDeckProgress(nextProgress);
       setActiveDeckCard(null);
       setDeckFeedback(null);
+      setDeckFeedbackArrowsVisible(false);
 
       const nextTrainingCard = getDeckStudyQueue(remainingCards, nextProgress)[0] ?? null;
 
@@ -2412,6 +2423,9 @@ export function ChessAnalysisLab() {
         }
 
         setHistoryIndex(boundedIndex);
+        if (activeDeckCard) {
+          setDeckFeedbackArrowsVisible(false);
+        }
         clearVariation();
         setGame(nextGame);
         clearSelection();
@@ -2447,6 +2461,9 @@ export function ChessAnalysisLab() {
         }
 
         setHistoryIndex(boundedIndex);
+        if (activeDeckCard) {
+          setDeckFeedbackArrowsVisible(false);
+        }
         clearVariation();
         setGame(nextGame);
         clearSelection();
@@ -2460,6 +2477,9 @@ export function ChessAnalysisLab() {
         const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
         setHistoryIndex(boundedIndex);
+        if (activeDeckCard) {
+          setDeckFeedbackArrowsVisible(false);
+        }
         clearVariation();
         setGame(nextGame);
         clearSelection();
@@ -2473,6 +2493,9 @@ export function ChessAnalysisLab() {
         const nextGame = restoreGameFromHistory(moveHistory, initialFen, boundedIndex);
 
         setHistoryIndex(boundedIndex);
+        if (activeDeckCard) {
+          setDeckFeedbackArrowsVisible(false);
+        }
         clearVariation();
         setGame(nextGame);
         clearSelection();
@@ -2688,6 +2711,7 @@ export function ChessAnalysisLab() {
       setReviewIndex(0);
       setActiveDeckCard(null);
       setDeckFeedback(null);
+      setDeckFeedbackArrowsVisible(false);
       setPositionAnalysis(null);
       setPreMoveAnalyses(cachedAnalysis?.preMoveAnalyses ?? []);
       setTimelineAnalyses(cachedAnalysis?.timelineAnalyses ?? []);
@@ -2959,6 +2983,7 @@ export function ChessAnalysisLab() {
         setSelectedDeckId(null);
         setActiveDeckCard(null);
         setDeckFeedback(null);
+        setDeckFeedbackArrowsVisible(false);
         setDeckCards([]);
         setOpeningLines([]);
 
@@ -3057,6 +3082,7 @@ export function ChessAnalysisLab() {
     setTimelineError('');
     setActiveDeckCard(null);
     setDeckFeedback(null);
+    setDeckFeedbackArrowsVisible(false);
     positionCacheRef.current.clear();
     positionInFlightRef.current.clear();
     clearSelection();
@@ -3262,6 +3288,9 @@ export function ChessAnalysisLab() {
                   setTimelineLoading(false);
                   setServerError('');
                   setTimelineError('');
+                  setActiveDeckCard(null);
+                  setDeckFeedback(null);
+                  setDeckFeedbackArrowsVisible(false);
                   positionCacheRef.current.clear();
                   positionInFlightRef.current.clear();
                   clearSelection();
@@ -3380,6 +3409,7 @@ export function ChessAnalysisLab() {
                   setTimelineError('');
                   setActiveDeckCard(null);
                   setDeckFeedback(null);
+                  setDeckFeedbackArrowsVisible(false);
                   setTrainAllSession(false);
                   setTrainAllQueue([]);
                   setTrainSessionIndex(0);

@@ -9,11 +9,11 @@ import {
   parseCardMoveReviews,
 } from './card-move-reviews-lib.mjs';
 import { buildTimelineSequencePositions } from '../../lib/chess-analysis-client.ts';
+import { DETERMINISTIC_ANALYSIS_PROFILE } from '../../lib/analysis-profile.ts';
 import { loadLocalEnv, requireAdminKey, requireEnv } from './env.mjs';
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_DEPTH = 14;
-const DEFAULT_MOVETIME_MS = 300;
+const DEFAULT_DEPTH = DETERMINISTIC_ANALYSIS_PROFILE.depth;
 const DEFAULT_BATCH_SIZE = 4;
 
 main().catch(error => {
@@ -27,8 +27,8 @@ async function main() {
   const supabaseUrl = requireEnv(env, 'NEXT_PUBLIC_SUPABASE_URL');
   const serviceRoleKey = requireAdminKey(env);
   const analyzeBaseUrl = env.ANALYZE_BASE_URL?.trim() || 'http://localhost:3000';
-  const depth = Number(env.CARD_REVIEW_DEPTH || DEFAULT_DEPTH);
-  const movetimeMs = Number(env.CARD_REVIEW_MOVETIME_MS || DEFAULT_MOVETIME_MS);
+  const depth = DEFAULT_DEPTH;
+  const movetimeMs = DETERMINISTIC_ANALYSIS_PROFILE.movetimeMs;
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });

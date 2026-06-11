@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Chess } from 'chess.js';
 import { pathToFileURL } from 'node:url';
 
+import { DETERMINISTIC_ANALYSIS_PROFILE } from '../../lib/analysis-profile.ts';
 import { loadLocalEnv, requireAdminKey, requireEnv } from './env.mjs';
 
 const OPENING_REPERTOIRE = [
@@ -18,8 +19,7 @@ const OPENING_REPERTOIRE = [
 const DECK_ID = 'opening-punishments-v1';
 const DEFAULT_PUNISH_THRESHOLD_CP = 30;
 const DEFAULT_ACCEPTABLE_LOSS_CP = 35;
-const DEFAULT_PUNISH_DEPTH = 14;
-const DEFAULT_PUNISH_MOVETIME_MS = 250;
+const DEFAULT_PUNISH_DEPTH = DETERMINISTIC_ANALYSIS_PROFILE.depth;
 const DEFAULT_PUNISH_MULTIPV = 3;
 
 export async function main() {
@@ -29,9 +29,9 @@ export async function main() {
   const analyzeUrl = env.ANALYZE_BASE_URL?.trim() || 'http://localhost:3000';
   const thresholdCp = Number(env.PUNISH_THRESHOLD_CP || DEFAULT_PUNISH_THRESHOLD_CP);
   const acceptableLossCp = Number(env.PUNISH_ACCEPTABLE_LOSS_CP || DEFAULT_ACCEPTABLE_LOSS_CP);
-  const depth = Number(env.PUNISH_DEPTH || DEFAULT_PUNISH_DEPTH);
-  const movetimeMs = Number(env.PUNISH_MOVETIME_MS || DEFAULT_PUNISH_MOVETIME_MS);
-  const multipv = Number(env.PUNISH_MULTIPV || DEFAULT_PUNISH_MULTIPV);
+  const depth = DEFAULT_PUNISH_DEPTH;
+  const movetimeMs = DETERMINISTIC_ANALYSIS_PROFILE.movetimeMs;
+  const multipv = DEFAULT_PUNISH_MULTIPV;
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: {

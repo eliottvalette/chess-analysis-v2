@@ -207,7 +207,6 @@ async function generateRecentDeck(profile: TrainingProfileCookie, body: Record<s
           ...process.env,
           ANALYZE_BASE_URL: analyzeBaseUrl,
         },
-        timeout: 12 * 60 * 1000,
         maxBuffer: 1024 * 1024 * 4,
       },
     );

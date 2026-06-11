@@ -1,32 +1,35 @@
 import { createClient } from '@supabase/supabase-js';
 import { Chess } from 'chess.js';
+import { fileURLToPath } from 'node:url';
 
 import { fetchArchives, fetchRecentGames, extractTag } from './api.mjs';
 import { isMoveInOpeningBook, dedupeTrainingCards, qualifiesAsLineRootMistake } from './deck-mistake-filter.mjs';
+import { DETERMINISTIC_ANALYSIS_PROFILE } from '../../lib/analysis-profile.ts';
 import { loadLocalEnv, requireAdminKey, requireEnv } from '../supabase/env.mjs';
 
 const DEFAULT_COUNT = 10;
 const DEFAULT_TIME_CLASS = 'blitz';
 const DEFAULT_THRESHOLD_CP = 90;
 const DEFAULT_ACCEPTABLE_LOSS_CP = 35;
-const DEFAULT_DEPTH = 12;
-const DEFAULT_MOVETIME_MS = 250;
-const DEFAULT_MULTIPV = 1;
+const DEFAULT_DEPTH = DETERMINISTIC_ANALYSIS_PROFILE.depth;
+const DEFAULT_MULTIPV = DETERMINISTIC_ANALYSIS_PROFILE.multipv;
 const DEFAULT_MAX_PLY = 16;
 const DEFAULT_CONCURRENCY = 2;
 const DECK_ID = 'recent-blitz-trainer-v1';
 const analysisCache = new Map();
 
-main().catch(error => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}
 
 function logProgress(message) {
   console.error(`[deck-build ${new Date().toISOString()}] ${message}`);
 }
 
-async function main() {
+export async function main() {
   const options = parseArgs(process.argv.slice(2));
   const env = loadLocalEnv();
   const username = (options.username || env.CHESSCOM_USERNAME || env.CHESSCOM_DECK_USERNAME || '').trim().toLowerCase();
@@ -39,16 +42,16 @@ async function main() {
 
   const ownerUsername = (options.profile || env.CHESSCOM_DECK_PROFILE || username).trim().toLowerCase();
   const analyzeBaseUrl = env.ANALYZE_BASE_URL?.trim() || 'http://localhost:3000';
-  const depth = Number(env.CHESSCOM_DECK_DEPTH || DEFAULT_DEPTH);
-  const movetimeMs = Number(env.CHESSCOM_DECK_MOVETIME_MS || DEFAULT_MOVETIME_MS);
+  const depth = DEFAULT_DEPTH;
+  const movetimeMs = DETERMINISTIC_ANALYSIS_PROFILE.movetimeMs;
   const thresholdCp = Number(env.CHESSCOM_DECK_THRESHOLD_CP || DEFAULT_THRESHOLD_CP);
   const acceptableLossCp = Number(env.CHESSCOM_DECK_ACCEPTABLE_LOSS_CP || DEFAULT_ACCEPTABLE_LOSS_CP);
-  const multipv = Number(env.CHESSCOM_DECK_MULTIPV || DEFAULT_MULTIPV);
+  const multipv = DEFAULT_MULTIPV;
   const maxPly = Number(env.CHESSCOM_DECK_MAX_PLY || options.maxPly || DEFAULT_MAX_PLY);
   const concurrency = Number(env.CHESSCOM_DECK_CONCURRENCY || options.concurrency || DEFAULT_CONCURRENCY);
 
   logProgress(
-    `starting build username=${username} profile=${ownerUsername || 'global'} count=${options.count} time_class=${options.timeClass} max_ply=${maxPly} depth=${depth} movetime_ms=${movetimeMs} concurrency=${concurrency}`,
+    `starting build username=${username} profile=${ownerUsername || 'global'} count=${options.count} time_class=${options.timeClass} max_ply=${maxPly} depth=${depth} movetime_ms=${movetimeMs ?? 'none'} concurrency=${concurrency}`,
   );
   logProgress(`checking analyze API at ${analyzeBaseUrl}`);
   await assertAnalyzeApi(analyzeBaseUrl);
@@ -129,8 +132,6 @@ async function main() {
 
     await upsertDeck(supabase, deck);
     logProgress(`upserted deck ${deck.id}`);
-    await replaceDeckContents(supabase, deck.id);
-    logProgress(`cleared previous contents for ${deck.id}`);
     await upsert(supabase, 'opening_lines', deckLines, 'id');
     logProgress(`upserted ${deckLines.length} opening lines`);
     await upsert(supabase, 'deck_cards', deckCards, 'id');
@@ -232,7 +233,7 @@ function parseArgs(args) {
   return options;
 }
 
-function buildLineRecord(game, username) {
+export function buildLineRecord(game, username) {
   const playerColor = inferPlayerColor(game, username);
   const trainingSide = oppositeSide(playerColor);
   const eco = extractTag(game.pgn, 'ECO') ?? 'GAME';
@@ -273,7 +274,7 @@ const ECO_NAME_FALLBACKS = new Map([
   ['B13', 'Caro-Kann Defense: Exchange Variation'],
 ]);
 
-async function buildCardsForGame({
+export async function buildCardsForGame({
   game,
   line,
   username,
@@ -426,7 +427,7 @@ async function buildCardsForGame({
   return cards.sort((left, right) => (right.score_swing_cp ?? 0) - (left.score_swing_cp ?? 0));
 }
 
-function loadVerboseMoves(pgn) {
+export function loadVerboseMoves(pgn) {
   const chess = new Chess();
   chess.loadPgn(pgn);
   return chess.history({ verbose: true });
@@ -436,7 +437,7 @@ function extractSanMoves(pgn) {
   return loadVerboseMoves(pgn).map(move => move.san);
 }
 
-function inferPlayerColor(game, username) {
+export function inferPlayerColor(game, username) {
   return game.white?.username?.toLowerCase() === username.toLowerCase() ? 'white' : 'black';
 }
 
@@ -484,7 +485,7 @@ async function analyzePositions(baseUrl, payload) {
   return Array.isArray(parsed.analyses) ? parsed.analyses : [];
 }
 
-async function analyzePositionsCached(baseUrl, { positions, depth, movetimeMs, gameIndex, totalGames }) {
+export async function analyzePositionsCached(baseUrl, { positions, depth, movetimeMs, gameIndex, totalGames }) {
   const analyses = new Array(positions.length);
   const missingPositions = [];
   const missingIndexes = [];
@@ -555,7 +556,7 @@ async function postAnalyzeRequest(baseUrl, path, payload) {
   }
 }
 
-function scoreToCpForSide(score, side) {
+export function scoreToCpForSide(score, side) {
   if (!score) {
     return null;
   }
@@ -564,7 +565,7 @@ function scoreToCpForSide(score, side) {
   return side === 'white' ? whiteScore : -whiteScore;
 }
 
-function moveFromFen(fen, uci) {
+export function moveFromFen(fen, uci) {
   const chess = new Chess(fen);
 
   try {
@@ -609,20 +610,6 @@ async function upsertDeck(supabase, deck) {
 
   if (fallback.error) {
     throw new Error(`decks: ${fallback.error.message}`);
-  }
-}
-
-async function replaceDeckContents(supabase, deckId) {
-  const cardDelete = await supabase.from('deck_cards').delete().eq('deck_id', deckId);
-
-  if (cardDelete.error) {
-    throw new Error(`deck_cards delete: ${cardDelete.error.message}`);
-  }
-
-  const lineDelete = await supabase.from('opening_lines').delete().eq('deck_id', deckId);
-
-  if (lineDelete.error) {
-    throw new Error(`opening_lines delete: ${lineDelete.error.message}`);
   }
 }
 
