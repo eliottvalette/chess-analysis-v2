@@ -186,7 +186,7 @@ test('classifyTimelineMoves scores played moves against the pre-move MultiPV lin
   );
 
   assert.equal(reviews[0]?.cpLossCp, 12);
-  assert.equal(reviews[0]?.category, 'best');
+  assert.equal(reviews[0]?.category, 'excellent');
 });
 
 test('classifyTimelineMoves gives bounded-loss moves a visible fallback category', () => {
@@ -309,7 +309,7 @@ test('classifyReviewCategory falls back to cp loss when expected points are unav
   );
 });
 
-test('classifyReviewCategory treats non-worsening moves as best even when not engine top', () => {
+test('classifyReviewCategory reserves best for the engine top move', () => {
   assert.equal(
     classifyReviewCategory({
       openingBookMove: false,
@@ -328,7 +328,7 @@ test('classifyReviewCategory treats non-worsening moves as best even when not en
       secondBestGapCp: 20,
       ratingFlex: 0.02,
     }),
-    'best',
+    'excellent',
   );
 
   assert.equal(
@@ -349,7 +349,7 @@ test('classifyReviewCategory treats non-worsening moves as best even when not en
       secondBestGapCp: 20,
       ratingFlex: 0.02,
     }),
-    'best',
+    'excellent',
   );
 });
 

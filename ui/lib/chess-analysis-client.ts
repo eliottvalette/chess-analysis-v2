@@ -1173,12 +1173,15 @@ export function classifyReviewCategory({
     afterExpected <= Math.min(0.64, beforeExpected - 0.18);
 
   if (expectedPointsLost != null) {
+    if (bestMovePlayed) {
+      return 'best';
+    }
+
     if (
-      bestMovePlayed ||
       expectedPointsLost <= 0.0005 ||
       (cpLossCp != null && cpLossCp <= 12 + Math.round(ratingFlex * 200))
     ) {
-      return 'best';
+      return 'excellent';
     }
 
     if (expectedPointsLost <= 0.02 + ratingFlex) {
@@ -1204,8 +1207,12 @@ export function classifyReviewCategory({
     return bestMovePlayed ? 'best' : null;
   }
 
-  if (bestMovePlayed || cpLossCp <= 0 || cpLossCp <= 12 + Math.round(ratingFlex * 200)) {
+  if (bestMovePlayed) {
     return 'best';
+  }
+
+  if (cpLossCp <= 0 || cpLossCp <= 12 + Math.round(ratingFlex * 200)) {
+    return 'excellent';
   }
 
   if (cpLossCp <= 28 + Math.round(ratingFlex * 250)) {
