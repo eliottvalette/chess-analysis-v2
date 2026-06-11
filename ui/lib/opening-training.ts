@@ -1,8 +1,8 @@
 import { Chess } from 'chess.js';
 
-import type { AnalysisLine, AnalysisResult, PerspectiveScore } from '@/lib/analysis-types';
-import type { CardMoveReview } from '@/lib/card-move-reviews';
-import { buildStoredMovesFromSanList, restoreGameFromHistory, toStoredMove, type StoredMove } from '@/lib/chess-analysis-client';
+import type { AnalysisLine, AnalysisResult, PerspectiveScore } from './analysis-types';
+import type { CardMoveReview } from './card-move-reviews';
+import { buildStoredMovesFromSanList, restoreGameFromHistory, toStoredMove, type StoredMove } from './chess-analysis-client';
 
 export type TrainingSide = 'white' | 'black';
 export type DeckCardKind = 'punish_mistake' | 'repertoire_choice';
