@@ -1,7 +1,11 @@
 import { Chess } from 'chess.js';
 import type { ChartOptions, PointStyle } from 'chart.js';
 
-import type { AnalysisResult, AnalyzeRequest, PerspectiveScore, PerspectiveWdl, ScoreBound } from '@/lib/analysis-types';
+import type { AnalysisResult, AnalyzeRequest, PerspectiveScore, PerspectiveWdl, ScoreBound } from './analysis-types.ts';
+
+type BrowserAnalysisModule = typeof import('./browser-analysis-engine.ts');
+
+let browserAnalysisModulePromise: Promise<BrowserAnalysisModule> | null = null;
 
 export type StoredMove = {
   from: string;
@@ -183,8 +187,11 @@ export async function analyzeSinglePosition(payload: AnalyzeRequest, signal?: Ab
   logAnalysisFetchStart('position', formatSingleAnalysisFetch(payload));
 
   try {
-    const result = await requestJson<AnalysisResult>('/api/analyze-position', payload, signal);
-    logAnalysisFetchDone('position', startedAt, formatAnalysisResult(result));
+    const browserAnalysis = canUseBrowserAnalysis() ? await getBrowserAnalysisModule() : null;
+    const result = browserAnalysis
+      ? await browserAnalysis.analyzeSinglePositionInBrowser(payload, signal)
+      : await analyzeSinglePositionOnServer(payload, signal);
+    logAnalysisFetchDone('position', startedAt, formatAnalysisResult(result), browserAnalysis ? 'client' : 'server');
     return result;
   } catch (error) {
     logAnalysisFetchFail('position', startedAt, error);
@@ -204,8 +211,11 @@ export async function analyzeGamePositions(
   logAnalysisFetchStart('game', formatBatchAnalysisFetch(payload));
 
   try {
-    const result = await requestJson<{ analyses: AnalysisResult[] }>('/api/analyze-game', payload, signal);
-    logAnalysisFetchDone('game', startedAt, `${result.analyses.length} results`);
+    const browserAnalysis = canUseBrowserAnalysis() ? await getBrowserAnalysisModule() : null;
+    const result = browserAnalysis
+      ? await browserAnalysis.analyzeGamePositionsInBrowser(payload, signal)
+      : await analyzeGamePositionsOnServer(payload, signal);
+    logAnalysisFetchDone('game', startedAt, `${result.analyses.length} results`, browserAnalysis ? 'client' : 'server');
     return result;
   } catch (error) {
     logAnalysisFetchFail('game', startedAt, error);
@@ -255,12 +265,44 @@ function logAnalysisFetchStart(kind: 'position' | 'game', detail: string) {
   console.info(`[analysis:${kind}] -> ${detail}`);
 }
 
-function logAnalysisFetchDone(kind: 'position' | 'game', startedAt: number, detail: string) {
-  console.info(`[analysis:${kind}] <- ${getAnalysisElapsedMs(startedAt)}ms ${detail}`);
+function logAnalysisFetchDone(kind: 'position' | 'game', startedAt: number, detail: string, source: 'client' | 'server') {
+  console.info(`[analysis:${kind}:${source}] <- ${getAnalysisElapsedMs(startedAt)}ms ${detail}`);
 }
 
 function logAnalysisFetchFail(kind: 'position' | 'game', startedAt: number, error: unknown) {
   console.warn(`[analysis:${kind}] !! ${getAnalysisElapsedMs(startedAt)}ms ${error instanceof Error ? error.message : String(error)}`);
+}
+
+function canUseBrowserAnalysis() {
+  return typeof window !== 'undefined' && typeof Worker !== 'undefined' && typeof WebAssembly !== 'undefined';
+}
+
+function getBrowserAnalysisModule() {
+  browserAnalysisModulePromise ??= import('./browser-analysis-engine.ts');
+  return browserAnalysisModulePromise;
+}
+
+function assertServerAnalysisAllowed() {
+  if (typeof window !== 'undefined') {
+    throw new Error('Browser Stockfish WASM is unavailable; server analysis fallback is disabled.');
+  }
+}
+
+function analyzeSinglePositionOnServer(payload: AnalyzeRequest, signal?: AbortSignal) {
+  assertServerAnalysisAllowed();
+  return requestJson<AnalysisResult>('/api/analyze-position', payload, signal);
+}
+
+function analyzeGamePositionsOnServer(
+  payload: {
+    positions: AnalyzeRequest[];
+    depth?: number;
+    movetimeMs?: number;
+  },
+  signal?: AbortSignal,
+) {
+  assertServerAnalysisAllowed();
+  return requestJson<{ analyses: AnalysisResult[] }>('/api/analyze-game', payload, signal);
 }
 
 export function buildStoredMovesFromSanList(initialFen: string | null, sanMoves: string[]) {

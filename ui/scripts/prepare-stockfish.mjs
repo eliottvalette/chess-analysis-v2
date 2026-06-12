@@ -13,8 +13,13 @@ const scriptsDir = path.dirname(fileURLToPath(import.meta.url));
 const projectDir = path.resolve(scriptsDir, '..');
 const outputPath = path.join(projectDir, 'bin', 'stockfish');
 const outputDir = path.dirname(outputPath);
+const browserStockfishDir = path.join(projectDir, 'public', 'stockfish');
+const stockfishPackageBinDir = path.join(projectDir, 'node_modules', 'stockfish', 'bin');
+const browserStockfishAssets = ['stockfish-18-single.js', 'stockfish-18-single.wasm'];
 const shouldPrepare =
   process.env.NETLIFY === 'true' || process.env.VERCEL === '1' || process.env.PREPARE_STOCKFISH === 'true';
+
+await prepareBrowserStockfishAssets();
 
 if (!shouldPrepare) {
   console.log('Skipping Linux Stockfish binary preparation outside Netlify/Vercel.');
@@ -56,6 +61,18 @@ async function fileExists(filePath) {
   } catch {
     return false;
   }
+}
+
+async function prepareBrowserStockfishAssets() {
+  await mkdir(browserStockfishDir, { recursive: true });
+
+  for (const asset of browserStockfishAssets) {
+    const source = path.join(stockfishPackageBinDir, asset);
+    const destination = path.join(browserStockfishDir, asset);
+    await copyFile(source, destination);
+  }
+
+  console.log(`Prepared browser Stockfish assets at ${path.relative(projectDir, browserStockfishDir)}.`);
 }
 
 function downloadFile(url, destination, redirectsLeft = 5) {

@@ -62,6 +62,7 @@ export async function runTimelineAnalysisDedupe({
     const plannedPromise = inFlight ?? deferred?.promise;
 
     if (plannedPromise && !inFlight) {
+      plannedPromise.catch(() => undefined);
       positionInFlight.set(cacheKey, plannedPromise);
     }
 
@@ -74,69 +75,79 @@ export async function runTimelineAnalysisDedupe({
     });
   });
 
-  for (let start = 0; start < missing.length; start += batchSize) {
-    const batch = missing.slice(start, start + batchSize);
-    const alreadyInFlight = batch.filter(item => item.inFlight && !item.deferred);
-    const needsBatchAnalysis = batch.filter(item => item.deferred);
+  try {
+    for (let start = 0; start < missing.length; start += batchSize) {
+      const batch = missing.slice(start, start + batchSize);
+      const alreadyInFlight = batch.filter(item => item.inFlight && !item.deferred);
+      const needsBatchAnalysis = batch.filter(item => item.deferred);
 
-    await Promise.all(
-      alreadyInFlight.map(async item => {
-        const analysis = await item.inFlight;
+      await Promise.all(
+        alreadyInFlight.map(async item => {
+          const analysis = await item.inFlight;
+
+          if (!analysis) {
+            throw new Error('Missing deep analysis result.');
+          }
+
+          cache.set(item.cacheKey, analysis);
+          sequence[item.index] = analysis;
+          completed += 1;
+          reportProgress();
+        }),
+      );
+
+      if (needsBatchAnalysis.length === 0) {
+        continue;
+      }
+
+      const batchKey = needsBatchAnalysis.map(item => item.cacheKey).join('|');
+      let batchPromise = batchInFlight.get(batchKey);
+
+      if (!batchPromise) {
+        batchPromise = analyzeBatch(needsBatchAnalysis.map(item => item.position)).finally(() => {
+          if (batchInFlight.get(batchKey) === batchPromise) {
+            batchInFlight.delete(batchKey);
+          }
+        });
+
+        batchInFlight.set(batchKey, batchPromise);
+      }
+
+      const analyses = await batchPromise.catch(error => {
+        needsBatchAnalysis.forEach(item => {
+          item.deferred?.reject(error);
+          if (positionInFlight.get(item.cacheKey) === item.deferred?.promise) {
+            positionInFlight.delete(item.cacheKey);
+          }
+        });
+        throw error;
+      });
+
+      needsBatchAnalysis.forEach((item, index) => {
+        const analysis = analyses[index];
 
         if (!analysis) {
           throw new Error('Missing deep analysis result.');
         }
 
         cache.set(item.cacheKey, analysis);
-        sequence[item.index] = analysis;
-        completed += 1;
-        reportProgress();
-      }),
-    );
-
-    if (needsBatchAnalysis.length === 0) {
-      continue;
-    }
-
-    const batchKey = needsBatchAnalysis.map(item => item.cacheKey).join('|');
-    let batchPromise = batchInFlight.get(batchKey);
-
-    if (!batchPromise) {
-      batchPromise = analyzeBatch(needsBatchAnalysis.map(item => item.position)).finally(() => {
-        if (batchInFlight.get(batchKey) === batchPromise) {
-          batchInFlight.delete(batchKey);
-        }
-      });
-
-      batchInFlight.set(batchKey, batchPromise);
-    }
-
-    const analyses = await batchPromise.catch(error => {
-      needsBatchAnalysis.forEach(item => {
-        item.deferred?.reject(error);
+        item.deferred?.resolve(analysis);
         if (positionInFlight.get(item.cacheKey) === item.deferred?.promise) {
           positionInFlight.delete(item.cacheKey);
         }
+        sequence[item.index] = analysis;
+        completed += 1;
+        reportProgress();
       });
-      throw error;
-    });
-
-    needsBatchAnalysis.forEach((item, index) => {
-      const analysis = analyses[index];
-
-      if (!analysis) {
-        throw new Error('Missing deep analysis result.');
-      }
-
-      cache.set(item.cacheKey, analysis);
-      item.deferred?.resolve(analysis);
+    }
+  } catch (error) {
+    missing.forEach(item => {
+      item.deferred?.reject(error);
       if (positionInFlight.get(item.cacheKey) === item.deferred?.promise) {
         positionInFlight.delete(item.cacheKey);
       }
-      sequence[item.index] = analysis;
-      completed += 1;
-      reportProgress();
     });
+    throw error;
   }
 
   onProgress?.(100);

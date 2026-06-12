@@ -102,11 +102,13 @@ const RECENT_GAMES_PAGE_SIZE = 10;
 const RECENT_GAMES_AUTO_REFRESH_MS = 90_000;
 const RECENT_GAMES_INTERACTION_IDLE_MS = 2_500;
 const RECENT_GAMES_PRELOAD_SCAN_MS = 1_000;
-const GAME_ANALYSIS_CACHE_VERSION = DETERMINISTIC_ANALYSIS_PROFILE.version;
+const GAME_ANALYSIS_CACHE_VERSION = DETERMINISTIC_ANALYSIS_PROFILE.version + 1;
+const TIMELINE_ANALYSIS_PROFILE_KEY = 'game-review-depth17-v1';
 
 type CachedTimelineAnalysis = {
   quality: 'refined';
   version?: number;
+  profileKey?: string;
   preMoveAnalyses: AnalysisResult[];
   timelineAnalyses: AnalysisResult[];
   updatedAt?: string;
@@ -364,6 +366,7 @@ async function saveCachedTimelineAnalysis({
   recentGameAnalysisMemoryCache.set(cacheKey, {
     quality: 'refined',
     version: GAME_ANALYSIS_CACHE_VERSION,
+    profileKey: TIMELINE_ANALYSIS_PROFILE_KEY,
     preMoveAnalyses,
     timelineAnalyses,
     updatedAt: new Date().toISOString(),
@@ -381,6 +384,7 @@ async function saveCachedTimelineAnalysis({
       analysis: {
         quality: 'refined',
         version: GAME_ANALYSIS_CACHE_VERSION,
+        profileKey: TIMELINE_ANALYSIS_PROFILE_KEY,
         preMoveAnalyses,
         timelineAnalyses,
       },
@@ -389,6 +393,26 @@ async function saveCachedTimelineAnalysis({
   } catch {
     // Best-effort persistence only.
   }
+}
+
+function isUsableCachedTimelineAnalysis(
+  analysis: CachedTimelineAnalysis | null | undefined,
+  moveCount: number,
+): analysis is CachedTimelineAnalysis {
+  if (
+    !analysis ||
+    analysis.version !== GAME_ANALYSIS_CACHE_VERSION ||
+    analysis.profileKey !== TIMELINE_ANALYSIS_PROFILE_KEY
+  ) {
+    return false;
+  }
+
+  const analyzedPlies = analysis.timelineAnalyses.length;
+  return (
+    analyzedPlies > 0 &&
+    analyzedPlies === moveCount &&
+    analysis.preMoveAnalyses.length === analyzedPlies
+  );
 }
 
 type TrainingProfile = {
@@ -942,13 +966,14 @@ export function ChessAnalysisLab() {
       onProgress?: (progress: number) => void,
     ) => {
       const positions = buildTimelineSequencePositions(moves, requestInitialFen);
+
       return runTimelineAnalysisDedupe({
         positions,
         cache: positionCacheRef.current,
         positionInFlight: positionInFlightRef.current,
         batchInFlight: timelineBatchInFlightRef.current,
         batchSize: TIMELINE_ANALYSIS_BATCH_SIZE,
-        getCacheKey: position => getPositionCacheKey(requestInitialFen, position.moves ?? []),
+        getCacheKey: position => getTimelinePositionCacheKey(requestInitialFen, position.moves ?? []),
         buildRequest: position => buildDeterministicAnalyzeRequest({
           ...position,
           initialFen: requestInitialFen,
@@ -2653,12 +2678,9 @@ export function ChessAnalysisLab() {
       const nextInitialFen = loadedGame.header().FEN ?? null;
       const nextHistory = loadedGame.history({ verbose: true }).map(toStoredMove);
       const nextGame = restoreGameFromHistory(nextHistory, nextInitialFen, 0);
+      const requestedCachedAnalysis = options?.cachedAnalysis ?? null;
       const cachedAnalysis =
-        options?.cachedAnalysis &&
-        options.cachedAnalysis.preMoveAnalyses.length === nextHistory.length &&
-        options.cachedAnalysis.timelineAnalyses.length === nextHistory.length
-          ? options.cachedAnalysis
-          : null;
+        isUsableCachedTimelineAnalysis(requestedCachedAnalysis, nextHistory.length) ? requestedCachedAnalysis : null;
 
       const nextMetadata = extractMetadataFromGame(loadedGame);
 
@@ -2776,11 +2798,7 @@ export function ChessAnalysisLab() {
           return;
         }
 
-        if (
-          analysis &&
-          analysis.preMoveAnalyses.length === nextHistory.length &&
-          analysis.timelineAnalyses.length === nextHistory.length
-        ) {
+        if (isUsableCachedTimelineAnalysis(analysis, nextHistory.length)) {
           setPreMoveAnalyses(analysis.preMoveAnalyses);
           setTimelineAnalyses(analysis.timelineAnalyses);
           setTimelineReviews(
@@ -3478,20 +3496,19 @@ function buildTimelineReviews(
   requestInitialFen: string | null,
   requestMetadata: GameMetadata | null,
 ): TimelineReview[] {
-  if (
-    moves.length === 0 ||
-    preMoveAnalyses.length !== moves.length ||
-    timelineAnalyses.length !== moves.length
-  ) {
+  const reviewedMoveCount = Math.min(moves.length, preMoveAnalyses.length, timelineAnalyses.length);
+
+  if (reviewedMoveCount === 0) {
     return [];
   }
 
-  const openingBookFlags = resolveOpeningBookFlagsLocal(moves, requestInitialFen);
+  const reviewedMoves = moves.slice(0, reviewedMoveCount);
+  const openingBookFlags = resolveOpeningBookFlagsLocal(reviewedMoves, requestInitialFen);
 
   return classifyTimelineMoves(
-    moves,
-    preMoveAnalyses,
-    timelineAnalyses,
+    reviewedMoves,
+    preMoveAnalyses.slice(0, reviewedMoveCount),
+    timelineAnalyses.slice(0, reviewedMoveCount),
     requestInitialFen,
     requestMetadata,
     openingBookFlags,
@@ -3500,6 +3517,10 @@ function buildTimelineReviews(
 
 function getPositionCacheKey(initialFen: string | null, moves: string[]) {
   return `analysis:v${GAME_ANALYSIS_CACHE_VERSION}:${initialFen ?? 'startpos'}|${moves.join(' ')}`;
+}
+
+function getTimelinePositionCacheKey(initialFen: string | null, moves: string[]) {
+  return `timeline:${TIMELINE_ANALYSIS_PROFILE_KEY}:d${DETERMINISTIC_ANALYSIS_PROFILE.depth}:${initialFen ?? 'startpos'}|${moves.join(' ')}`;
 }
 
 function mergeDeckProgress(serverProgress: DeckProgressMap, localProgress: DeckProgressMap) {
