@@ -6,6 +6,7 @@ type TimelinePosition = AnalyzeRequest & {
 
 type TimelineAnalysisRunnerOptions = {
   label?: string;
+  signal?: AbortSignal;
   positions: TimelinePosition[];
   cache: Map<string, AnalysisResult>;
   positionInFlight: Map<string, Promise<AnalysisResult>>;
@@ -13,12 +14,13 @@ type TimelineAnalysisRunnerOptions = {
   batchSize: number;
   getCacheKey: (position: TimelinePosition) => string;
   buildRequest: (position: TimelinePosition) => AnalyzeRequest;
-  analyzeBatch: (positions: AnalyzeRequest[]) => Promise<AnalysisResult[]>;
+  analyzeBatch: (positions: AnalyzeRequest[], signal?: AbortSignal) => Promise<AnalysisResult[]>;
   onProgress?: (progress: number) => void;
 };
 
 export async function runTimelineAnalysisDedupe({
   label = 'timeline',
+  signal,
   positions,
   cache,
   positionInFlight,
@@ -44,6 +46,8 @@ export async function runTimelineAnalysisDedupe({
     logTimelineAnalysis(label, `progress ${completed}/${positions.length} ${Math.round(progress)}%`);
     onProgress?.(progress);
   };
+
+  throwIfAborted(signal);
 
   logTimelineAnalysis(label, `start positions=${positions.length} batch=${batchSize} cache=${cache.size} position_inflight=${positionInFlight.size} batch_inflight=${batchInFlight.size}`);
 
@@ -86,6 +90,7 @@ export async function runTimelineAnalysisDedupe({
 
   try {
     for (let start = 0; start < missing.length; start += batchSize) {
+      throwIfAborted(signal);
       const batch = missing.slice(start, start + batchSize);
       const alreadyInFlight = batch.filter(item => item.inFlight && !item.deferred);
       const needsBatchAnalysis = batch.filter(item => item.deferred);
@@ -96,6 +101,7 @@ export async function runTimelineAnalysisDedupe({
 
       await Promise.all(
         alreadyInFlight.map(async item => {
+          throwIfAborted(signal);
           const analysis = await item.inFlight;
 
           if (!analysis) {
@@ -118,7 +124,7 @@ export async function runTimelineAnalysisDedupe({
 
       if (!batchPromise) {
         logTimelineAnalysis(label, `batch-start count=${needsBatchAnalysis.length} indexes=${formatTimelineIndexes(needsBatchAnalysis.map(item => item.index))}`);
-        batchPromise = analyzeBatch(needsBatchAnalysis.map(item => item.position)).finally(() => {
+        batchPromise = analyzeBatch(needsBatchAnalysis.map(item => item.position), signal).finally(() => {
           if (batchInFlight.get(batchKey) === batchPromise) {
             batchInFlight.delete(batchKey);
           }
@@ -142,6 +148,7 @@ export async function runTimelineAnalysisDedupe({
       logTimelineAnalysis(label, `batch-done count=${analyses.length} elapsed=${getTimelineElapsedMs(startedAt)}ms`);
 
       needsBatchAnalysis.forEach((item, index) => {
+        throwIfAborted(signal);
         const analysis = analyses[index];
 
         if (!analysis) {
@@ -194,6 +201,12 @@ function getTimelineElapsedMs(startedAt: number) {
 
 function logTimelineAnalysis(label: string, detail: string) {
   console.info(`[timeline:${label}] ${detail}`);
+}
+
+function throwIfAborted(signal: AbortSignal | undefined) {
+  if (signal?.aborted) {
+    throw new DOMException('Analysis aborted.', 'AbortError');
+  }
 }
 
 function createAnalysisDeferred() {

@@ -19,7 +19,7 @@ type PendingRun = {
   predicate: (line: string, lines: string[]) => boolean;
   resolve: (lines: string[]) => void;
   reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout> | null;
   abort?: () => void;
 };
 
@@ -30,7 +30,7 @@ const BROWSER_ENGINE_STORE_NAME = 'analysis';
 const BROWSER_ENGINE_MAX_CACHE_ENTRIES = 6_000;
 const BROWSER_ENGINE_DEFAULT_POOL_SIZE = 2;
 const BROWSER_ENGINE_MAX_POOL_SIZE = 2;
-const BROWSER_ENGINE_TIMEOUT_MS = 30_000;
+const BROWSER_ENGINE_TIMEOUT_MS = 120_000;
 const STOCKFISH_SCRIPT_URL = '/stockfish/stockfish-18-single.js#/stockfish/stockfish-18-single.wasm';
 
 let browserEnginePool: Promise<BrowserStockfishSession[]> | null = null;
@@ -158,7 +158,7 @@ class BrowserStockfishSession {
         ['setoption name Clear Hash', `setoption name MultiPV value ${multipv}`, positionCommand, searchCommand],
         line => line.startsWith('bestmove '),
         signal,
-        movetimeMs == null ? BROWSER_ENGINE_TIMEOUT_MS : Math.max(BROWSER_ENGINE_TIMEOUT_MS, movetimeMs + 5_000),
+        movetimeMs == null ? null : Math.max(BROWSER_ENGINE_TIMEOUT_MS, movetimeMs + 5_000),
       );
 
       const analysis = parseAnalysis(lines, analysisFen, depth);
@@ -191,7 +191,7 @@ class BrowserStockfishSession {
     commands: string[],
     predicate: (line: string, lines: string[]) => boolean,
     signal?: AbortSignal,
-    timeoutMs = BROWSER_ENGINE_TIMEOUT_MS,
+    timeoutMs: number | null = BROWSER_ENGINE_TIMEOUT_MS,
   ) {
     return new Promise<string[]>((resolve, reject) => {
       if (this.pending) {
@@ -204,22 +204,26 @@ class BrowserStockfishSession {
         return;
       }
 
-      const timer = setTimeout(() => {
-        const active = this.pending;
-        this.pending = null;
-        reject(
-          new Error(
-            `Browser Stockfish timeout after ${timeoutMs}ms.${active ? ` Last lines: ${active.lines.slice(-6).join(' | ')}` : ''}`,
-          ),
-        );
-      }, timeoutMs);
+      const timer = timeoutMs == null
+        ? null
+        : setTimeout(() => {
+            const active = this.pending;
+            this.pending = null;
+            reject(
+              new Error(
+                `Browser Stockfish timeout after ${timeoutMs}ms.${active ? ` Last lines: ${active.lines.slice(-6).join(' | ')}` : ''}`,
+              ),
+            );
+          }, timeoutMs);
 
       const abort = () => {
         const active = this.pending;
         if (active) {
           this.worker.postMessage('stop');
           this.pending = null;
-          clearTimeout(active.timer);
+          if (active.timer) {
+            clearTimeout(active.timer);
+          }
           active.reject(new DOMException('Analysis aborted.', 'AbortError'));
         }
       };
@@ -258,7 +262,9 @@ class BrowserStockfishSession {
     if (this.pending.predicate(line, this.pending.lines)) {
       const current = this.pending;
       this.pending = null;
-      clearTimeout(current.timer);
+      if (current.timer) {
+        clearTimeout(current.timer);
+      }
       current.resolve(current.lines);
     }
   }
@@ -267,7 +273,9 @@ class BrowserStockfishSession {
     const current = this.pending;
     this.pending = null;
     if (current) {
-      clearTimeout(current.timer);
+      if (current.timer) {
+        clearTimeout(current.timer);
+      }
     }
     current?.reject(error);
   }

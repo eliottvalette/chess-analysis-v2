@@ -578,6 +578,7 @@ export function ChessAnalysisLab() {
   const recentAutoFetchStartedRef = useRef(false);
   const recentPreloadBusyRef = useRef(false);
   const recentPreloadRequestIdRef = useRef(0);
+  const recentPreloadAbortRef = useRef<AbortController | null>(null);
   const recentPreloadedKeysRef = useRef(new Set<string>());
   const activeRecentGameCacheKeyRef = useRef<string | null>(null);
   const activeRecentGameLinkRef = useRef<string | null>(null);
@@ -965,12 +966,14 @@ export function ChessAnalysisLab() {
       requestInitialFen: string | null,
       onProgress?: (progress: number) => void,
       label = 'review',
+      signal?: AbortSignal,
     ) => {
       const positions = buildTimelineSequencePositions(moves, requestInitialFen);
 
       return runTimelineAnalysisDedupe({
         label,
         positions,
+        signal,
         cache: positionCacheRef.current,
         positionInFlight: positionInFlightRef.current,
         batchInFlight: timelineBatchInFlightRef.current,
@@ -980,11 +983,11 @@ export function ChessAnalysisLab() {
           ...position,
           initialFen: requestInitialFen,
         }),
-        analyzeBatch: async batchPositions => {
+        analyzeBatch: async (batchPositions, batchSignal) => {
           const response = await analyzeGamePositions({
             positions: batchPositions,
             depth: DETERMINISTIC_ANALYSIS_PROFILE.depth,
-          });
+          }, batchSignal);
           return response.analyses ?? [];
         },
         onProgress,
@@ -992,6 +995,19 @@ export function ChessAnalysisLab() {
     },
     [],
   );
+
+  const cancelRecentPreload = useCallback((reason: string) => {
+    const hadPreload = recentPreloadBusyRef.current || recentPreloadAbortRef.current != null;
+    recentPreloadRequestIdRef.current += 1;
+    recentPreloadAbortRef.current?.abort();
+    recentPreloadAbortRef.current = null;
+    recentPreloadBusyRef.current = false;
+    timelineBatchInFlightRef.current.clear();
+    positionInFlightRef.current.clear();
+    if (hadPreload) {
+      logRecentGamePreload('cancel', reason);
+    }
+  }, []);
 
   useEffect(() => {
     const stage = boardStageRef.current;
@@ -1441,6 +1457,8 @@ export function ChessAnalysisLab() {
     const cacheKey = getRecentGameCacheKey(nextGame);
     recentPreloadedKeysRef.current.add(cacheKey);
     recentPreloadBusyRef.current = true;
+    let requestId = 0;
+    let preloadAbortController: AbortController | null = null;
 
     try {
       const cached = await loadCachedTimelineAnalysis(cacheKey);
@@ -1450,7 +1468,9 @@ export function ChessAnalysisLab() {
         return;
       }
 
-      const requestId = ++recentPreloadRequestIdRef.current;
+      requestId = ++recentPreloadRequestIdRef.current;
+      preloadAbortController = new AbortController();
+      recentPreloadAbortRef.current = preloadAbortController;
       const preloadPromise = (async (): Promise<CachedTimelineAnalysis | null> => {
         const preloadGame = new Chess();
         preloadGame.loadPgn(nextGame.pgn);
@@ -1467,6 +1487,7 @@ export function ChessAnalysisLab() {
           nextInitialFen,
           undefined,
           `preload:${formatRecentGameLogLabel(nextGame)}`,
+          preloadAbortController.signal,
         );
 
         if (recentPreloadRequestIdRef.current !== requestId) {
@@ -1502,9 +1523,15 @@ export function ChessAnalysisLab() {
       setRecentPreloadTick(tick => tick + 1);
     } catch (error) {
       recentPreloadedKeysRef.current.delete(cacheKey);
-      logRecentGamePreload('fail', `${formatRecentGameLogLabel(nextGame)} ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      logRecentGamePreload(message === 'Analysis aborted.' ? 'cancel' : 'fail', `${formatRecentGameLogLabel(nextGame)} ${message}`);
     } finally {
-      recentPreloadBusyRef.current = false;
+      if (requestId === 0 || recentPreloadRequestIdRef.current === requestId) {
+        recentPreloadBusyRef.current = false;
+        if (preloadAbortController && recentPreloadAbortRef.current === preloadAbortController) {
+          recentPreloadAbortRef.current = null;
+        }
+      }
       recentGameAnalysisInFlightCache.delete(cacheKey);
     }
   }, [analyzeTimelineDeep, positionLoading, recentChessGames, timelineLoading]);
@@ -1876,7 +1903,7 @@ export function ChessAnalysisLab() {
   }, [activeDeckCard, deckFeedback, fetchCachedPositionAnalysis, initialFen, moveHistory]);
 
   useEffect(() => {
-    if (moveHistory.length === 0 || historyIndex >= moveHistory.length) {
+    if (timelineLoading || moveHistory.length === 0 || historyIndex >= moveHistory.length) {
       return;
     }
 
@@ -1895,7 +1922,7 @@ export function ChessAnalysisLab() {
     }, 180);
 
     return () => window.clearTimeout(timer);
-  }, [fetchCachedPositionAnalysis, historyIndex, initialFen, moveHistory]);
+  }, [fetchCachedPositionAnalysis, historyIndex, initialFen, moveHistory, timelineLoading]);
 
   useEffect(() => {
     setReviewIndex(value => Math.max(0, Math.min(value, Math.max(0, reviewMoments.length - 1))));
@@ -2587,6 +2614,7 @@ export function ChessAnalysisLab() {
     nextInitialFen = initialFen,
     nextMetadata: GameMetadata | null = metadata,
   ) {
+    cancelRecentPreload('interactive review started');
     const requestId = ++timelineRequestIdRef.current;
     timelineRefineRequestIdRef.current += 1;
 
@@ -2671,6 +2699,7 @@ export function ChessAnalysisLab() {
       blackAvatarUrl?: string | null;
     },
   ) {
+    cancelRecentPreload('game opened');
     persistTrainWorkspaceSnapshot();
     reviewWorkspaceSnapshotRef.current = null;
     timelineRefineRequestIdRef.current += 1;
