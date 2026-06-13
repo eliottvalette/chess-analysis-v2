@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
+import { Chess } from 'chess.js';
 import { fileURLToPath } from 'node:url';
 
 import { fetchArchives, fetchRecentGames } from '../chesscom/api.mjs';
 import { dedupeTrainingCards } from '../chesscom/deck-mistake-filter.mjs';
-import { buildCardsForGame, buildLineRecord, moveFromFen, scoreToCpForSide } from '../chesscom/build-recent-blitz-deck.mjs';
+import { buildCardsForGame, buildLineRecord, scoreToCpForSide } from '../chesscom/build-recent-blitz-deck.mjs';
 import {
   DEFAULT_ANALYZE_BASE_URL,
   analyzePositionsCached,
@@ -103,7 +104,12 @@ export async function main() {
   }
 
   const cards = await attachMoveReviews({
-    cards: dedupeTrainingCards(rawCards).map(card => ({ ...card, deck_id: deckId })),
+    cards: await applyVerifiedCardAnswers({
+      cards: dedupeTrainingCards(rawCards).map(card => ({ ...card, deck_id: deckId })),
+      baseUrl: options.baseUrl,
+      profile,
+      analysisCache,
+    }),
     baseUrl: options.baseUrl,
     profile,
     analysisCache,
@@ -164,38 +170,39 @@ async function auditCardAnswers({ cards, baseUrl, profile, analysisCache }) {
   let missingBestCount = 0;
 
   for (const card of cards) {
-    const analysis = await analyzeSingleCached(baseUrl, {
-      position: {
-        fen: card.fen,
-        multipv: profile.multipv,
-      },
+    const verified = await resolveVerifiedCardAnswer({
+      card,
+      baseUrl,
       profile,
-      cache: analysisCache,
+      analysisCache,
     });
-    const bestMove = analysis?.bestMove ?? null;
 
-    if (!bestMove) {
+    if (!verified) {
       missingBestCount += 1;
       continue;
     }
 
-    if (bestMove !== card.answer_uci) {
-      const bestMoveSan = moveFromFen(card.fen, bestMove)?.san ?? bestMove;
-      const referenceEvalCp = scoreToCpForSide(analysis.whitePerspective, card.side === 'black' ? 'black' : 'white');
+    if (
+      verified.answer_uci !== card.answer_uci ||
+      verified.answer_san !== card.answer_san ||
+      verified.reference_eval_cp !== (card.reference_eval_cp ?? null)
+    ) {
       mismatches.push({
         id: card.id,
         source_type: card.source_type ?? null,
         fen: card.fen,
         answer_uci: card.answer_uci,
-        deterministic_best_uci: bestMove,
+        deterministic_best_uci: verified.answer_uci,
         answer_san: card.answer_san,
-        deterministic_best_san: bestMoveSan,
+        deterministic_best_san: verified.answer_san,
+        reference_eval_cp: card.reference_eval_cp ?? null,
+        deterministic_reference_eval_cp: verified.reference_eval_cp,
       });
       fixes.push({
         id: card.id,
-        answer_uci: bestMove,
-        answer_san: bestMoveSan,
-        reference_eval_cp: referenceEvalCp == null ? null : Math.round(referenceEvalCp),
+        answer_uci: verified.answer_uci,
+        answer_san: verified.answer_san,
+        reference_eval_cp: verified.reference_eval_cp,
       });
     }
   }
@@ -207,6 +214,105 @@ async function auditCardAnswers({ cards, baseUrl, profile, analysisCache }) {
     mismatches: mismatches.slice(0, 30),
     fixes,
   };
+}
+
+async function applyVerifiedCardAnswers({ cards, baseUrl, profile, analysisCache }) {
+  const verifiedCards = [];
+
+  for (const card of cards) {
+    const verified = await resolveVerifiedCardAnswer({
+      card,
+      baseUrl,
+      profile,
+      analysisCache,
+    });
+
+    verifiedCards.push(verified ? { ...card, ...verified } : card);
+  }
+
+  return verifiedCards;
+}
+
+async function resolveVerifiedCardAnswer({ card, baseUrl, profile, analysisCache }) {
+  const rootAnalysis = await analyzeSingleCached(baseUrl, {
+    position: {
+      fen: card.fen,
+      multipv: profile.multipv,
+    },
+    profile,
+    cache: analysisCache,
+  });
+  const candidates = getRootCandidateMoves(rootAnalysis).slice(0, 3);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const side = card.side === 'black' ? 'black' : 'white';
+  const verified = [];
+
+  for (const answerUci of candidates) {
+    const chess = new Chess(card.fen);
+    const move = chess.move({
+      from: answerUci.slice(0, 2),
+      to: answerUci.slice(2, 4),
+      ...(answerUci[4] ? { promotion: answerUci[4] } : {}),
+    });
+
+    if (!move) {
+      continue;
+    }
+
+    const postMoveAnalysis = await analyzeSingleCached(baseUrl, {
+      position: {
+        fen: chess.fen(),
+        multipv: 1,
+      },
+      profile,
+      cache: analysisCache,
+    });
+    const scoreCp = scoreToCpForSide(postMoveAnalysis.whitePerspective, side);
+
+    verified.push({
+      answer_uci: answerUci,
+      answer_san: move.san,
+      reference_eval_cp: scoreCp == null ? null : Math.round(scoreCp),
+    });
+  }
+
+  if (verified.length === 0) {
+    return null;
+  }
+
+  return verified.reduce((best, candidate) => {
+    if (best.reference_eval_cp == null) {
+      return candidate;
+    }
+
+    if (candidate.reference_eval_cp != null && candidate.reference_eval_cp > best.reference_eval_cp) {
+      return candidate;
+    }
+
+    return best;
+  }, verified[0]);
+}
+
+function getRootCandidateMoves(analysis) {
+  const candidates = new Set();
+
+  for (const line of analysis?.lines ?? []) {
+    const move = line.bestMove ?? line.pv?.[0] ?? null;
+
+    if (move) {
+      candidates.add(move);
+    }
+  }
+
+  if (analysis?.bestMove) {
+    candidates.add(analysis.bestMove);
+  }
+
+  return [...candidates];
 }
 
 async function attachMoveReviews({ cards, baseUrl, profile, analysisCache }) {

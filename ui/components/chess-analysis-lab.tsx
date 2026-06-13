@@ -60,8 +60,8 @@ import {
   type DeckCard,
   type DeckFeedback,
   type OpeningSeedLine,
-  scoreToCpForSide,
 } from '@/lib/opening-training';
+import { resolvePostMoveVerifiedReviewCardAnswer } from '@/lib/review-card-answer';
 import {
   applyDeckAttempt,
   buildMixedTrainingQueue,
@@ -3024,14 +3024,19 @@ export function ChessAnalysisLab() {
     setDeckActionError('');
 
     try {
-      const bestMove = displayAnalysis?.bestMove;
+      const rootAnalysis = displayAnalysis;
       const side = game.turn() === 'b' ? 'black' : 'white';
-      const referenceEvalCp = scoreToCpForSide(displayAnalysis?.whitePerspective, side);
 
-      if (!selectedDeckId || !bestMove) {
+      if (!selectedDeckId || !rootAnalysis?.bestMove) {
         throw new Error('Choose a deck and wait for analysis before saving.');
       }
 
+      const verifiedAnswer = await resolvePostMoveVerifiedReviewCardAnswer({
+        fen: currentFen,
+        side,
+        rootAnalysis,
+        analyzePosition: request => analyzeSinglePosition(request),
+      });
       const setupMoves = saveReplayFromStart ? currentMoves.map(move => move.san) : [];
       const replayFromStart = saveReplayFromStart && setupMoves.length > 0;
       const moveReviews = replayFromStart ? cardMoveReviewsFromTimeline(timelineReviews, setupMoves.length) : [];
@@ -3049,11 +3054,11 @@ export function ChessAnalysisLab() {
             side,
             ply: historyIndex,
             fen: currentFen,
-            answerUci: bestMove,
-            answerSan: formatBestMove(currentFen, bestMove),
+            answerUci: verifiedAnswer.answerUci,
+            answerSan: verifiedAnswer.answerSan,
             prompt: `${side === 'white' ? 'White' : 'Black'} to move: find the best response.`,
             context: currentMoves.length > 0 ? currentMoves.map(move => move.san).join(' ') : 'Starting position',
-            referenceEvalCp,
+            referenceEvalCp: verifiedAnswer.referenceEvalCp,
             replayFromStart,
             initialFen: replayFromStart ? initialFen : null,
             setupMoves,
