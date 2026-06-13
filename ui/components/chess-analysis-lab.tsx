@@ -964,10 +964,12 @@ export function ChessAnalysisLab() {
       moves: StoredMove[],
       requestInitialFen: string | null,
       onProgress?: (progress: number) => void,
+      label = 'review',
     ) => {
       const positions = buildTimelineSequencePositions(moves, requestInitialFen);
 
       return runTimelineAnalysisDedupe({
+        label,
         positions,
         cache: positionCacheRef.current,
         positionInFlight: positionInFlightRef.current,
@@ -1460,7 +1462,12 @@ export function ChessAnalysisLab() {
         }
 
         logRecentGamePreload('start', `${formatRecentGameLogLabel(nextGame)} ${nextHistory.length} plies`);
-        const sequence = await analyzeTimelineDeep(nextHistory, nextInitialFen);
+        const sequence = await analyzeTimelineDeep(
+          nextHistory,
+          nextInitialFen,
+          undefined,
+          `preload:${formatRecentGameLogLabel(nextGame)}`,
+        );
 
         if (recentPreloadRequestIdRef.current !== requestId) {
           return null;
@@ -2602,7 +2609,7 @@ export function ChessAnalysisLab() {
         if (timelineRequestIdRef.current === requestId) {
           setTimelineProgress(TIMELINE_ENGINE_PROGRESS_OFFSET + progress * TIMELINE_ENGINE_PROGRESS_WEIGHT);
         }
-      });
+      }, 'review');
 
       if (timelineRequestIdRef.current !== requestId) {
         return;

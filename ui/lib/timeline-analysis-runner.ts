@@ -5,6 +5,7 @@ type TimelinePosition = AnalyzeRequest & {
 };
 
 type TimelineAnalysisRunnerOptions = {
+  label?: string;
   positions: TimelinePosition[];
   cache: Map<string, AnalysisResult>;
   positionInFlight: Map<string, Promise<AnalysisResult>>;
@@ -17,6 +18,7 @@ type TimelineAnalysisRunnerOptions = {
 };
 
 export async function runTimelineAnalysisDedupe({
+  label = 'timeline',
   positions,
   cache,
   positionInFlight,
@@ -36,9 +38,14 @@ export async function runTimelineAnalysisDedupe({
     deferred?: ReturnType<typeof createAnalysisDeferred>;
   }> = [];
   let completed = 0;
+  const startedAt = getTimelineLogTime();
   const reportProgress = () => {
-    onProgress?.((completed / Math.max(1, positions.length)) * 100);
+    const progress = (completed / Math.max(1, positions.length)) * 100;
+    logTimelineAnalysis(label, `progress ${completed}/${positions.length} ${Math.round(progress)}%`);
+    onProgress?.(progress);
   };
+
+  logTimelineAnalysis(label, `start positions=${positions.length} batch=${batchSize} cache=${cache.size} position_inflight=${positionInFlight.size} batch_inflight=${batchInFlight.size}`);
 
   reportProgress();
 
@@ -75,11 +82,17 @@ export async function runTimelineAnalysisDedupe({
     });
   });
 
+  logTimelineAnalysis(label, `planned cached=${completed} missing=${missing.length} reused_inflight=${missing.filter(item => item.inFlight && !item.deferred).length}`);
+
   try {
     for (let start = 0; start < missing.length; start += batchSize) {
       const batch = missing.slice(start, start + batchSize);
       const alreadyInFlight = batch.filter(item => item.inFlight && !item.deferred);
       const needsBatchAnalysis = batch.filter(item => item.deferred);
+
+      if (alreadyInFlight.length > 0) {
+        logTimelineAnalysis(label, `await-inflight count=${alreadyInFlight.length} indexes=${formatTimelineIndexes(alreadyInFlight.map(item => item.index))}`);
+      }
 
       await Promise.all(
         alreadyInFlight.map(async item => {
@@ -104,6 +117,7 @@ export async function runTimelineAnalysisDedupe({
       let batchPromise = batchInFlight.get(batchKey);
 
       if (!batchPromise) {
+        logTimelineAnalysis(label, `batch-start count=${needsBatchAnalysis.length} indexes=${formatTimelineIndexes(needsBatchAnalysis.map(item => item.index))}`);
         batchPromise = analyzeBatch(needsBatchAnalysis.map(item => item.position)).finally(() => {
           if (batchInFlight.get(batchKey) === batchPromise) {
             batchInFlight.delete(batchKey);
@@ -111,6 +125,8 @@ export async function runTimelineAnalysisDedupe({
         });
 
         batchInFlight.set(batchKey, batchPromise);
+      } else {
+        logTimelineAnalysis(label, `batch-reuse count=${needsBatchAnalysis.length} indexes=${formatTimelineIndexes(needsBatchAnalysis.map(item => item.index))}`);
       }
 
       const analyses = await batchPromise.catch(error => {
@@ -122,6 +138,8 @@ export async function runTimelineAnalysisDedupe({
         });
         throw error;
       });
+
+      logTimelineAnalysis(label, `batch-done count=${analyses.length} elapsed=${getTimelineElapsedMs(startedAt)}ms`);
 
       needsBatchAnalysis.forEach((item, index) => {
         const analysis = analyses[index];
@@ -141,6 +159,7 @@ export async function runTimelineAnalysisDedupe({
       });
     }
   } catch (error) {
+    logTimelineAnalysis(label, `fail elapsed=${getTimelineElapsedMs(startedAt)}ms ${error instanceof Error ? error.message : String(error)}`);
     missing.forEach(item => {
       item.deferred?.reject(error);
       if (positionInFlight.get(item.cacheKey) === item.deferred?.promise) {
@@ -151,7 +170,30 @@ export async function runTimelineAnalysisDedupe({
   }
 
   onProgress?.(100);
+  logTimelineAnalysis(label, `done positions=${positions.length} elapsed=${getTimelineElapsedMs(startedAt)}ms`);
   return sequence;
+}
+
+function formatTimelineIndexes(indexes: number[]) {
+  if (indexes.length === 0) {
+    return '-';
+  }
+
+  const first = indexes[0];
+  const last = indexes[indexes.length - 1];
+  return first === last ? String(first) : `${first}-${last}`;
+}
+
+function getTimelineLogTime() {
+  return typeof performance === 'undefined' ? Date.now() : performance.now();
+}
+
+function getTimelineElapsedMs(startedAt: number) {
+  return Math.round(getTimelineLogTime() - startedAt);
+}
+
+function logTimelineAnalysis(label: string, detail: string) {
+  console.info(`[timeline:${label}] ${detail}`);
 }
 
 function createAnalysisDeferred() {

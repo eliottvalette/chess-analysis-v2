@@ -37,6 +37,7 @@ let browserEnginePool: Promise<BrowserStockfishSession[]> | null = null;
 let browserRoundRobin = 0;
 let indexedDbCache: Promise<BrowserAnalysisCache | null> | null = null;
 let legacyCacheCleanup: Promise<void> | null = null;
+let browserSearchId = 0;
 const memoryCache = new Map<string, AnalysisResult>();
 
 export function canUseBrowserAnalysis() {
@@ -49,9 +50,11 @@ export async function analyzeSinglePositionInBrowser(payload: AnalyzeRequest, si
   const cached = await getCachedAnalysis(cacheKey);
 
   if (cached) {
+    logBrowserAnalysis(`cache-hit ${formatBrowserAnalysisRequest(request)} best=${cached.bestMove ?? '-'}`);
     return cached;
   }
 
+  logBrowserAnalysis(`cache-miss ${formatBrowserAnalysisRequest(request)}`);
   const session = await getNextBrowserSession();
   const analysis = await session.analyze(request, signal);
   await setCachedAnalysis(cacheKey, analysis);
@@ -102,6 +105,7 @@ async function getNextBrowserSession() {
 async function getBrowserEnginePool() {
   if (!browserEnginePool) {
     const size = getBrowserEnginePoolSize();
+    logBrowserAnalysis(`pool-create size=${size} script=${STOCKFISH_SCRIPT_URL}`);
     browserEnginePool = Promise.all(Array.from({ length: size }, () => BrowserStockfishSession.create()));
   }
 
@@ -132,19 +136,24 @@ class BrowserStockfishSession {
   }
 
   static async create() {
+    const startedAt = getBrowserAnalysisLogTime();
     const session = new BrowserStockfishSession(new Worker(STOCKFISH_SCRIPT_URL));
     await session.initialize();
+    logBrowserAnalysis(`worker-ready elapsed=${getBrowserAnalysisElapsedMs(startedAt)}ms`);
     return session;
   }
 
   analyze(request: AnalyzeRequest, signal?: AbortSignal) {
     return this.enqueue(async () => {
+      const searchId = ++browserSearchId;
+      const startedAt = getBrowserAnalysisLogTime();
       const depth = sanitizeDepth(request.depth);
       const movetimeMs = sanitizeMovetime(request.movetimeMs);
       const multipv = sanitizeMultiPv(request.multipv);
       const positionCommand = buildPositionCommand(request);
       const analysisFen = getAnalysisFen(request);
       const searchCommand = movetimeMs == null ? `go depth ${depth}` : `go movetime ${movetimeMs}`;
+      logBrowserAnalysis(`search#${searchId} start ${formatBrowserAnalysisRequest(request)} command="${searchCommand}"`);
       const lines = await this.run(
         ['setoption name Clear Hash', `setoption name MultiPV value ${multipv}`, positionCommand, searchCommand],
         line => line.startsWith('bestmove '),
@@ -152,7 +161,9 @@ class BrowserStockfishSession {
         movetimeMs == null ? BROWSER_ENGINE_TIMEOUT_MS : Math.max(BROWSER_ENGINE_TIMEOUT_MS, movetimeMs + 5_000),
       );
 
-      return parseAnalysis(lines, analysisFen, depth);
+      const analysis = parseAnalysis(lines, analysisFen, depth);
+      logBrowserAnalysis(`search#${searchId} done elapsed=${getBrowserAnalysisElapsedMs(startedAt)}ms best=${analysis.bestMove ?? '-'} nodes=${analysis.nodes ?? '-'}`);
+      return analysis;
     });
   }
 
@@ -339,6 +350,26 @@ function deleteIndexedDbDatabase(name: string) {
     request.onsuccess = () => resolve();
     request.onblocked = () => resolve();
   });
+}
+
+function formatBrowserAnalysisRequest(request: AnalyzeRequest) {
+  return [
+    `ply=${request.moves?.length ?? 0}`,
+    `depth=${sanitizeDepth(request.depth)}`,
+    `pv=${sanitizeMultiPv(request.multipv)}`,
+  ].join(' ');
+}
+
+function getBrowserAnalysisLogTime() {
+  return typeof performance === 'undefined' ? Date.now() : performance.now();
+}
+
+function getBrowserAnalysisElapsedMs(startedAt: number) {
+  return Math.round(getBrowserAnalysisLogTime() - startedAt);
+}
+
+function logBrowserAnalysis(detail: string) {
+  console.info(`[analysis:browser] ${detail}`);
 }
 
 class BrowserAnalysisCache {
